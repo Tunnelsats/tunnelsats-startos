@@ -1,0 +1,129 @@
+# TunnelSats for StartOS
+# Service Manifest v0.3.5.x
+
+id: tunnelsats
+title: TunnelSats
+version: 0.1.0
+release-notes: |
+  Initial release - WireGuard VPN proxy for Lightning hybrid mode.
+  
+  Features:
+  - Full WireGuard config paste support
+  - SOCKS5 outbound proxy (port 9050)
+  - Inbound port forwarding via socat
+  - Automatic health checks
+  
+license: MIT
+wrapper-repo: "https://github.com/Tunnelsats/tunnelsats-startos"
+upstream-repo: "https://github.com/Tunnelsats/tunnelsats"
+support-site: "https://tunnelsats.com/faq"
+marketing-site: "https://tunnelsats.com"
+build: ["make"]
+
+description:
+  short: "Privacy VPN for Lightning Hybrid Mode"
+  long: |
+    TunnelSats provides a pre-configured WireGuard VPN tunnel optimized for 
+    Lightning Network nodes. Route your clearnet traffic through Tier-1 
+    infrastructure while keeping your real IP hidden.
+    
+    Features:
+    • Hybrid Mode: Run Tor + Clearnet simultaneously
+    • Lightning Optimized: Pre-configured for LND/CLN
+    • Privacy First: No KYC, pay with Lightning
+    • Easy Setup: Just paste your config
+
+assets:
+  license: LICENSE
+  icon: icon.png
+  instructions: instructions.md
+
+# Main container configuration
+main:
+  type: docker
+  image: main
+  entrypoint: "docker_entrypoint.sh"
+  args: []
+  mounts:
+    main: /data
+  # CRITICAL: Required for WireGuard interface creation
+  capabilities:
+    - NET_ADMIN
+
+# Supported architectures
+hardware-requirements:
+  arch:
+    - x86_64
+    - aarch64
+
+# GPU not needed
+gpu-acceleration: false
+
+# Data volume for config persistence
+volumes:
+  main:
+    type: data
+
+# Network interfaces
+interfaces:
+  proxy:
+    name: SOCKS5 Proxy
+    description: "Internal proxy for other services. Point LND/CLN proxy settings here."
+    tor-config: null
+    lan-config: null
+    ui: false
+    protocols:
+      - tcp
+    internal-port: 9050
+
+# Health monitoring
+health-checks:
+  vpn:
+    name: VPN Connection
+    success-message: "Connected to TunnelSats VPN"
+    type: script
+
+# Configuration (handled by compat scripts)
+config:
+  get:
+    type: script
+  set:
+    type: script
+
+# Service properties (displayed in UI)
+properties: ~
+
+# No service dependencies for PoC
+dependencies: {}
+
+# Backup configuration
+backup:
+  create:
+    type: docker
+    image: compat
+    system: true
+    entrypoint: compat
+    args: ["duplicity", "create", "/mnt/backup", "/data"]
+    mounts:
+      BACKUP: "/mnt/backup"
+      main: "/data"
+  restore:
+    type: docker
+    image: compat
+    system: true
+    entrypoint: compat
+    args: ["duplicity", "restore", "/mnt/backup", "/data"]
+    mounts:
+      BACKUP: "/mnt/backup"
+      main: "/data"
+
+# Migrations - allow upgrades from any version
+migrations:
+  from:
+    "*":
+      type: script
+      args: ["from"]
+  to:
+    "*":
+      type: script
+      args: ["to"]
