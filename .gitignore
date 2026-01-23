@@ -1,0 +1,30 @@
+# Build artifacts
+*.s9pk
+image.tar
+docker-images/
+
+# Editor/IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Node (if using JS for config scripts)
+node_modules/
+package-lock.json
+
+# Logs
+*.log
+
+# Secrets (never commit!)
+*.conf
+!tests/fixtures/*.conf
+
+# Temporary files
+tmp/
+.tmp/
