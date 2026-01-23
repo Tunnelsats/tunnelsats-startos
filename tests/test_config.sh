@@ -12,7 +12,8 @@ echo "[Interface]
 PrivateKey = test-key-value" > data/tunnelsats.conf
 
 # Ensure config_spec.json exists locally for testing
-cat config_spec.yaml | yq . | jq . > config_spec.json
+# Using the now-available standard yq
+yq -o=json '.' config_spec.yaml > config_spec.json
 
 # Temporarily point config_get.sh to the local spec file AND local data file
 sed -i 's|/usr/local/share/tunnelsats/config_spec.json|./config_spec.json|g' scripts/config_get.sh

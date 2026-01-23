@@ -1,8 +1,6 @@
 #!/bin/bash
-
 # TunnelSats prepare script
 # Sets up the build environment for a Debian system for Start9 verification
-
 set -e
 
 echo "[TunnelSats] Preparing build environment..."
@@ -22,16 +20,17 @@ sudo apt-get install -y \
     curl \
     jq
 
-# Note: yq version 3.4.3 is already installed on this machine,
-# but we include it here for documentation.
-if ! which yq > /dev/null; then
-    echo "Installing yq..."
-    sudo snap install yq || (
-        VERSION=v4.30.6
-        BINARY=yq_linux_arm64 # Adjust for current arch if needed
-        curl -L https://github.com/mikefarah/yq/releases/download/${VERSION}/${BINARY} -o /usr/local/bin/yq
-        chmod +x /usr/local/bin/yq
-    )
-fi
+# Install yq (Mike Farah version)
+echo "Installing/Updating yq..."
+ARCH=$(uname -m)
+case $ARCH in
+    x86_64) YQ_ARCH="amd64" ;;
+    aarch64) YQ_ARCH="arm64" ;;
+    *) echo "Unsupported architecture: $ARCH"; exit 1 ;;
+esac
+
+sudo curl -L https://github.com/mikefarah/yq/releases/latest/download/yq_linux_${YQ_ARCH} -o /usr/local/bin/yq
+sudo chmod a+rx /usr/local/bin/yq
 
 echo "[TunnelSats] Build environment ready."
+/usr/local/bin/yq --version
