@@ -91,6 +91,7 @@ config:
     args: []
     mounts:
       main: /data
+    io-format: json
   set:
     type: docker
     image: main
@@ -98,6 +99,7 @@ config:
     args: []
     mounts:
       main: /data
+    io-format: json
 
 # Service properties (displayed in UI)
 properties: ~
@@ -134,9 +136,11 @@ migrations:
       image: main
       entrypoint: "echo"
       args: ["no migrations needed"]
+      io-format: json
   to:
     "*":
       type: docker
       image: main
       entrypoint: "echo"
       args: ["no migrations needed"]
+      io-format: json
