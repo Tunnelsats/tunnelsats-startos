@@ -1,3 +1,11 @@
+# ⚠️ WORK IN PROGRESS - DO NOT USE ⚠️
+
+> [!WARNING]
+> This service is currently under active development and is **not functional** on the `main` branch. 
+> Please do not attempt to sideload or install this service yet. 
+> 
+> Development is taking place on the [feat/startos-integration](https://github.com/Tunnelsats/tunnelsats-startos/tree/feat/startos-integration) branch.
+
 # TunnelSats for StartOS
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
