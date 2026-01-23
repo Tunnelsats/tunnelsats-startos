@@ -53,7 +53,6 @@ main:
 # Supported architectures
 hardware-requirements:
   arch:
-    - x86_64
     - aarch64
 
 # GPU not needed
@@ -83,12 +82,22 @@ health-checks:
     success-message: "Connected to TunnelSats VPN"
     type: script
 
-# Configuration (handled by compat scripts)
+# Configuration flow
 config:
   get:
-    type: script
+    type: docker
+    image: main
+    entrypoint: "config_get.sh"
+    args: []
+    mounts:
+      main: /data
   set:
-    type: script
+    type: docker
+    image: main
+    entrypoint: "config_set.sh"
+    args: []
+    mounts:
+      main: /data
 
 # Service properties (displayed in UI)
 properties: ~
@@ -106,7 +115,7 @@ backup:
     args: ["duplicity", "create", "/mnt/backup", "/data"]
     mounts:
       BACKUP: "/mnt/backup"
-      main: "/data"
+      main: /data
   restore:
     type: docker
     image: compat
@@ -115,15 +124,19 @@ backup:
     args: ["duplicity", "restore", "/mnt/backup", "/data"]
     mounts:
       BACKUP: "/mnt/backup"
-      main: "/data"
+      main: /data
 
 # Migrations - allow upgrades from any version
 migrations:
   from:
     "*":
-      type: script
-      args: ["from"]
+      type: docker
+      image: main
+      entrypoint: "echo"
+      args: ["no migrations needed"]
   to:
     "*":
-      type: script
-      args: ["to"]
+      type: docker
+      image: main
+      entrypoint: "echo"
+      args: ["no migrations needed"]

@@ -1,0 +1,18 @@
+# TunnelSats Config Spec
+# This defines the UI for the "Config" tab in startOS
+
+tunnelsats-config:
+  type: string
+  name: WireGuard Configuration
+  description: |
+    Paste your entire TunnelSats WireGuard configuration file here.
+    This includes the [Interface] and [Peer] sections, as well as the 
+    important metadata comments like # Server: and # Port Forwarding:.
+  nullable: false
+  copyable: true
+  masked: false
+  placeholder: |
+    [Interface]
+    PrivateKey = ...
+    Address = ...
+    ...
