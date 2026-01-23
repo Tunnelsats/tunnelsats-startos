@@ -58,7 +58,7 @@ parse_comment() {
 # Main Logic
 # ============================================
 main() {
-    log_info "Starting TunnelSats v0.1.2..."
+    log_info "Starting TunnelSats v0.1.3..."
 
     # Check config file exists
     if [[ ! -f "$CONFIG_FILE" ]]; then
@@ -132,11 +132,26 @@ EOF
     log_success "WireGuard config written to $WG_CONF"
 
     # Start WireGuard tunnel
-    log_info "Starting WireGuard tunnel (ts0)..."
-    wg-quick up ts0
+    log_info "Starting WireGuard tunnel (ts0) using wireguard-go..."
     
-    log_success "WireGuard tunnel active"
-    wg show ts0
+    # Ensure /dev/net/tun exists
+    if [[ ! -c /dev/net/tun ]]; then
+        log_info "Creating /dev/net/tun..."
+        mkdir -p /dev/net
+        mknod /dev/net/tun c 10 200 || log_error "Failed to create /dev/net/tun"
+    fi
+
+    # Force wg-quick to use wireguard-go
+    export WG_QUICK_USERSPACE_IMPLEMENTATION=wireguard-go
+    export WG_THREADS_MAX=1
+    
+    if wg-quick up ts0; then
+        log_success "WireGuard tunnel active"
+        wg show ts0
+    else
+        log_error "Failed to start WireGuard tunnel. Check if TUN device is available."
+        exit 1
+    fi
 
     # Start inbound port forwarding if VPN port is configured
     if [[ -n "$VPN_PORT" ]]; then
