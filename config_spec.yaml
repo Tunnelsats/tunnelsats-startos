@@ -9,6 +9,7 @@ tunnelsats-config:
     This includes the [Interface] and [Peer] sections, as well as the 
     important metadata comments like # Server: and # Port Forwarding:.
   textarea: true
+  nullable: false
   copyable: true
   masked: false
   placeholder: |

@@ -25,6 +25,7 @@ echo "$GET_RESPONSE" | jq .
 # Validate keys for config_get: { "config": { ... }, "spec": { ... } }
 echo "$GET_RESPONSE" | jq -e '.config' > /dev/null || (echo "FAILED: Missing 'config' field in GET response" && exit 1)
 echo "$GET_RESPONSE" | jq -e '.spec' > /dev/null || (echo "FAILED: Missing 'spec' field in GET response" && exit 1)
+echo "$GET_RESPONSE" | jq -e '.spec."tunnelsats-config".nullable != null' > /dev/null || (echo "FAILED: Missing 'nullable' field in spec" && exit 1)
 echo "$GET_RESPONSE" | jq -r '.config."tunnelsats-config"' | grep -q "test-key-value" || (echo "FAILED: Incorrect config value in GET response" && exit 1)
 
 echo "--- Testing config_set.sh ---"
