@@ -23,32 +23,42 @@ log_success() { echo "[TunnelSats ✓] $1"; }
 # ============================================
 # Config Parser Functions
 # ============================================
-# Robust parser that handles:
-# - Case insensitivity
-# - Leading/trailing whitespace
-# - DOS/Unix line endings (\r)
-# - Multiple spaces around the equals sign
+# Ultra-robust parser for shell environments
 parse_field() {
     local field="$1"
-    # 1. Match line (case insensitive)
-    # 2. Extract value after =
-    # 3. Strip \r and leading/trailing spaces
-    grep -iE "^ *${field} *=" "$CONFIG_FILE" 2>/dev/null | head -1 | \
-        sed -E "s/^ *${field} *= *(.*)/\1/I" | \
-        tr -d '\r' | xargs echo || echo ""
+    # 1. Use grep -i to find the line (case insensitive)
+    # 2. Use head -1 to take the first match
+    local line
+    line=$(grep -iE "^ *${field} *=" "$CONFIG_FILE" 2>/dev/null | head -1)
+    
+    if [[ -n "$line" ]]; then
+        # Extract everything after the first '='
+        local val="${line#*=}"
+        # Trim leading/trailing whitespace and remove \r
+        echo "$val" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//' | tr -d '\r'
+    else
+        echo ""
+    fi
 }
 
 parse_comment() {
     local field="$1"
-    grep -oPi "# ${field}: *\K.*" "$CONFIG_FILE" 2>/dev/null | head -1 | \
-        tr -d '\r' | xargs echo || echo ""
+    # Comments are often used for metadata in TunnelSats configs
+    local line
+    line=$(grep -iE "^# *${field}:" "$CONFIG_FILE" 2>/dev/null | head -1)
+    if [[ -n "$line" ]]; then
+        local val="${line#*:}"
+        echo "$val" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//' | tr -d '\r'
+    else
+        echo ""
+    fi
 }
 
 # ============================================
 # Main Logic
 # ============================================
 main() {
-    log_info "Starting TunnelSats v0.1.1..."
+    log_info "Starting TunnelSats v0.1.2..."
 
     # Check config file exists
     if [[ ! -f "$CONFIG_FILE" ]]; then
@@ -57,10 +67,10 @@ main() {
         exit 1
     fi
 
-    # Debug: Check config file contents (redacted)
-    log_info "Reading configuration from $CONFIG_FILE..."
+    # Diagnostic: Check config file
+    local file_size=$(wc -c < "$CONFIG_FILE")
     local line_count=$(wc -l < "$CONFIG_FILE")
-    log_info "Config file has $line_count lines"
+    log_info "Configuration file: $CONFIG_FILE ($file_size bytes, $line_count lines)"
     
     # Parse WireGuard config
     log_info "Parsing WireGuard configuration..."
@@ -80,14 +90,14 @@ main() {
 
     # Validate required fields
     local missing=0
-    if [[ -z "$PRIVATE_KEY" ]]; then log_error "[VALIDATION] Missing: PrivateKey"; missing=1; fi
-    if [[ -z "$ADDRESS" ]];     then log_error "[VALIDATION] Missing: Address";    missing=1; fi
-    if [[ -z "$PEER_PUBKEY" ]];  then log_error "[VALIDATION] Missing: PublicKey";  missing=1; fi
-    if [[ -z "$ENDPOINT" ]];     then log_error "[VALIDATION] Missing: Endpoint";   missing=1; fi
+    if [[ -z "$PRIVATE_KEY" ]]; then log_error "[DIAGNOSTIC] PrivateKey is missing or empty"; missing=1; fi
+    if [[ -z "$ADDRESS" ]];     then log_error "[DIAGNOSTIC] Address is missing or empty";    missing=1; fi
+    if [[ -z "$PEER_PUBKEY" ]];  then log_error "[DIAGNOSTIC] PublicKey is missing or empty";  missing=1; fi
+    if [[ -z "$ENDPOINT" ]];     then log_error "[DIAGNOSTIC] Endpoint is missing or empty";   missing=1; fi
     
     if [[ $missing -eq 1 ]]; then
-        log_error "Invalid configuration. Fields are missing or empty."
-        log_error "Ensure you pasted the ENTIRE WireGuard config including [Interface] and [Peer] sections."
+        log_error "Configuration parsing failed. Listing file structure for debug:"
+        grep -vE "^#|^$" "$CONFIG_FILE" | sed 's/=.*$/= [REDACTED]/' || echo "File is empty or not readable."
         exit 1
     fi
 
