@@ -4,14 +4,22 @@
 
 set -euo pipefail
 
+SPEC_FILE="/usr/local/share/tunnelsats/config_spec.json"
 CONFIG_FILE="/data/tunnelsats.conf"
 
+# Read current config value
 if [[ -f "$CONFIG_FILE" ]]; then
-    VALUE=$(cat "$CONFIG_FILE")
+    CONFIG_VALUE=$(cat "$CONFIG_FILE")
 else
-    VALUE=""
+    CONFIG_VALUE=""
 fi
 
-# Return JSON-encoded object matching config_spec.yaml
-# start-sdk expects a JSON object on stdout
-echo "{ \"tunnelsats-config\": \"$VALUE\" }"
+# Build config value object
+CONFIG_JSON=$(jq -n --arg val "$CONFIG_VALUE" '{"tunnelsats-config": $val}')
+
+# Combine with spec for StartOS
+# StartOS expects: { "config": { ... }, "spec": { ... } }
+jq -n \
+  --slurpfile spec "$SPEC_FILE" \
+  --argjson config "$CONFIG_JSON" \
+  '{config: $config, spec: $spec[0]}'

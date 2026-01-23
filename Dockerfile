@@ -10,7 +10,8 @@ RUN apk add --no-cache \
     git \
     make \
     gcc \
-    musl-dev
+    musl-dev \
+    yq
 
 WORKDIR /build
 
@@ -19,6 +20,10 @@ RUN git clone --depth 1 https://github.com/rofl0r/microsocks.git && \
     cd microsocks && \
     make && \
     mv microsocks /usr/local/bin/
+
+# Convert config spec to JSON for the config_get.sh script
+COPY config_spec.yaml .
+RUN yq '.' config_spec.yaml -o json > config_spec.json
 
 # ============================================
 # Stage 2: Runtime
@@ -41,6 +46,7 @@ RUN apk add --no-cache \
 
 # Copy microsocks from builder
 COPY --from=builder /usr/local/bin/microsocks /usr/local/bin/
+COPY --from=builder /build/config_spec.json /usr/local/share/tunnelsats/
 
 # Copy scripts
 COPY scripts/ /usr/local/bin/
