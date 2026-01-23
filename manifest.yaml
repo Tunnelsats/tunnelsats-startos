@@ -3,7 +3,7 @@
 
 id: tunnelsats
 title: TunnelSats
-version: 0.1.0
+version: 0.1.1
 release-notes: |
   Initial release - WireGuard VPN proxy for Lightning hybrid mode.
   

@@ -1,5 +1,5 @@
 PKG_ID := tunnelsats
-PKG_VERSION := 0.1.0
+PKG_VERSION := $(shell yq '.version' manifest.yaml)
 PLATFORM ?= $(shell uname -m)
 
 # Detect architecture
