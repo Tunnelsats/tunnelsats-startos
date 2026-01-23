@@ -23,21 +23,32 @@ log_success() { echo "[TunnelSats ✓] $1"; }
 # ============================================
 # Config Parser Functions
 # ============================================
+# Robust parser that handles:
+# - Case insensitivity
+# - Leading/trailing whitespace
+# - DOS/Unix line endings (\r)
+# - Multiple spaces around the equals sign
 parse_field() {
     local field="$1"
-    grep -oP "${field}"' *= *\K.*' "$CONFIG_FILE" 2>/dev/null | head -1 || echo ""
+    # 1. Match line (case insensitive)
+    # 2. Extract value after =
+    # 3. Strip \r and leading/trailing spaces
+    grep -iE "^ *${field} *=" "$CONFIG_FILE" 2>/dev/null | head -1 | \
+        sed -E "s/^ *${field} *= *(.*)/\1/I" | \
+        tr -d '\r' | xargs echo || echo ""
 }
 
 parse_comment() {
     local field="$1"
-    grep -oP "# ${field}: *\K.*" "$CONFIG_FILE" 2>/dev/null | head -1 || echo ""
+    grep -oPi "# ${field}: *\K.*" "$CONFIG_FILE" 2>/dev/null | head -1 | \
+        tr -d '\r' | xargs echo || echo ""
 }
 
 # ============================================
 # Main Logic
 # ============================================
 main() {
-    log_info "Starting TunnelSats v0.1.0..."
+    log_info "Starting TunnelSats v0.1.1..."
 
     # Check config file exists
     if [[ ! -f "$CONFIG_FILE" ]]; then
@@ -46,6 +57,11 @@ main() {
         exit 1
     fi
 
+    # Debug: Check config file contents (redacted)
+    log_info "Reading configuration from $CONFIG_FILE..."
+    local line_count=$(wc -l < "$CONFIG_FILE")
+    log_info "Config file has $line_count lines"
+    
     # Parse WireGuard config
     log_info "Parsing WireGuard configuration..."
     
@@ -64,13 +80,14 @@ main() {
 
     # Validate required fields
     local missing=0
-    [[ -z "$PRIVATE_KEY" ]] && { log_error "Missing: PrivateKey"; missing=1; }
-    [[ -z "$ADDRESS" ]] && { log_error "Missing: Address"; missing=1; }
-    [[ -z "$PEER_PUBKEY" ]] && { log_error "Missing: PublicKey"; missing=1; }
-    [[ -z "$ENDPOINT" ]] && { log_error "Missing: Endpoint"; missing=1; }
+    if [[ -z "$PRIVATE_KEY" ]]; then log_error "[VALIDATION] Missing: PrivateKey"; missing=1; fi
+    if [[ -z "$ADDRESS" ]];     then log_error "[VALIDATION] Missing: Address";    missing=1; fi
+    if [[ -z "$PEER_PUBKEY" ]];  then log_error "[VALIDATION] Missing: PublicKey";  missing=1; fi
+    if [[ -z "$ENDPOINT" ]];     then log_error "[VALIDATION] Missing: Endpoint";   missing=1; fi
     
     if [[ $missing -eq 1 ]]; then
-        log_error "Invalid configuration. Please check your TunnelSats config file."
+        log_error "Invalid configuration. Fields are missing or empty."
+        log_error "Ensure you pasted the ENTIRE WireGuard config including [Interface] and [Peer] sections."
         exit 1
     fi
 
