@@ -19,16 +19,18 @@ all: pack
 
 # Build Docker image
 build:
+	mkdir -p docker-images
 	docker buildx build \
 		--tag start9/$(PKG_ID)/main:$(PKG_VERSION) \
 		--platform $(DOCKER_PLATFORM) \
-		-o type=docker,dest=image.tar \
+		-o type=docker,dest=docker-images/$(ARCH).tar \
 		.
 
 # Package for StartOS
 pack: build
 	start-sdk pack
 	start-sdk verify s9pk $(PKG_ID).s9pk
+	mv $(PKG_ID).s9pk $(PKG_ID)_$(ARCH).s9pk
 
 # Setup build environment
 prepare:
@@ -48,7 +50,7 @@ test-docker:
 
 # Clean build artifacts
 clean:
-	rm -f $(PKG_ID).s9pk
+	rm -f *.s9pk
 	rm -f image.tar
 	rm -rf docker-images/
 

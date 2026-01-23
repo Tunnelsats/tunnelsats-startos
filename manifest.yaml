@@ -54,6 +54,7 @@ main:
 hardware-requirements:
   arch:
     - aarch64
+    - x86_64
 
 # GPU not needed
 gpu-acceleration: false
