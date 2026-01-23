@@ -8,7 +8,7 @@ tunnelsats-config:
     Paste your entire TunnelSats WireGuard configuration file here.
     This includes the [Interface] and [Peer] sections, as well as the 
     important metadata comments like # Server: and # Port Forwarding:.
-  nullable: false
+  textarea: true
   copyable: true
   masked: false
   placeholder: |

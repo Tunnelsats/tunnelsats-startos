@@ -13,5 +13,5 @@ NEW_CONFIG=$(echo "$CONFIG_JSON" | jq -r '."tunnelsats-config"')
 # During config: set, the script might run in a temporary container with the volume mounted
 echo "$NEW_CONFIG" > /data/tunnelsats.conf
 
-# Return empty success object or error
-echo "{}"
+# Return success object with required depends-on field
+echo "{ \"depends-on\": {} }"
