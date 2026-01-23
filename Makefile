@@ -28,6 +28,11 @@ build:
 # Package for StartOS
 pack: build
 	start-sdk pack
+	start-sdk verify s9pk $(PKG_ID).s9pk
+
+# Setup build environment
+prepare:
+	./prepare.sh
 
 # Run unit tests
 test:
