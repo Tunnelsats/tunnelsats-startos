@@ -1,5 +1,5 @@
 # Build artifacts
-*.s9pk
+# *.s9pk
 image.tar
 docker-images/
 
