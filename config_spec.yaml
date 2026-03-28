@@ -1,0 +1,24 @@
+target-node:
+  type: enum
+  name: "Target Lightning Node"
+  description: "Select which Lightning service on your StartOS server will receive inbound connections."
+  values:
+    - lnd
+    - cln
+  valueNames:
+    lnd: "LND (lnd.embassy)"
+    cln: "Core Lightning (c-lightning.embassy)"
+  default: lnd
+tunnelsats-conf:
+  type: string
+  name: "WireGuard Configuration"
+  description: "Paste the content of your TunnelSats .conf file here. Ensure it includes the '# VPNPort: XXXXX' metadata comment for automatic port-forwarding."
+  nullable: false
+  placeholder: |
+    [Interface]
+    PrivateKey = <your_private_key>
+    Address = 10.x.x.x/32
+    # VPNPort: 12345
+    ...
+  # StartOS doesn't have a 'textarea' type in 0.3.5.x, but string is rendered as a text box.
+  # Some versions use 'type: textarea' but common is string.

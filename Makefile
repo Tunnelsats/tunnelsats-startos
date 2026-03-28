@@ -27,7 +27,7 @@ build:
 
 # Package for StartOS
 pack: build
-	start-sdk pack
+	/home/hakuna/.cargo/bin/start-sdk -c /home/hakuna/.start-sdk.yaml pack
 
 # Run unit tests
 test:

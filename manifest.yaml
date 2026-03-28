@@ -1,0 +1,104 @@
+id: tunnelsats
+title: "TunnelSats"
+version: 0.1.0
+release-notes: "Initial release for StartOS."
+license: "MIT"
+wrapper-repo: "https://github.com/Tunnelsats/tunnelsats-startos"
+upstream-repo: "https://github.com/Tunnelsats/tunnelsats"
+support-site: "https://github.com/Tunnelsats/tunnelsats/issues"
+marketing-site: "https://tunnelsats.com"
+min-os-version: "0.3.5"
+description:
+  short: "A privacy-focused VPN gateway for Lightning Nodes."
+  long: "TunnelSats provides premium VPN infrastructure for Lightning Nodes (LND/CLN), enabling clearnet inbound connections and masking outbound traffic to improve routing performance and privacy."
+assets:
+  license: LICENSE
+  icon: icon.png
+  instructions: README.md
+  docker-images: image.tar
+main:
+  type: docker
+  image: main
+  entrypoint: "/app/docker_entrypoint.sh"
+  args: []
+  mounts:
+    main: /data
+  capabilities:
+    add:
+      - NET_ADMIN
+health-checks:
+  vpn-connected:
+    name: "VPN Connectivity"
+    description: "Ensures the WireGuard tunnel is established and active."
+    type: docker
+    image: main
+    inject: true
+    system: false
+    entrypoint: "python3"
+    args: ["bridge.py", "health", "vpn"]
+    io-format: json
+  proxy-ready:
+    name: "SOCKS5 Proxy"
+    description: "Verifies that the SOCKS5 proxy is listening for connections."
+    type: docker
+    image: main
+    inject: true
+    system: false
+    entrypoint: "python3"
+    args: ["bridge.py", "health", "proxy"]
+    io-format: json
+config:
+  get:
+    type: docker
+    image: main
+    entrypoint: "python3"
+    args: ["bridge.py", "config", "get"]
+    mounts:
+      main: /data
+    io-format: json
+  set:
+    type: docker
+    image: main
+    entrypoint: "python3"
+    args: ["bridge.py", "config", "set"]
+    mounts:
+      main: /data
+    io-format: json
+volumes:
+  main:
+    type: data
+interfaces:
+  main:
+    name: "SOCKS5 Proxy"
+    description: "Internal SOCKS5 proxy interface for Lightning Node routing."
+    tor-config:
+      port-mapping:
+        1080: "1080"
+    lan-config:
+      1080:
+        ssl: false
+        internal: 1080
+    ui: false
+    protocols:
+      - tcp
+      - http
+      - socks5
+backup:
+  create:
+    type: docker
+    image: main
+    system: false
+    entrypoint: "true"
+    args: []
+    mounts:
+      main: /data
+    io-format: json
+  restore:
+    type: docker
+    image: main
+    system: false
+    entrypoint: "true"
+    args: []
+    mounts:
+      main: /data
+    io-format: json
