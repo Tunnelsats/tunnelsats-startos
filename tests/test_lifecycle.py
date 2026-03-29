@@ -135,5 +135,27 @@ class TestBridgeLifecycle(unittest.TestCase):
         self.assertEqual(mock_run.call_count, 4)
         mock_run.assert_any_call(["iptables", "-t", "nat", "-D", "PREROUTING", "-i", "tunnelsatsv3", "-p", "tcp", "--dport", "54321", "-j", "DNAT", "--to-destination", "10.0.0.10:9735"], check=False)
 
+    @patch('bridge.get_wg_ip')
+    @patch('subprocess.run')
+    @patch('builtins.open', new_callable=unittest.mock.mock_open, read_data='[Interface]\nPrivateKey = hidden_key\n# VPNPort: 54321\n[Peer]\nEndpoint = 198.51.100.1:51820')
+    @patch('sys.stdout', new_callable=unittest.mock.MagicMock)
+    def test_get_properties_success(self, mock_stdout, mock_open, mock_run, mock_get_ip):
+        mock_get_ip.return_value = "10.9.9.45"
+        
+        # Mock `wg pubkey`
+        mock_run.return_value = MagicMock(stdout=b'public_key_abc123\n')
+        
+        bridge.get_properties()
+        
+        # Verify JSON properties output
+        args, kwargs = mock_stdout.write.call_args_list[0]
+        import json
+        output = json.loads(args[0])
+        self.assertEqual(output["version"], 2)
+        self.assertEqual(output["data"]["TunnelSats Public IP"]["value"], "198.51.100.1")
+        self.assertEqual(output["data"]["Forwarding Port"]["value"], "54321")
+        self.assertEqual(output["data"]["WireGuard Public Key"]["value"], "public_key_abc123")
+        self.assertEqual(output["data"]["Internal IP (Last Octet)"]["value"], "45")
+
 if __name__ == '__main__':
     unittest.main()

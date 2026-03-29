@@ -194,6 +194,71 @@ def get_status():
             "handshake": "none"
         }
 
+def get_properties():
+    try:
+        with open(CONFIG_PATH, 'r') as f:
+            config_content = f.read()
+            
+        vpn_port = extract_vpn_port(config_content)
+        
+        endpoint_match = re.search(r'Endpoint\s*=\s*([0-9\.]+):\d+', config_content, re.IGNORECASE)
+        public_ip = endpoint_match.group(1) if endpoint_match else "Unknown"
+        
+        private_key_match = re.search(r'PrivateKey\s*=\s*(.+)', config_content, re.IGNORECASE)
+        pubkey = "Unknown"
+        if private_key_match:
+            try:
+                proc = subprocess.run(["wg", "pubkey"], input=private_key_match.group(1).strip().encode(), capture_output=True)
+                pubkey = proc.stdout.decode().strip()
+            except Exception:
+                pass
+                
+        wg_ip = get_wg_ip()
+        internal_octet = wg_ip.split('.')[-1] if wg_ip else "Unknown"
+        
+        properties = {
+            "version": 2,
+            "data": {
+                "WireGuard Public Key": {
+                    "type": "string",
+                    "value": pubkey,
+                    "description": "Used to link this StartOS node to your tunnelsats.com dashboard.",
+                    "copyable": True
+                },
+                "Internal IP (Last Octet)": {
+                    "type": "string",
+                    "value": internal_octet,
+                    "description": "Provide this 3-digit octet on the dashboard to confirm your identity.",
+                    "copyable": True
+                },
+                "TunnelSats Public IP": {
+                    "type": "string",
+                    "value": public_ip,
+                    "description": "Your designated external IPv4 address for Clearnet routing.",
+                    "copyable": True
+                },
+                "Forwarding Port": {
+                    "type": "string",
+                    "value": str(vpn_port),
+                    "description": "Your assigned port for inbound Lightning connections.",
+                    "copyable": True
+                }
+            }
+        }
+        
+    except FileNotFoundError:
+        properties = {
+            "version": 2,
+            "data": {
+                "Service Status": {
+                    "type": "string",
+                    "value": "Unconfigured",
+                    "description": "Configure your TunnelSats config in the settings to display connection properties."
+                }
+            }
+        }
+    print(json.dumps(properties))
+
 def main():
     if len(sys.argv) < 2:
         print("Usage: bridge.py <command> [args]")
@@ -258,6 +323,9 @@ def main():
                 sys.exit(1)
 
 
+    elif command == "properties":
+        get_properties()
+        
     elif command == "config":
         subcommand = sys.argv[2] if len(sys.argv) > 2 else None
         

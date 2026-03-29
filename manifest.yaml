@@ -102,6 +102,14 @@ backup:
     mounts:
       main: /data
     io-format: json
+properties:
+  type: docker
+  image: main
+  entrypoint: "python3"
+  args: ["bridge.py", "properties"]
+  inject: true
+  system: false
+  io-format: json
 dependencies:
   lnd:
     version: ">=0.15.5"
