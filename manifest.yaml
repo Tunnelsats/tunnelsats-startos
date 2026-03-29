@@ -102,3 +102,16 @@ backup:
     mounts:
       main: /data
     io-format: json
+dependencies:
+  lnd:
+    version: ">=0.15.5"
+    requirement:
+      type: "opt-out"
+      how: "Install LND to route traffic through TunnelSats"
+    description: "Lightning Network Daemon. Required if you choose LND as your Target Lightning Node for inbound connections."
+  c-lightning:
+    version: ">=23.02.2"
+    requirement:
+      type: "opt-out"
+      how: "Install Core Lightning to route traffic through TunnelSats"
+    description: "Core Lightning. Required if you choose Core Lightning as your Target Lightning Node for inbound connections."
