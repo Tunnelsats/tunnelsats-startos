@@ -25,9 +25,11 @@ build:
 		-o type=docker,dest=image.tar \
 		.
 
+START_SDK ?= start-sdk
+
 # Package for StartOS
 pack: build
-	/home/hakuna/.cargo/bin/start-sdk -c /home/hakuna/.start-sdk.yaml pack
+	$(START_SDK) pack
 
 # Run unit tests
 test:

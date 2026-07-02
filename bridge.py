@@ -303,9 +303,8 @@ def main():
         try:
             if not os.path.exists(CONFIG_PATH):
                 print(f"WireGuard config not found at {CONFIG_PATH}. Waiting for user setup...", file=sys.stderr)
-                while True:
+                while not os.path.exists(CONFIG_PATH):
                     time.sleep(5)
-                    # We block instead of crashing because StartOS relies on initial healthchecks to prompt config.
             vpn_up(CONFIG_PATH)
             print("VPN Started Successfully")
             
@@ -318,7 +317,7 @@ def main():
             # Stay alive
             while True:
                 time.sleep(1)
-        except (subprocess.CalledProcessError, FileNotFoundError) as e:
+        except Exception as e:
             stderr = getattr(e, 'stderr', str(e))
             print(f"Failed to start services: {stderr}", file=sys.stderr)
             sys.exit(1)
@@ -327,7 +326,7 @@ def main():
         try:
             vpn_down(CONFIG_PATH)
             print("VPN Stopped Successfully")
-        except (subprocess.CalledProcessError, FileNotFoundError) as e:
+        except Exception as e:
             stderr = getattr(e, 'stderr', str(e))
             print(f"Failed to stop VPN: {stderr}", file=sys.stderr)
             sys.exit(1)
