@@ -5,7 +5,7 @@ target-node:
   values:
     - lnd
     - cln
-  valueNames:
+  value-names:
     lnd: "LND (lnd.embassy)"
     cln: "Core Lightning (c-lightning.embassy)"
   default: lnd
@@ -20,5 +20,8 @@ tunnelsats-conf:
     Address = 10.x.x.x/32
     # VPNPort: 12345
     ...
-  # StartOS doesn't have a 'textarea' type in 0.3.5.x, but string is rendered as a text box.
-  # Some versions use 'type: textarea' but common is string.
+  pattern: ".*"
+  pattern-description: "Please paste a valid WireGuard configuration."
+  textarea: true
+  copyable: true
+  masked: false

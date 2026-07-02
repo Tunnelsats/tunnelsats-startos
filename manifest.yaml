@@ -13,7 +13,7 @@ description:
   long: "TunnelSats provides premium VPN infrastructure for Lightning Nodes (LND/CLN), enabling clearnet inbound connections and masking outbound traffic to improve routing performance and privacy."
 assets:
   license: LICENSE
-  icon: icon.png
+  icon: icon.svg
   instructions: README.md
   docker-images: image.tar
 main:
@@ -23,9 +23,6 @@ main:
   args: []
   mounts:
     main: /data
-  capabilities:
-    add:
-      - NET_ADMIN
 health-checks:
   vpn-connected:
     name: "VPN Connectivity"
@@ -117,9 +114,11 @@ dependencies:
       type: "opt-out"
       how: "Install LND to route traffic through TunnelSats"
     description: "Lightning Network Daemon. Required if you choose LND as your Target Lightning Node for inbound connections."
+    critical: false
   c-lightning:
     version: ">=23.02.2"
     requirement:
       type: "opt-out"
       how: "Install Core Lightning to route traffic through TunnelSats"
     description: "Core Lightning. Required if you choose Core Lightning as your Target Lightning Node for inbound connections."
+    critical: false

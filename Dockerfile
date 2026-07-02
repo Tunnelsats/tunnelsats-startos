@@ -1,9 +1,9 @@
-# Builder stage for microsocks
-FROM alpine:3.19 AS builder
-RUN apk add --no-cache build-base git
-RUN git clone https://github.com/rofl0r/microsocks.git && \
-    cd microsocks && \
-    make
+# Builder stage for wireproxy
+FROM golang:alpine AS builder
+RUN apk add --no-cache git
+RUN git clone https://github.com/octeep/wireproxy.git /wireproxy && \
+    cd /wireproxy && \
+    go build -o /wireproxy-bin ./cmd/wireproxy
 
 # Final stage
 FROM alpine:3.19
@@ -11,19 +11,13 @@ FROM alpine:3.19
 # Install system dependencies
 RUN apk add --no-cache \
     python3 \
-    wireguard-tools \
-    iptables \
-    iproute2 \
     ca-certificates \
     curl \
     bash \
-    su-exec
+    wireguard-tools
 
-# Create unprivileged user for the proxy
-RUN adduser -D -H -u 1000 proxy_user
-
-# Copy compiled microsocks from builder
-COPY --from=builder /microsocks/microsocks /usr/local/bin/microsocks
+# Copy compiled wireproxy from builder
+COPY --from=builder /wireproxy-bin /usr/local/bin/wireproxy
 
 # Set working directory
 WORKDIR /app

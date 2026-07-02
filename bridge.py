@@ -8,133 +8,102 @@ import signal
 import time
 import socket
 
-proxy_process = None
+wireproxy_process = None
 
 DEFAULT_VPN_PORT = 9735
-DATA_DIR = "/data"
+DATA_DIR = os.getenv("DATA_DIR", "/data")
 CONFIG_PATH = os.path.join(DATA_DIR, "tunnelsatsv3.conf")
+WIREPROXY_CONFIG_PATH = os.path.join(DATA_DIR, "wireproxy.conf")
 APP_CONFIG_PATH = os.path.join(DATA_DIR, "config.json")
 
 def extract_vpn_port(config_content):
     try:
-        match = re.search(r'#\s*VPNPort:\s*(\d+)', config_content, re.IGNORECASE)
+        # Match either "# VPNPort: 12345" or "# Port Forwarding: 12345"
+        match = re.search(r'#\s*(?:VPNPort|Port Forwarding):\s*(\d+)', config_content, re.IGNORECASE)
         if match:
             return int(match.group(1))
     except (ValueError, IndexError):
         pass
     return DEFAULT_VPN_PORT
 
-def get_target_ip():
+def get_target_details():
+    """
+    Returns (target_host, target_port) based on the target node config.
+    """
+    target = "lnd"
     try:
         if os.path.exists(APP_CONFIG_PATH):
             with open(APP_CONFIG_PATH, 'r') as f:
                 config_data = json.load(f)
                 target = config_data.get("target-node", "lnd")
-                hostname = f"{target}.embassy"
-                return socket.gethostbyname(hostname)
     except Exception as e:
-        print(f"Error resolving target IP: {e}", file=sys.stderr)
-    return None
+        print(f"Error reading target node from config: {e}", file=sys.stderr)
+
+    # Map to StartOS service ID and default port
+    if target in ("cln", "c-lightning"):
+        hostname = "c-lightning.embassy"
+    else:
+        hostname = "lnd.embassy"
+    return hostname, 9735
+
+def get_target_ip():
+    host, _ = get_target_details()
+    try:
+        return socket.gethostbyname(host)
+    except Exception:
+        return None
+
+def generate_wireproxy_config():
+    try:
+        with open(CONFIG_PATH, 'r') as f:
+            wg_config = f.read()
+            
+        vpn_port = extract_vpn_port(wg_config)
+        target_host, target_port = get_target_details()
+        target_ip = get_target_ip() or target_host
+        
+        extra_config = f"""
+[Socks5]
+BindAddress = 0.0.0.0:1080
+
+[TCPServerTunnel]
+ListenPort = {vpn_port}
+Target = {target_ip}:{target_port}
+"""
+        with open(WIREPROXY_CONFIG_PATH, 'w') as f:
+            f.write(wg_config + "\n" + extra_config)
+        print("Generated wireproxy config successfully.")
+        return True
+    except Exception as e:
+        print(f"Failed to generate wireproxy config: {e}", file=sys.stderr)
+        return False
 
 def inbound_up():
-    target_ip = get_target_ip()
-    if not target_ip:
-        print("Warning: Could not resolve target IP. Inbound routing disabled.", file=sys.stderr)
-        return False
-        
-    try:
-        with open(CONFIG_PATH, 'r') as f:
-            config_content = f.read()
-    except Exception as e:
-        print("Failed to read WireGuard config.", file=sys.stderr)
-        return False
-        
-    vpn_port = extract_vpn_port(config_content)
-    
-    try:
-        # PREROUTING: DNAT inbound TCP traffic from wg0 on <VPNPort> to <TargetIP>:9735
-        subprocess.run(["iptables", "-t", "nat", "-A", "PREROUTING", "-i", "tunnelsatsv3", "-p", "tcp", "--dport", str(vpn_port), "-j", "DNAT", "--to-destination", f"{target_ip}:9735"], check=True)
-        # POSTROUTING: Masquerade outgoing eth0 traffic targeted at <TargetIP>:9735 to ensure the node replies via VPN natively
-        subprocess.run(["iptables", "-t", "nat", "-A", "POSTROUTING", "-o", "eth0", "-d", target_ip, "-p", "tcp", "--dport", "9735", "-j", "MASQUERADE"], check=True)
-        # FORWARD RULES
-        subprocess.run(["iptables", "-A", "FORWARD", "-i", "tunnelsatsv3", "-o", "eth0", "-p", "tcp", "-d", target_ip, "--dport", "9735", "-j", "ACCEPT"], check=True)
-        subprocess.run(["iptables", "-A", "FORWARD", "-i", "eth0", "-o", "tunnelsatsv3", "-m", "state", "--state", "RELATED,ESTABLISHED", "-j", "ACCEPT"], check=True)
-        print(f"Inbound routing configured: Port {vpn_port} -> {target_ip}:9735")
-        return True
-    except subprocess.CalledProcessError as e:
-        print(f"Error configuring inbound iptables: {e}", file=sys.stderr)
-        return False
+    print("Inbound forwarding handled natively by wireproxy userspace tunnel.")
+    return True
 
 def inbound_down():
-    target_ip = get_target_ip()
-    if not target_ip:
-        return
-        
-    try:
-        with open(CONFIG_PATH, 'r') as f:
-            config_content = f.read()
-    except Exception as e:
-        return
-        
-    vpn_port = extract_vpn_port(config_content)
-    
-    try:
-        subprocess.run(["iptables", "-t", "nat", "-D", "PREROUTING", "-i", "tunnelsatsv3", "-p", "tcp", "--dport", str(vpn_port), "-j", "DNAT", "--to-destination", f"{target_ip}:9735"], check=False)
-        subprocess.run(["iptables", "-t", "nat", "-D", "POSTROUTING", "-o", "eth0", "-d", target_ip, "-p", "tcp", "--dport", "9735", "-j", "MASQUERADE"], check=False)
-        subprocess.run(["iptables", "-D", "FORWARD", "-i", "tunnelsatsv3", "-o", "eth0", "-p", "tcp", "-d", target_ip, "--dport", "9735", "-j", "ACCEPT"], check=False)
-        subprocess.run(["iptables", "-D", "FORWARD", "-i", "eth0", "-o", "tunnelsatsv3", "-m", "state", "--state", "RELATED,ESTABLISHED", "-j", "ACCEPT"], check=False)
-        print("Inbound routing disabled.")
-    except Exception as e:
-        pass
+    print("Inbound forwarding stopped natively by wireproxy.")
+    return True
 
 def get_wg_ip():
     try:
-        result = subprocess.run(
-            ["ip", "-4", "addr", "show", "tunnelsatsv3"],
-            check=True, capture_output=True, text=True
-        )
-        match = re.search(r'inet\s+([0-9\.]+)/\d+', result.stdout)
-        if match:
-            return match.group(1)
-    except subprocess.CalledProcessError:
-        pass
+        if os.path.exists(CONFIG_PATH):
+            with open(CONFIG_PATH, 'r') as f:
+                config_content = f.read()
+            match = re.search(r'Address\s*=\s*([0-9\.]+)', config_content, re.IGNORECASE)
+            if match:
+                return match.group(1)
+    except Exception as e:
+        print(f"Error parsing WG IP: {e}", file=sys.stderr)
     return None
 
 def proxy_up():
-    global proxy_process
-    wg_ip = get_wg_ip()
-    if not wg_ip:
-        print("Failed to get tunnelsatsv3 IP address for proxy binding.", file=sys.stderr)
-        return False
-    try:
-        # Apply killswitch rule
-        subprocess.run(
-            ["iptables", "-I", "OUTPUT", "1", "-m", "owner", "--uid-owner", "proxy_user", "!", "-o", "tunnelsatsv3", "-j", "REJECT"],
-            check=True
-        )
-        # Start microsocks
-        cmd = ["su-exec", "proxy_user", "/usr/local/bin/microsocks", "-i", "0.0.0.0", "-p", "1080", "-b", wg_ip]
-        proxy_process = subprocess.Popen(cmd)
-        print(f"Proxy started on 0.0.0.0:1080 bound securely to {wg_ip}")
-        return True
-    except Exception as e:
-        print(f"Failed to start proxy: {str(e)}", file=sys.stderr)
-        return False
+    print("Outbound proxy handled natively by wireproxy.")
+    return True
 
 def proxy_down():
-    global proxy_process
-    try:
-        if proxy_process:
-            proxy_process.terminate()
-            proxy_process.wait(timeout=5)
-            proxy_process = None
-        subprocess.run(
-            ["iptables", "-D", "OUTPUT", "-m", "owner", "--uid-owner", "proxy_user", "!", "-o", "tunnelsatsv3", "-j", "REJECT"],
-            check=False
-        )
-        print("Proxy stopped.")
-    except Exception as e:
-        print(f"Error stopping proxy: {str(e)}", file=sys.stderr)
+    print("Outbound proxy stopped natively by wireproxy.")
 
 def check_proxy_health():
     try:
@@ -156,43 +125,76 @@ def shutdown_handler(signum, frame):
     sys.exit(0)
 
 def vpn_up(config_path):
-    return subprocess.run(
-        ["wg-quick", "up", config_path],
-        check=True,
-        capture_output=True,
+    global wireproxy_process
+    # Generate wireproxy config first
+    if not generate_wireproxy_config():
+        raise RuntimeError("Failed to generate wireproxy config")
+        
+    cmd = ["/usr/local/bin/wireproxy", "-c", WIREPROXY_CONFIG_PATH]
+    wireproxy_process = subprocess.Popen(
+        cmd,
         text=True
     )
+    print("wireproxy started successfully.")
 
 def vpn_down(config_path):
-    return subprocess.run(
-        ["wg-quick", "down", config_path],
-        check=True,
-        capture_output=True,
-        text=True
-    )
+    global wireproxy_process
+    if wireproxy_process:
+        wireproxy_process.terminate()
+        try:
+            wireproxy_process.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            wireproxy_process.kill()
+        wireproxy_process = None
+        print("wireproxy stopped.")
+
+def is_wireproxy_running():
+    try:
+        proc = subprocess.run(["pgrep", "wireproxy"], capture_output=True)
+        return proc.returncode == 0
+    except Exception:
+        return False
 
 def get_status():
-    try:
-        result = subprocess.run(
-            ["wg", "show", "tunnelsatsv3"],
-            check=True,
-            capture_output=True,
-            text=True
-        )
-        handshake_match = re.search(r'latest handshake: (.*)', result.stdout)
-        handshake = handshake_match.group(1) if handshake_match else "unknown"
-        
-        return {
-            "status": "running",
-            "vpn_connected": True,
-            "handshake": handshake
-        }
-    except (subprocess.CalledProcessError, FileNotFoundError):
+    if not is_wireproxy_running():
         return {
             "status": "stopped",
             "vpn_connected": False,
             "handshake": "none"
         }
+        
+    try:
+        # Connect to 1.1.1.1:80 via SOCKS5 proxy to test the tunnel
+        proc = subprocess.run(
+            ["curl", "-s", "--socks5-hostname", "127.0.0.1:1080", "--connect-timeout", "3", "-I", "http://1.1.1.1"],
+            capture_output=True
+        )
+        if proc.returncode == 0:
+            return {
+                "status": "running",
+                "vpn_connected": True,
+                "handshake": "active"
+            }
+    except Exception as e:
+        print(f"Health check connectivity error: {e}", file=sys.stderr)
+        
+    return {
+        "status": "running",
+        "vpn_connected": False,
+        "handshake": "none"
+    }
+
+def validate_config(wg_conf):
+    if not wg_conf:
+        return
+    if not re.search(r'PrivateKey\s*=', wg_conf, re.IGNORECASE):
+        raise ValueError("Missing 'PrivateKey' property.")
+    if not re.search(r'Address\s*=', wg_conf, re.IGNORECASE):
+        raise ValueError("Missing 'Address' property.")
+    if not re.search(r'Endpoint\s*=', wg_conf, re.IGNORECASE):
+        raise ValueError("Missing 'Endpoint' routing property.")
+    if not re.search(r'#\s*(?:VPNPort|Port Forwarding):\s*\d+', wg_conf, re.IGNORECASE):
+        raise ValueError("Missing port-forwarding metadata (e.g., # Port Forwarding: XXXXX).")
 
 def get_properties():
     try:
@@ -201,7 +203,7 @@ def get_properties():
             
         vpn_port = extract_vpn_port(config_content)
         
-        endpoint_match = re.search(r'Endpoint\s*=\s*([0-9\.]+):\d+', config_content, re.IGNORECASE)
+        endpoint_match = re.search(r'Endpoint\s*=\s*([^:\s]+):\d+', config_content, re.IGNORECASE)
         public_ip = endpoint_match.group(1) if endpoint_match else "Unknown"
         
         private_key_match = re.search(r'PrivateKey\s*=\s*(.+)', config_content, re.IGNORECASE)
@@ -330,28 +332,67 @@ def main():
         subcommand = sys.argv[2] if len(sys.argv) > 2 else None
         
         if subcommand == "get":
+            # The UI requires the 'spec' metadata exactly as defined in config_spec.yaml
+            spec = {
+                "target-node": {
+                    "type": "enum",
+                    "name": "Target Lightning Node",
+                    "description": "Select which Lightning service on your StartOS server will receive inbound connections.",
+                    "values": ["lnd", "cln"],
+                    "value-names": {
+                        "lnd": "LND (lnd.embassy)",
+                        "cln": "Core Lightning (c-lightning.embassy)"
+                    },
+                    "default": "lnd"
+                },
+                "tunnelsats-conf": {
+                    "type": "string",
+                    "name": "WireGuard Configuration",
+                    "description": "Paste the content of your TunnelSats .conf file here. Ensure it includes the '# VPNPort: XXXXX' metadata comment for automatic port-forwarding.",
+                    "nullable": False,
+                    "default": None,
+                    "placeholder": "[Interface]\nPrivateKey = <your_private_key>\nAddress = 10.x.x.x/32\n# VPNPort: 12345\n...\n",
+                    "pattern": ".*",
+                    "pattern-description": "Please paste a valid WireGuard configuration.",
+                    "textarea": True,
+                    "copyable": True,
+                    "masked": False
+                }
+            }
+            
             # StartOS calls this to populate the UI
             if os.path.exists(APP_CONFIG_PATH):
                 with open(APP_CONFIG_PATH, 'r') as f:
-                    print(f.read())
+                    config_data = json.load(f)
             else:
-                # Default empty config for initial install
-                print(json.dumps({
+                config_data = {
                     "target-node": "lnd",
                     "tunnelsats-conf": ""
-                }))
+                }
+                
+            print(json.dumps({
+                "config": config_data,
+                "spec": spec
+            }))
                 
         elif subcommand == "set":
             # StartOS passes the UI values via stdin
             try:
                 config_data = json.load(sys.stdin)
                 
+                # Validation checking malformed fields
+                wg_conf = config_data.get("tunnelsats-conf", "")
+                try:
+                    validate_config(wg_conf)
+                except ValueError as ve:
+                    print(f"Invalid WireGuard Configuration: {str(ve)}", file=sys.stderr)
+                    sys.exit(1)
+                
                 # 1. Save the JSON config for future "get" calls
                 with open(APP_CONFIG_PATH, 'w') as f:
                     json.dump(config_data, f, indent=2)
                 
                 # 2. Extract the .conf blob and write it to the WireGuard path
-                wg_conf = config_data.get("tunnelsats-conf", "")
                 if wg_conf:
                     with open(CONFIG_PATH, 'w') as f:
                         f.write(wg_conf)

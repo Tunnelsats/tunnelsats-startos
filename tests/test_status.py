@@ -11,36 +11,33 @@ import bridge
 class TestBridgeStatus(unittest.TestCase):
     @patch('subprocess.run')
     def test_status_connected(self, mock_run):
-        # Mock wg show output for a connected state
-        mock_run.return_value = MagicMock(
-            returncode=0,
-            stdout="""interface: wg0
-  public key: key123
-  private key: (hidden)
-  listening port: 51820
-
-peer: key456
-  endpoint: 1.2.3.4:51820
-  allowed ips: 0.0.0.0/0
-  latest handshake: 10 seconds ago
-  transfer: 1.2 KiB received, 3.4 KiB sent
-""",
-            stderr=""
-        )
+        # First call (pgrep) returns 0 (running), second call (curl) returns 0 (connected)
+        mock_run.side_effect = [MagicMock(returncode=0), MagicMock(returncode=0)]
         
         status = bridge.get_status()
         self.assertEqual(status["status"], "running")
         self.assertTrue(status["vpn_connected"])
-        self.assertEqual(status["handshake"], "10 seconds ago")
+        self.assertEqual(status["handshake"], "active")
 
     @patch('subprocess.run')
     def test_status_disconnected(self, mock_run):
-        # Mock wg show output for an interface that doesn't exist
-        mock_run.side_effect = subprocess.CalledProcessError(1, "wg show", stderr="Device not found")
+        # First call (pgrep) returns 0 (running), second call (curl) returns 1 (disconnected)
+        mock_run.side_effect = [MagicMock(returncode=0), MagicMock(returncode=1)]
+        
+        status = bridge.get_status()
+        self.assertEqual(status["status"], "running")
+        self.assertFalse(status["vpn_connected"])
+        self.assertEqual(status["handshake"], "none")
+
+    @patch('subprocess.run')
+    def test_status_stopped(self, mock_run):
+        # First call (pgrep) returns 1 (not running)
+        mock_run.return_value = MagicMock(returncode=1)
         
         status = bridge.get_status()
         self.assertEqual(status["status"], "stopped")
         self.assertFalse(status["vpn_connected"])
+        self.assertEqual(status["handshake"], "none")
 
 if __name__ == '__main__':
     unittest.main()

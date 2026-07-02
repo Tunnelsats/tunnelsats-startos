@@ -11,4 +11,4 @@ mkdir -p /data
 # bridge.py will call wg-quick up, but we want it to stay interactive.
 
 echo "Starting TunnelSats Bridge Orchestrator..."
-exec python3 bridge.py start
+exec python3 -u bridge.py start

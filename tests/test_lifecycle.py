@@ -1,92 +1,55 @@
 import unittest
 import os
 import sys
+import subprocess
 from unittest.mock import patch, MagicMock
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 import bridge
 
 class TestBridgeLifecycle(unittest.TestCase):
-    @patch('subprocess.run')
-    def test_start_vpn_calls_wg_quick(self, mock_run):
-        # Mock successful execution
-        mock_run.return_value = MagicMock(returncode=0)
+    @patch('bridge.generate_wireproxy_config')
+    @patch('subprocess.Popen')
+    def test_start_vpn_calls_wireproxy(self, mock_popen, mock_gen_config):
+        mock_gen_config.return_value = True
+        mock_popen.return_value = MagicMock()
         
         bridge.vpn_up("/data/tunnelsatsv3.conf")
         
-        # Verify it calls wg-quick up
-        mock_run.assert_called_with(
-            ["wg-quick", "up", "/data/tunnelsatsv3.conf"],
-            check=True,
-            capture_output=True,
+        mock_popen.assert_called_with(
+            ["/usr/local/bin/wireproxy", "-c", bridge.WIREPROXY_CONFIG_PATH],
             text=True
         )
 
-    @patch('subprocess.run')
-    def test_stop_vpn_calls_wg_quick(self, mock_run):
-        mock_run.return_value = MagicMock(returncode=0)
+    def test_stop_vpn_calls_wireproxy(self):
+        mock_proc = MagicMock()
+        bridge.wireproxy_process = mock_proc
         
         bridge.vpn_down("/data/tunnelsatsv3.conf")
         
-        mock_run.assert_called_with(
-            ["wg-quick", "down", "/data/tunnelsatsv3.conf"],
-            check=True,
-            capture_output=True,
-            text=True
-        )
+        mock_proc.terminate.assert_called_once()
+        mock_proc.wait.assert_called_with(timeout=5)
+        self.assertIsNone(bridge.wireproxy_process)
 
-    @patch('subprocess.run')
-    def test_get_wg_ip_success(self, mock_run):
-        mock_run.return_value = MagicMock(returncode=0, stdout="inet 10.9.9.9/32 scope global tunnelsatsv3\n")
+    @patch('os.path.exists')
+    @patch('builtins.open', new_callable=unittest.mock.mock_open, read_data='[Interface]\nAddress = 10.9.9.9/32')
+    def test_get_wg_ip_success(self, mock_open, mock_exists):
+        mock_exists.return_value = True
         ip = bridge.get_wg_ip()
         self.assertEqual(ip, "10.9.9.9")
 
-    @patch('subprocess.run')
-    def test_get_wg_ip_failure(self, mock_run):
-        import subprocess
-        mock_run.side_effect = subprocess.CalledProcessError(1, "cmd")
+    @patch('os.path.exists')
+    def test_get_wg_ip_failure(self, mock_exists):
+        mock_exists.return_value = False
         ip = bridge.get_wg_ip()
         self.assertIsNone(ip)
 
-    @patch('subprocess.Popen')
-    @patch('subprocess.run')
-    @patch('bridge.get_wg_ip')
-    def test_proxy_up_success(self, mock_get_ip, mock_run, mock_popen):
-        mock_get_ip.return_value = "10.9.9.9"
-        mock_run.return_value = MagicMock(returncode=0)
-        mock_popen.return_value = MagicMock()
-
+    def test_proxy_up_success(self):
         result = bridge.proxy_up()
-        
         self.assertTrue(result)
-        mock_run.assert_called_with(
-            ["iptables", "-I", "OUTPUT", "1", "-m", "owner", "--uid-owner", "proxy_user", "!", "-o", "tunnelsatsv3", "-j", "REJECT"],
-            check=True
-        )
-        mock_popen.assert_called_with(
-            ["su-exec", "proxy_user", "/usr/local/bin/microsocks", "-i", "0.0.0.0", "-p", "1080", "-b", "10.9.9.9"]
-        )
 
-    @patch('bridge.get_wg_ip')
-    def test_proxy_up_fails_without_ip(self, mock_get_ip):
-        mock_get_ip.return_value = None
-        result = bridge.proxy_up()
-        self.assertFalse(result)
-
-    @patch('subprocess.run')
-    def test_proxy_down_teardown(self, mock_run):
-        mock_proc = MagicMock()
-        bridge.proxy_process = mock_proc
+    def test_proxy_down_teardown(self):
         bridge.proxy_down()
-        
-        mock_proc.terminate.assert_called_once()
-        mock_proc.wait.assert_called_with(timeout=5)
-        self.assertIsNone(bridge.proxy_process)
-        mock_run.assert_called_with(
-            ["iptables", "-D", "OUTPUT", "-m", "owner", "--uid-owner", "proxy_user", "!", "-o", "tunnelsatsv3", "-j", "REJECT"],
-            check=False
-        )
-
 
     def test_extract_vpn_port_success(self):
         config = "[Interface]\n# VPNPort: 12345\nPrivateKey=..."
@@ -100,40 +63,49 @@ class TestBridgeLifecycle(unittest.TestCase):
 
     @patch('os.path.exists')
     @patch('builtins.open', new_callable=unittest.mock.mock_open, read_data='{"target-node": "cln"}')
-    @patch('socket.gethostbyname')
-    def test_get_target_ip_success(self, mock_socket, mock_open, mock_exists):
+    def test_get_target_details_cln(self, mock_open, mock_exists):
         mock_exists.return_value = True
-        mock_socket.return_value = "10.0.0.5"
-        
-        ip = bridge.get_target_ip()
-        
-        mock_socket.assert_called_with("cln.embassy")
-        self.assertEqual(ip, "10.0.0.5")
+        host, port = bridge.get_target_details()
+        self.assertEqual(host, "c-lightning.embassy")
+        self.assertEqual(port, 9735)
 
-    @patch('bridge.get_target_ip')
-    @patch('builtins.open', new_callable=unittest.mock.mock_open, read_data='# VPNPort: 54321')
-    @patch('subprocess.run')
-    def test_inbound_up_success(self, mock_run, mock_open, mock_get_target):
-        mock_get_target.return_value = "10.0.0.10"
-        
+    @patch('os.path.exists')
+    @patch('builtins.open', new_callable=unittest.mock.mock_open, read_data='{"target-node": "lnd"}')
+    def test_get_target_details_lnd(self, mock_open, mock_exists):
+        mock_exists.return_value = True
+        host, port = bridge.get_target_details()
+        self.assertEqual(host, "lnd.embassy")
+        self.assertEqual(port, 9735)
+
+    def test_inbound_up_success(self):
         result = bridge.inbound_up()
-        
         self.assertTrue(result)
-        # Should be called 4 times for the 4 iptables rules
-        self.assertEqual(mock_run.call_count, 4)
-        mock_run.assert_any_call(["iptables", "-t", "nat", "-A", "PREROUTING", "-i", "tunnelsatsv3", "-p", "tcp", "--dport", "54321", "-j", "DNAT", "--to-destination", "10.0.0.10:9735"], check=True)
-        mock_run.assert_any_call(["iptables", "-t", "nat", "-A", "POSTROUTING", "-o", "eth0", "-d", "10.0.0.10", "-p", "tcp", "--dport", "9735", "-j", "MASQUERADE"], check=True)
 
-    @patch('bridge.get_target_ip')
-    @patch('builtins.open', new_callable=unittest.mock.mock_open, read_data='# VPNPort: 54321')
-    @patch('subprocess.run')
-    def test_inbound_down_teardown(self, mock_run, mock_open, mock_get_target):
-        mock_get_target.return_value = "10.0.0.10"
-        
+    def test_inbound_down_teardown(self):
         bridge.inbound_down()
+
+    def test_validate_config_success(self):
+        valid_conf = "[Interface]\nPrivateKey = hidden_key\nAddress = 10.x.x.x/32\n# VPNPort: 54321\n[Peer]\nEndpoint = 198.51.100.1:51820"
+        bridge.validate_config(valid_conf) # Should not raise
         
-        self.assertEqual(mock_run.call_count, 4)
-        mock_run.assert_any_call(["iptables", "-t", "nat", "-D", "PREROUTING", "-i", "tunnelsatsv3", "-p", "tcp", "--dport", "54321", "-j", "DNAT", "--to-destination", "10.0.0.10:9735"], check=False)
+    def test_validate_config_missing_privatekey(self):
+        invalid_conf = "[Interface]\nAddress = 10.x.x.x/32\n# VPNPort: 54321\n[Peer]\nEndpoint = 198.51.100.1:51820"
+        with self.assertRaisesRegex(ValueError, "Missing 'PrivateKey'"):
+            bridge.validate_config(invalid_conf)
+            
+    def test_validate_config_missing_endpoint(self):
+        invalid_conf = "[Interface]\nPrivateKey = hidden_key\nAddress = 10.x.x.x/32\n# VPNPort: 54321\n[Peer]\n"
+        with self.assertRaisesRegex(ValueError, "Missing 'Endpoint'"):
+            bridge.validate_config(invalid_conf)
+
+    def test_validate_config_missing_vpnport(self):
+        invalid_conf = "[Interface]\nPrivateKey = hidden_key\nAddress = 10.x.x.x/32\n[Peer]\nEndpoint = 198.51.100.1:51820"
+        with self.assertRaisesRegex(ValueError, "Missing port-forwarding metadata"):
+            bridge.validate_config(invalid_conf)
+
+    def test_validate_config_with_port_forwarding_tag(self):
+        valid_conf = "[Interface]\nPrivateKey = hidden_key\nAddress = 10.x.x.x/32\n# Port Forwarding: 54321\n[Peer]\nEndpoint = 198.51.100.1:51820"
+        bridge.validate_config(valid_conf) # Should work cleanly now
 
     @patch('bridge.get_wg_ip')
     @patch('subprocess.run')
