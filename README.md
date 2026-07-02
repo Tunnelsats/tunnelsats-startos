@@ -25,17 +25,20 @@ Privacy-preserving VPN tunnel for Lightning Network nodes on [StartOS](https://s
 ┌─────────────────────────────────────────────────────────────┐
 │                        StartOS                               │
 │  ┌─────────────┐     ┌──────────────────────┐               │
-│  │     LND     │────▶│  TunnelSats Service  │               │
+│  │  LND / CLN  │────▶│  TunnelSats Service  │               │
 │  └─────────────┘     │  ┌────────────────┐  │               │
-│        │             │  │   WireGuard    │──┼──▶ Clearnet   │
-│        │             │  │   (ts0)        │  │               │
+│        │             │  │   wireproxy    │──┼──▶ Clearnet   │
+│        │             │  │  (userspace)   │  │ (VPN Server)  │
 │        ▼             │  ├────────────────┤  │               │
 │   Tor Daemon ───────▶│  │ SOCKS5 Proxy   │  │               │
-│        │             │  │ (outbound)     │  │               │
+│        │             │  │ (port 1080)    │  │               │
 │        ▼             │  ├────────────────┤  │               │
-│   Tor Network        │  │ socat          │  │               │
-│                      │  │ (inbound)      │  │               │
+│   Tor Network        │  │ Server Tunnel  │  │               │
+│                      │  │ (inbound port) │  │               │
 │                      └──────────────────────┘               │
+│                                  │                          │
+│                                  ▼                          │
+│                      (forward P2P to port 9735)             │
 └─────────────────────────────────────────────────────────────┘
 ```
 
@@ -92,14 +95,13 @@ make
 
 The resulting `tunnelsats.s9pk` can be sideloaded into StartOS.
 
-## Testing
+## Testing & Development
+
+For details on local development setups, unit testing, and container-level routing verification on live StartOS nodes, refer to the [DEVELOPMENT.md](DEVELOPMENT.md) guide.
 
 ```bash
 # Run unit tests
-make test
-
-# Build and smoke test
-make test-docker
+python3 -m unittest discover -s tests -p "test_*.py"
 ```
 
 ## Contributing
