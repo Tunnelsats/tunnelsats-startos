@@ -6,9 +6,8 @@ set -e
 # 1. Ensure the data directory exists
 mkdir -p /data
 
-# 2. Check for the WireGuard interface
-# Note: In StartOS, the container is spawned as root with CAP_NET_ADMIN.
-# bridge.py will call wg-quick up, but we want it to stay interactive.
+# 2. Run the orchestrator in userspace
+# bridge.py will launch and manage the wireproxy client.
 
 echo "Starting TunnelSats Bridge Orchestrator..."
 exec python3 -u bridge.py start

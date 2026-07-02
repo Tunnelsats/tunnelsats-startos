@@ -12,12 +12,14 @@ class TestBridgeLifecycle(unittest.TestCase):
     @patch('subprocess.Popen')
     def test_start_vpn_calls_wireproxy(self, mock_popen, mock_gen_config):
         mock_gen_config.return_value = True
-        mock_popen.return_value = MagicMock()
+        mock_proc = MagicMock()
+        mock_proc.poll.return_value = None
+        mock_popen.return_value = mock_proc
         
         bridge.vpn_up("/data/tunnelsatsv3.conf")
         
         mock_popen.assert_called_with(
-            ["/usr/local/bin/wireproxy", "-c", bridge.WIREPROXY_CONFIG_PATH],
+            ["/usr/local/bin/wireproxy", "-c", bridge.WIREPROXY_CONFIG_PATH, "-i", "127.0.0.1:8080"],
             text=True
         )
 

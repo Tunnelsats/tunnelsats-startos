@@ -60,7 +60,9 @@ def generate_wireproxy_config():
             
         vpn_port = extract_vpn_port(wg_config)
         target_host, target_port = get_target_details()
-        target_ip = get_target_ip() or target_host
+        target_ip = get_target_ip()
+        if not target_ip:
+            raise ValueError(f"Could not resolve IP for target host '{target_host}'. Please ensure the target Lightning service is running.")
         
         extra_config = f"""
 [Socks5]
@@ -130,11 +132,15 @@ def vpn_up(config_path):
     if not generate_wireproxy_config():
         raise RuntimeError("Failed to generate wireproxy config")
         
-    cmd = ["/usr/local/bin/wireproxy", "-c", WIREPROXY_CONFIG_PATH]
+    cmd = ["/usr/local/bin/wireproxy", "-c", WIREPROXY_CONFIG_PATH, "-i", "127.0.0.1:8080"]
     wireproxy_process = subprocess.Popen(
         cmd,
         text=True
     )
+    # Give wireproxy a brief moment to initialize and check if it crashed immediately
+    time.sleep(1)
+    if wireproxy_process.poll() is not None:
+        raise RuntimeError("wireproxy failed to start or crashed immediately after spawning")
     print("wireproxy started successfully.")
 
 def vpn_down(config_path):
@@ -164,19 +170,42 @@ def get_status():
         }
         
     try:
-        # Connect to 1.1.1.1:80 via SOCKS5 proxy to test the tunnel
+        # Check wireproxy metrics locally without making WAN traffic
         proc = subprocess.run(
-            ["curl", "-s", "--socks5-hostname", "127.0.0.1:1080", "--connect-timeout", "3", "-I", "http://1.1.1.1"],
-            capture_output=True
+            ["curl", "-s", "http://127.0.0.1:8080/metrics"],
+            capture_output=True,
+            text=True,
+            timeout=3
         )
         if proc.returncode == 0:
+            content = proc.stdout
+            for line in content.splitlines():
+                if "last_handshake_time_sec=" in line:
+                    parts = line.strip().split("=")
+                    if len(parts) >= 2:
+                        try:
+                            val = float(parts[1])
+                            if val > 0:
+                                return {
+                                    "status": "running",
+                                    "vpn_connected": True,
+                                    "handshake": "active"
+                                }
+                        except ValueError:
+                            pass
+    except Exception as e:
+        print(f"Health check metrics query error: {e}", file=sys.stderr)
+        
+    # Fallback to checking SOCKS5 port availability if HTTP /metrics fails
+    try:
+        with socket.create_connection(("127.0.0.1", 1080), timeout=2):
             return {
                 "status": "running",
-                "vpn_connected": True,
-                "handshake": "active"
+                "vpn_connected": False,
+                "handshake": "none"
             }
-    except Exception as e:
-        print(f"Health check connectivity error: {e}", file=sys.stderr)
+    except OSError:
+        pass
         
     return {
         "status": "running",
