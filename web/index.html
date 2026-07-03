@@ -1,0 +1,141 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>TunnelSats Dashboard</title>
+    <!-- Outfit, Inter & JetBrains Mono Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Outfit:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <div class="background-glow"></div>
+    <div class="dashboard-container">
+        <!-- Header -->
+        <header class="dashboard-header">
+            <div class="brand">
+                <img src="logo.svg" alt="TunnelSats Logo" class="brand-logo">
+                <div class="brand-text">
+                    <h1>TunnelSats</h1>
+                    <span class="subtext">Lightning Network VPN Router</span>
+                </div>
+            </div>
+            <div class="status-badge-container">
+                <span id="status-badge" class="status-badge inactive">
+                    <span class="pulse-dot"></span>
+                    <span class="status-text">TUNNEL INACTIVE</span>
+                </span>
+            </div>
+        </header>
+
+        <!-- Main Content Grid -->
+        <main class="dashboard-grid">
+            <!-- Subscription Card -->
+            <section class="card glass-card span-2 subscription-card">
+                <div class="card-header">
+                    <h2>Subscription Status</h2>
+                    <span class="info-label" id="expiry-date-raw">Unknown</span>
+                </div>
+                <div class="subscription-content">
+                    <div class="countdown-container">
+                        <span class="countdown-label">Time Remaining</span>
+                        <div class="countdown-timer" id="countdown-timer">Checking...</div>
+                    </div>
+                    <div class="progress-bar-container">
+                        <div class="progress-bar" id="subscription-progress" style="width: 0%;"></div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Connection Details Card -->
+            <section class="card glass-card span-2 properties-card">
+                <h2>Connection Properties</h2>
+                <div class="properties-grid">
+                    <div class="prop-item">
+                        <div class="prop-label">TunnelSats Public IP</div>
+                        <div class="prop-value-group">
+                            <span class="prop-value" id="val-public-ip">...</span>
+                            <button class="btn-copy" onclick="copyText('val-public-ip', this)">Copy</button>
+                        </div>
+                    </div>
+                    <div class="prop-item">
+                        <div class="prop-label">Forwarding Port</div>
+                        <div class="prop-value-group">
+                            <span class="prop-value" id="val-vpn-port">...</span>
+                            <button class="btn-copy" onclick="copyText('val-vpn-port', this)">Copy</button>
+                        </div>
+                    </div>
+                    <div class="prop-item">
+                        <div class="prop-label">WireGuard Public Key</div>
+                        <div class="prop-value-group">
+                            <span class="prop-value truncated" id="val-pubkey">...</span>
+                            <button class="btn-copy" onclick="copyText('val-pubkey', this)">Copy</button>
+                        </div>
+                    </div>
+                    <div class="prop-item">
+                        <div class="prop-label">Internal IP (Last Octet)</div>
+                        <div class="prop-value-group">
+                            <span class="prop-value" id="val-octet">...</span>
+                            <button class="btn-copy" onclick="copyText('val-octet', this)">Copy</button>
+                        </div>
+                    </div>
+                    <div class="prop-item">
+                        <div class="prop-label">SOCKS5 Proxy (Outbound)</div>
+                        <div class="prop-value-group">
+                            <span class="prop-value" id="val-socks5">127.0.0.1:1080</span>
+                            <button class="btn-copy" onclick="copyText('val-socks5', this)">Copy</button>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Documentation & Guides Card -->
+            <section class="card glass-card span-2 docs-card">
+                <div class="docs-header">
+                    <h2>Lightning Routing Setup Guides</h2>
+                    <div class="tabs">
+                        <button class="tab-btn active" onclick="switchTab('lnd-tab', this)">LND</button>
+                        <button class="tab-btn" onclick="switchTab('cln-tab', this)">Core Lightning (CLN)</button>
+                    </div>
+                </div>
+                
+                <div class="tab-content active" id="lnd-tab">
+                    <p class="guide-intro">Configure LND to announce the TunnelSats public IP and port, while ensuring normal routing for Tor/clearnet peers.</p>
+                    <div class="code-block-header">
+                        <span>Append to your <code>lnd.conf</code>:</span>
+                        <button class="btn-copy-code" onclick="copyCode('lnd-code', this)">Copy Block</button>
+                    </div>
+                    <pre><code id="lnd-code"># [Application Options]
+externalhosts=<span class="highlight-ip">tunnelsats_ip</span>:<span class="highlight-port">tunnelsats_port</span>
+
+# [tor]
+tor.skip-proxy-for-clearnet-targets=true
+tor.streamisolation=false</code></pre>
+                    <div class="warning-box">
+                        <strong>Important Note:</strong> Restart the LND service on StartOS after modifying its config file to apply the new announced address.
+                    </div>
+                </div>
+
+                <div class="tab-content" id="cln-tab">
+                    <p class="guide-intro">Configure Core Lightning to announce your TunnelSats external IP and port for inbound peer-to-peer connections.</p>
+                    <div class="code-block-header">
+                        <span>Append to your CLN <code>config</code> file:</span>
+                        <button class="btn-copy-code" onclick="copyCode('cln-code', this)">Copy Block</button>
+                    </div>
+                    <pre><code id="cln-code">announce-addr=<span class="highlight-ip">tunnelsats_ip</span>:<span class="highlight-port">tunnelsats_port</span></code></pre>
+                    <div class="warning-box">
+                        <strong>Important Note:</strong> Restart the Core Lightning service on StartOS after saving these modifications.
+                    </div>
+                </div>
+            </section>
+        </main>
+        
+        <footer class="dashboard-footer">
+            <p>Need to renew? Visit the official <a href="https://tunnelsats.com" target="_blank" rel="noopener">TunnelSats Website</a></p>
+        </footer>
+    </div>
+    <script src="script.js"></script>
+</body>
+</html>
