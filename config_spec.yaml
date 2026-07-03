@@ -1,3 +1,9 @@
+enabled:
+  type: boolean
+  name: "Enable TunnelSats"
+  description: "Turn the TunnelSats VPN tunnel On or Off."
+  nullable: true
+  default: false
 target-node:
   type: enum
   name: "Target Lightning Node"
@@ -13,15 +19,13 @@ tunnelsats-conf:
   type: string
   name: "WireGuard Configuration"
   description: "Paste the content of your TunnelSats .conf file here. Ensure it includes the '# VPNPort: XXXXX' metadata comment for automatic port-forwarding."
-  nullable: false
+  nullable: true
   placeholder: |
     [Interface]
     PrivateKey = <your_private_key>
     Address = 10.x.x.x/32
     # VPNPort: 12345
     ...
-  pattern: ".*"
-  pattern-description: "Please paste a valid WireGuard configuration."
   textarea: true
   copyable: true
   masked: false

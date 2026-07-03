@@ -1,6 +1,6 @@
 id: tunnelsats
 title: "TunnelSats"
-version: 0.1.0
+version: 0.2.0
 release-notes: "Initial release for StartOS."
 license: "MIT"
 wrapper-repo: "https://github.com/Tunnelsats/tunnelsats-startos"
@@ -9,8 +9,8 @@ support-site: "https://github.com/Tunnelsats/tunnelsats/issues"
 marketing-site: "https://tunnelsats.com"
 min-os-version: "0.3.5"
 description:
-  short: "A privacy-focused VPN gateway for Lightning Nodes."
-  long: "TunnelSats provides premium VPN infrastructure for Lightning Nodes (LND/CLN), enabling clearnet inbound connections and masking outbound traffic to improve routing performance and privacy."
+  short: "A privacy-focused VPN gateway for Lightning Nodes (LND/CLN)."
+  long: "TunnelSats provides premium VPN infrastructure specifically for Lightning Nodes (LND/CLN), enabling clearnet inbound connections and masking outbound peer-to-peer traffic. Please note: TunnelSats is a dedicated Lightning Network VPN, NOT a general VPN for all StartOS system or server traffic."
 assets:
   license: LICENSE
   icon: icon.svg
@@ -80,6 +80,20 @@ interfaces:
       - tcp
       - http
       - socks5
+  ui:
+    name: "Web Dashboard"
+    description: "TunnelSats Web Dashboard, connection properties, and setup instructions."
+    tor-config:
+      port-mapping:
+        80: "80"
+    lan-config:
+      443:
+        ssl: true
+        internal: 80
+    ui: true
+    protocols:
+      - tcp
+      - http
 backup:
   create:
     type: docker
