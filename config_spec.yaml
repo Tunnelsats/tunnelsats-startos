@@ -1,0 +1,27 @@
+target-node:
+  type: enum
+  name: "Target Lightning Node"
+  description: "Select which Lightning service on your StartOS server will receive inbound connections."
+  values:
+    - lnd
+    - cln
+  value-names:
+    lnd: "LND (lnd.embassy)"
+    cln: "Core Lightning (c-lightning.embassy)"
+  default: lnd
+tunnelsats-conf:
+  type: string
+  name: "WireGuard Configuration"
+  description: "Paste the content of your TunnelSats .conf file here. Ensure it includes the '# VPNPort: XXXXX' metadata comment for automatic port-forwarding."
+  nullable: false
+  placeholder: |
+    [Interface]
+    PrivateKey = <your_private_key>
+    Address = 10.x.x.x/32
+    # VPNPort: 12345
+    ...
+  pattern: ".*"
+  pattern-description: "Please paste a valid WireGuard configuration."
+  textarea: true
+  copyable: true
+  masked: false

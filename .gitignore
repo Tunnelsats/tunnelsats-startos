@@ -28,3 +28,6 @@ package-lock.json
 # Temporary files
 tmp/
 .tmp/
+.env.local
+startOS-context.md
+deploy-sideload.sh

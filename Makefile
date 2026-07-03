@@ -25,9 +25,11 @@ build:
 		-o type=docker,dest=image.tar \
 		.
 
+START_SDK ?= start-sdk
+
 # Package for StartOS
 pack: build
-	start-sdk pack
+	$(START_SDK) pack
 
 # Run unit tests
 test:
