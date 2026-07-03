@@ -131,5 +131,53 @@ class TestBridgeLifecycle(unittest.TestCase):
         self.assertEqual(output["data"]["WireGuard Public Key"]["value"], "public_key_abc123")
         self.assertEqual(output["data"]["Internal IP (Last Octet)"]["value"], "45")
 
+    @patch('bridge.is_enabled')
+    @patch('bridge.vpn_up')
+    @patch('time.sleep')
+    @patch('sys.argv', ['bridge.py', 'start'])
+    def test_main_start_disabled(self, mock_sleep, mock_vpn_up, mock_is_enabled):
+        mock_is_enabled.return_value = False
+        mock_sleep.side_effect = KeyboardInterrupt("Stop loop")
+        
+        with self.assertRaises(KeyboardInterrupt):
+            bridge.main()
+            
+        mock_vpn_up.assert_not_called()
+
+    @patch('urllib.request.urlopen')
+    @patch('builtins.open', new_callable=unittest.mock.mock_open)
+    def test_lazy_sync_success(self, mock_open, mock_urlopen):
+        mock_response = MagicMock()
+        mock_response.status = 200
+        mock_response.read.return_value = b'{"expiry": "2026-12-31T23:59:59Z"}'
+        mock_response.__enter__ = lambda s: s
+        mock_response.__exit__ = MagicMock(return_value=False)
+        mock_urlopen.return_value = mock_response
+        
+        bridge.lazy_sync("mock_pubkey_123")
+        
+        mock_open.assert_called_with(bridge.META_FILE_PATH, 'w')
+        handle = mock_open()
+        written_data = "".join([call.args[0] for call in handle.write.call_args_list])
+        import json
+        parsed_written = json.loads(written_data)
+        self.assertEqual(parsed_written["expiresAt"], "2026-12-31T23:59:59Z")
+
+    @patch('builtins.open', new_callable=unittest.mock.mock_open, read_data='{"expiresAt": "2026-12-31T23:59:59Z"}')
+    @patch('os.path.exists')
+    @patch('bridge.datetime')
+    def test_format_subscription_expiry_active(self, mock_datetime, mock_exists, mock_open):
+        mock_exists.return_value = True
+        
+        # Mock current time: 2026-12-20 12:00:00 UTC
+        from datetime import datetime, timezone
+        fixed_now = datetime(2026, 12, 20, 12, 0, 0, tzinfo=timezone.utc)
+        mock_datetime.now.return_value = fixed_now
+        # Also need fromisoformat to work normally
+        mock_datetime.fromisoformat.side_effect = lambda s: datetime.fromisoformat(s)
+        
+        result = bridge.format_subscription_expiry()
+        self.assertEqual(result, "Active (Expires in 11d 11h)")
+
 if __name__ == '__main__':
     unittest.main()

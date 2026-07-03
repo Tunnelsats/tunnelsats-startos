@@ -7,6 +7,7 @@ import subprocess
 import signal
 import time
 import socket
+from datetime import datetime, timezone
 
 wireproxy_process = None
 
@@ -15,6 +16,282 @@ DATA_DIR = os.getenv("DATA_DIR", "/data")
 CONFIG_PATH = os.path.join(DATA_DIR, "tunnelsatsv3.conf")
 WIREPROXY_CONFIG_PATH = os.path.join(DATA_DIR, "wireproxy.conf")
 APP_CONFIG_PATH = os.path.join(DATA_DIR, "config.json")
+META_FILE_PATH = os.path.join(DATA_DIR, "tunnelsats-meta.json")
+TUNNELSATS_API_URL = "https://tunnelsats.com/api/public/v1"
+
+def parse_config_comments(config_content):
+    meta = {}
+    for line in config_content.splitlines():
+        line = line.strip()
+        if match := re.match(r"^#\s*Valid Until:\s*(.+)", line, re.IGNORECASE):
+            meta["expiresAt"] = match.group(1).strip()
+        elif match := re.match(r"^#\s*(?:VPNPort|Port Forwarding):\s*(\d+)", line, re.IGNORECASE):
+            meta["vpnPort"] = int(match.group(1))
+    return meta
+
+def lazy_sync(wg_pubkey):
+    if not wg_pubkey or wg_pubkey == "Unknown" or wg_pubkey == "Not available":
+        return
+
+    import urllib.request
+    import urllib.error
+    url = f"{TUNNELSATS_API_URL}/subscription/status"
+    data = json.dumps({"wgPublicKey": wg_pubkey}).encode("utf-8")
+    req = urllib.request.Request(
+        url,
+        data=data,
+        headers={
+            "Content-Type": "application/json",
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+        },
+        method="POST"
+    )
+    
+    meta = {}
+    try:
+        # Load existing metadata if it exists
+        if os.path.exists(META_FILE_PATH):
+            try:
+                with open(META_FILE_PATH, 'r') as f:
+                    meta = json.load(f)
+            except Exception:
+                pass
+
+        with urllib.request.urlopen(req, timeout=10) as response:
+            if response.status == 200:
+                res_data = json.loads(response.read().decode("utf-8"))
+                if isinstance(res_data, dict):
+                    expiry = res_data.get("expiry")
+                    if expiry:
+                        meta["expiresAt"] = expiry
+                    
+                    server_domain = res_data.get("server_domain")
+                    if server_domain:
+                        meta["serverDomain"] = server_domain
+                    
+                    vpn_port = res_data.get("vpn_port")
+                    if vpn_port:
+                        meta["vpnPort"] = vpn_port
+
+        # Fallback to comments parsing if config file exists and we don't have expiresAt
+        if not meta.get("expiresAt") and os.path.exists(CONFIG_PATH):
+            try:
+                with open(CONFIG_PATH, 'r') as f:
+                    config_content = f.read()
+                parsed = parse_config_comments(config_content)
+                if parsed.get("expiresAt"):
+                    meta["expiresAt"] = parsed["expiresAt"]
+            except Exception:
+                pass
+
+        # Write metadata back
+        with open(META_FILE_PATH, 'w') as f:
+            json.dump(meta, f, indent=2)
+            
+    except Exception as e:
+        print(f"Error during lazy subscription sync: {e}", file=sys.stderr)
+        
+        # Fallback to comments parsing on error if file does not have expiry
+        if not meta.get("expiresAt") and os.path.exists(CONFIG_PATH):
+            try:
+                with open(CONFIG_PATH, 'r') as f:
+                    config_content = f.read()
+                parsed = parse_config_comments(config_content)
+                if parsed.get("expiresAt"):
+                    meta["expiresAt"] = parsed["expiresAt"]
+                    with open(META_FILE_PATH, 'w') as f:
+                        json.dump(meta, f, indent=2)
+            except Exception:
+                pass
+
+def format_subscription_expiry():
+    if not os.path.exists(META_FILE_PATH):
+        return "Unknown"
+    
+    try:
+        with open(META_FILE_PATH, 'r') as f:
+            meta = json.load(f)
+        expires_at = meta.get("expiresAt")
+        if not expires_at:
+            return "Unknown"
+            
+        try:
+            expiry_dt = datetime.fromisoformat(expires_at.replace("Z", "+00:00"))
+            if expiry_dt.tzinfo is None:
+                expiry_dt = expiry_dt.replace(tzinfo=timezone.utc)
+            
+            now = datetime.now(timezone.utc)
+            if expiry_dt < now:
+                return f"Expired (on {expiry_dt.strftime('%Y-%m-%d')})"
+                
+            delta = expiry_dt - now
+            days = delta.days
+            hours = delta.seconds // 3600
+            
+            if days > 0:
+                return f"Active (Expires in {days}d {hours}h)"
+            else:
+                minutes = (delta.seconds % 3600) // 60
+                return f"Active (Expires in {hours}h {minutes}m)"
+        except Exception:
+            return f"Expires: {expires_at}"
+    except Exception:
+        pass
+    return "Unknown"
+
+def subscription_sync_loop():
+    try:
+        time.sleep(5)
+    except KeyboardInterrupt:
+        return
+    while True:
+        try:
+            pubkey = "Unknown"
+            if os.path.exists(CONFIG_PATH):
+                with open(CONFIG_PATH, 'r') as f:
+                    config_content = f.read()
+                private_key_match = re.search(r'PrivateKey\s*=\s*(.+)', config_content, re.IGNORECASE)
+                if private_key_match:
+                    try:
+                        proc = subprocess.run(["wg", "pubkey"], input=private_key_match.group(1).strip().encode(), capture_output=True)
+                        pubkey = proc.stdout.decode().strip()
+                    except Exception:
+                        pass
+            
+            if pubkey and pubkey != "Unknown":
+                lazy_sync(pubkey)
+        except Exception as e:
+            print(f"Error in subscription sync loop: {e}", file=sys.stderr)
+        
+        try:
+            time.sleep(86400)
+        except KeyboardInterrupt:
+            break
+
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+
+class DashboardHTTPRequestHandler(BaseHTTPRequestHandler):
+    def log_message(self, format, *args):
+        pass
+
+    def do_GET(self):
+        if self.path == "/api/status":
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Access-Control-Allow-Origin", "*")
+            self.end_headers()
+            
+            status_data = get_status()
+            
+            pubkey = "Unknown"
+            if os.path.exists(CONFIG_PATH):
+                try:
+                    with open(CONFIG_PATH, 'r') as f:
+                        config_content = f.read()
+                    private_key_match = re.search(r'PrivateKey\s*=\s*(.+)', config_content, re.IGNORECASE)
+                    if private_key_match:
+                        proc = subprocess.run(["wg", "pubkey"], input=private_key_match.group(1).strip().encode(), capture_output=True)
+                        pubkey = proc.stdout.decode().strip()
+                except Exception:
+                    pass
+            
+            expiry = "Unknown"
+            if os.path.exists(META_FILE_PATH):
+                try:
+                    with open(META_FILE_PATH, 'r') as f:
+                        meta = json.load(f)
+                        expiry = meta.get("expiresAt", "Unknown")
+                except Exception:
+                    pass
+                    
+            target_host, target_port = get_target_details()
+            
+            vpn_port = DEFAULT_VPN_PORT
+            public_ip = "Unknown"
+            if os.path.exists(CONFIG_PATH):
+                try:
+                    with open(CONFIG_PATH, 'r') as f:
+                        config_content = f.read()
+                    vpn_port = extract_vpn_port(config_content)
+                    endpoint_match = re.search(r'Endpoint\s*=\s*([^:\s]+):\d+', config_content, re.IGNORECASE)
+                    public_ip = endpoint_match.group(1) if endpoint_match else "Unknown"
+                except Exception:
+                    pass
+
+            wg_ip = get_wg_ip()
+            internal_octet = wg_ip.split('.')[-1] if wg_ip else "Unknown"
+
+            response = {
+                "enabled": is_enabled(),
+                "status": status_data["status"],
+                "vpn_connected": status_data["vpn_connected"],
+                "handshake": status_data["handshake"],
+                "pubkey": pubkey,
+                "expires_at": expiry,
+                "target_host": target_host,
+                "target_port": target_port,
+                "vpn_port": vpn_port,
+                "public_ip": public_ip,
+                "socks5_port": 1080,
+                "internal_octet": internal_octet
+            }
+            self.wfile.write(json.dumps(response).encode("utf-8"))
+            return
+
+        web_dir = os.path.join(os.path.dirname(__file__), "web")
+        target_path = self.path.lstrip("/")
+        if not target_path or target_path == "":
+            target_path = "index.html"
+            
+        safe_path = os.path.abspath(os.path.join(web_dir, target_path))
+        if not safe_path.startswith(os.path.abspath(web_dir)):
+            self.send_error(403, "Access denied")
+            return
+
+        if os.path.exists(safe_path) and os.path.isfile(safe_path):
+            self.send_response(200)
+            if safe_path.endswith(".html"):
+                self.send_header("Content-Type", "text/html")
+            elif safe_path.endswith(".css"):
+                self.send_header("Content-Type", "text/css")
+            elif safe_path.endswith(".js"):
+                self.send_header("Content-Type", "application/javascript")
+            elif safe_path.endswith(".svg"):
+                self.send_header("Content-Type", "image/svg+xml")
+            elif safe_path.endswith(".png"):
+                self.send_header("Content-Type", "image/png")
+            else:
+                self.send_header("Content-Type", "application/octet-stream")
+            self.end_headers()
+            
+            with open(safe_path, "rb") as f:
+                self.wfile.write(f.read())
+        else:
+            self.send_error(404, "File not found")
+
+def web_server_thread():
+    try:
+        server = ThreadingHTTPServer(("0.0.0.0", 80), DashboardHTTPRequestHandler)
+        print("Web UI Dashboard server running on port 80...")
+        server.serve_forever()
+    except Exception as e:
+        print(f"Failed to start web server on port 80: {e}", file=sys.stderr)
+        try:
+            server = ThreadingHTTPServer(("0.0.0.0", 8000), DashboardHTTPRequestHandler)
+            print("Web UI Dashboard server fallback running on port 8000...")
+            server.serve_forever()
+        except Exception as e2:
+            print(f"Failed to start fallback web server: {e2}", file=sys.stderr)
+
+def is_enabled():
+    try:
+        if os.path.exists(APP_CONFIG_PATH):
+            with open(APP_CONFIG_PATH, 'r') as f:
+                config_data = json.load(f)
+                return config_data.get("enabled", False)
+    except Exception as e:
+        print(f"Error checking enabled status: {e}", file=sys.stderr)
+    return False
 
 def extract_vpn_port(config_content):
     try:
@@ -261,6 +538,12 @@ def get_properties():
                     "value": str(vpn_port),
                     "description": "Your assigned port for inbound Lightning connections.",
                     "copyable": True
+                },
+                "Subscription Expiry": {
+                    "type": "string",
+                    "value": format_subscription_expiry(),
+                    "description": "Remaining validity of your TunnelSats subscription.",
+                    "copyable": False
                 }
             }
         }
@@ -289,6 +572,17 @@ def main():
         signal.signal(signal.SIGTERM, shutdown_handler)
         signal.signal(signal.SIGINT, shutdown_handler)
         try:
+            import threading
+            sync_thread = threading.Thread(target=subscription_sync_loop, daemon=True)
+            sync_thread.start()
+
+            web_thread = threading.Thread(target=web_server_thread, daemon=True)
+            web_thread.start()
+
+            if not is_enabled():
+                print("TunnelSats is disabled. Staying idle...", file=sys.stderr)
+                while True:
+                    time.sleep(1)
             if not os.path.exists(CONFIG_PATH):
                 print(f"WireGuard config not found at {CONFIG_PATH}. Waiting for user setup...", file=sys.stderr)
                 while not os.path.exists(CONFIG_PATH):
@@ -328,6 +622,10 @@ def main():
     elif command == "health":
         target = sys.argv[2] if len(sys.argv) > 2 else "vpn"
         
+        if not is_enabled():
+            print(json.dumps({"result": "ok"}))
+            sys.exit(0)
+            
         if target == "vpn":
             status = get_status()
             if status["vpn_connected"]:
@@ -353,6 +651,14 @@ def main():
         if subcommand == "get":
             # The UI requires the 'spec' metadata exactly as defined in config_spec.yaml
             spec = {
+                "enabled": {
+                    "type": "boolean",
+                    "name": "Enable TunnelSats",
+                    "description": "Turn the TunnelSats VPN tunnel On or Off.",
+                    "nullable": True,
+                    "default": False,
+                    "depends-on": {}
+                },
                 "target-node": {
                     "type": "enum",
                     "name": "Target Lightning Node",
@@ -362,20 +668,20 @@ def main():
                         "lnd": "LND (lnd.embassy)",
                         "cln": "Core Lightning (c-lightning.embassy)"
                     },
-                    "default": "lnd"
+                    "default": "lnd",
+                    "depends-on": {}
                 },
                 "tunnelsats-conf": {
                     "type": "string",
                     "name": "WireGuard Configuration",
                     "description": "Paste the content of your TunnelSats .conf file here. Ensure it includes the '# VPNPort: XXXXX' metadata comment for automatic port-forwarding.",
-                    "nullable": False,
+                    "nullable": True,
                     "default": None,
                     "placeholder": "[Interface]\nPrivateKey = <your_private_key>\nAddress = 10.x.x.x/32\n# VPNPort: 12345\n...\n",
-                    "pattern": ".*",
-                    "pattern-description": "Please paste a valid WireGuard configuration.",
                     "textarea": True,
                     "copyable": True,
-                    "masked": False
+                    "masked": False,
+                    "depends-on": {}
                 }
             }
             
@@ -385,27 +691,39 @@ def main():
                     config_data = json.load(f)
             else:
                 config_data = {
+                    "enabled": False,
                     "target-node": "lnd",
                     "tunnelsats-conf": ""
                 }
                 
             print(json.dumps({
                 "config": config_data,
-                "spec": spec
+                "spec": spec,
+                "depends-on": {}
             }))
                 
         elif subcommand == "set":
             # StartOS passes the UI values via stdin
             try:
-                config_data = json.load(sys.stdin)
+                raw_input = json.load(sys.stdin)
                 
-                # Validation checking malformed fields
-                wg_conf = config_data.get("tunnelsats-conf", "")
-                try:
-                    validate_config(wg_conf)
-                except ValueError as ve:
-                    print(f"Invalid WireGuard Configuration: {str(ve)}", file=sys.stderr)
-                    sys.exit(1)
+                # Handle both wrapped and unwrapped (for tests) formats
+                if isinstance(raw_input, dict) and "config" in raw_input:
+                    config_data = raw_input.get("config", {})
+                    depends_on = raw_input.get("depends-on", {})
+                else:
+                    config_data = raw_input
+                    depends_on = {}
+                
+                enabled = config_data.get("enabled", False)
+                wg_conf = config_data.get("tunnelsats-conf") or ""
+                
+                if enabled or wg_conf:
+                    try:
+                        validate_config(wg_conf)
+                    except ValueError as ve:
+                        print(f"Invalid WireGuard Configuration: {str(ve)}", file=sys.stderr)
+                        sys.exit(1)
                 
                 # 1. Save the JSON config for future "get" calls
                 with open(APP_CONFIG_PATH, 'w') as f:
@@ -415,10 +733,18 @@ def main():
                 if wg_conf:
                     with open(CONFIG_PATH, 'w') as f:
                         f.write(wg_conf)
+                elif os.path.exists(CONFIG_PATH):
+                    try:
+                        os.remove(CONFIG_PATH)
+                    except Exception:
+                        pass
                 
-                # StartOS expects the config back on success
-                print(json.dumps(config_data))
-                
+                # StartOS always expects the wrapped format with top-level depends-on
+                print(json.dumps({
+                    "config": config_data,
+                    "depends-on": {}
+                }))
+                    
             except Exception as e:
                 print(f"Error setting config: {str(e)}", file=sys.stderr)
                 sys.exit(1)
