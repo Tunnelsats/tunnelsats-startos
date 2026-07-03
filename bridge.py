@@ -184,7 +184,7 @@ def get_status():
                     if len(parts) >= 2:
                         try:
                             val = float(parts[1])
-                            if val > 0:
+                            if val > 0 and (time.time() - val) < 300:
                                 return {
                                     "status": "running",
                                     "vpn_connected": True,

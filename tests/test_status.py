@@ -14,9 +14,11 @@ class TestBridgeStatus(unittest.TestCase):
     def test_status_connected(self, mock_run, mock_urlopen, mock_socket):
         # pgrep returns 0 (running)
         mock_run.return_value = MagicMock(returncode=0)
-        # urllib returns metrics with active handshake
+        # urllib returns metrics with a recent handshake timestamp
+        import time as _time
+        recent_ts = str(int(_time.time()) - 10)
         mock_response = MagicMock()
-        mock_response.read.return_value = b"last_handshake_time_sec=1629837493\n"
+        mock_response.read.return_value = f"last_handshake_time_sec={recent_ts}\n".encode()
         mock_response.__enter__ = lambda s: s
         mock_response.__exit__ = MagicMock(return_value=False)
         mock_urlopen.return_value = mock_response
