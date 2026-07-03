@@ -3,6 +3,7 @@ import json
 import subprocess
 import os
 import sys
+import shutil
 
 def run_command(cmd, input_str=None):
     try:
@@ -20,7 +21,11 @@ def run_command(cmd, input_str=None):
 
 def main():
     bridge_path = "./bridge.py"
-    sdk_verify_bin = "/home/hakuna/.cargo/bin/start-sdk"
+    # Allow override via START_SDK env var; fall back to PATH lookup then common cargo install location
+    sdk_verify_bin = os.environ.get(
+        "START_SDK",
+        shutil.which("start-sdk") or os.path.expanduser("~/.cargo/bin/start-sdk")
+    )
 
     print("Phase 1: Validating 'config get' Schema with StartOS SDK...")
     try:

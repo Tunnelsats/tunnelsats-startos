@@ -42,7 +42,7 @@ def lazy_sync(wg_pubkey):
         data=data,
         headers={
             "Content-Type": "application/json",
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+            "User-Agent": "tunnelsats-startos/0.2.0"
         },
         method="POST"
     )
@@ -178,7 +178,6 @@ class DashboardHTTPRequestHandler(BaseHTTPRequestHandler):
         if self.path == "/api/status":
             self.send_response(200)
             self.send_header("Content-Type", "application/json")
-            self.send_header("Access-Control-Allow-Origin", "*")
             self.end_headers()
             
             status_data = get_status()
@@ -276,12 +275,6 @@ def web_server_thread():
         server.serve_forever()
     except Exception as e:
         print(f"Failed to start web server on port 80: {e}", file=sys.stderr)
-        try:
-            server = ThreadingHTTPServer(("0.0.0.0", 8000), DashboardHTTPRequestHandler)
-            print("Web UI Dashboard server fallback running on port 8000...")
-            server.serve_forever()
-        except Exception as e2:
-            print(f"Failed to start fallback web server: {e2}", file=sys.stderr)
 
 def is_enabled():
     try:
