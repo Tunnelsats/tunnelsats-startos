@@ -46,14 +46,6 @@ def get_target_details():
         hostname = "lnd.embassy"
     return hostname, 9735
 
-def get_target_ip():
-    host, _ = get_target_details()
-    for _ in range(5):
-        try:
-            return socket.gethostbyname(host)
-        except Exception:
-            time.sleep(2)
-    return None
 
 def generate_wireproxy_config():
     try:
@@ -62,9 +54,6 @@ def generate_wireproxy_config():
             
         vpn_port = extract_vpn_port(wg_config)
         target_host, target_port = get_target_details()
-        target_ip = get_target_ip()
-        if not target_ip:
-            raise ValueError(f"Could not resolve IP for target host '{target_host}'. Please ensure the target Lightning service is running.")
         
         extra_config = f"""
 [Socks5]
@@ -72,7 +61,7 @@ BindAddress = 0.0.0.0:1080
 
 [TCPServerTunnel]
 ListenPort = {vpn_port}
-Target = {target_ip}:{target_port}
+Target = {target_host}:{target_port}
 """
         with open(WIREPROXY_CONFIG_PATH, 'w') as f:
             f.write(wg_config + "\n" + extra_config)
@@ -207,7 +196,7 @@ def get_status():
         pass
         
     return {
-        "status": "running",
+        "status": "stopped",
         "vpn_connected": False,
         "handshake": "none"
     }
@@ -313,8 +302,11 @@ def main():
                 
             inbound_up()
             
-            # Stay alive
+            # Stay alive and monitor the wireproxy process
             while True:
+                if wireproxy_process and wireproxy_process.poll() is not None:
+                    print("wireproxy process exited unexpectedly.", file=sys.stderr)
+                    sys.exit(1)
                 time.sleep(1)
         except Exception as e:
             stderr = getattr(e, 'stderr', str(e))

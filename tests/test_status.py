@@ -38,7 +38,7 @@ class TestBridgeStatus(unittest.TestCase):
         mock_socket.side_effect = OSError("Connection refused")
 
         status = bridge.get_status()
-        self.assertEqual(status["status"], "running")
+        self.assertEqual(status["status"], "stopped")
         self.assertFalse(status["vpn_connected"])
         self.assertEqual(status["handshake"], "none")
 
