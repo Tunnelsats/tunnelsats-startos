@@ -48,10 +48,12 @@ def get_target_details():
 
 def get_target_ip():
     host, _ = get_target_details()
-    try:
-        return socket.gethostbyname(host)
-    except Exception:
-        return None
+    for _ in range(5):
+        try:
+            return socket.gethostbyname(host)
+        except Exception:
+            time.sleep(2)
+    return None
 
 def generate_wireproxy_config():
     try:
@@ -93,7 +95,7 @@ def get_wg_ip():
         if os.path.exists(CONFIG_PATH):
             with open(CONFIG_PATH, 'r') as f:
                 config_content = f.read()
-            match = re.search(r'Address\s*=\s*([0-9\.]+)', config_content, re.IGNORECASE)
+            match = re.search(r'^\s*(?!#|;)\s*Address\s*=\s*([0-9\.]+)', config_content, re.IGNORECASE | re.MULTILINE)
             if match:
                 return match.group(1)
     except Exception as e:
@@ -171,14 +173,11 @@ def get_status():
         
     try:
         # Check wireproxy metrics locally without making WAN traffic
-        proc = subprocess.run(
-            ["curl", "-s", "http://127.0.0.1:8080/metrics"],
-            capture_output=True,
-            text=True,
-            timeout=3
-        )
-        if proc.returncode == 0:
-            content = proc.stdout
+        import urllib.request
+        req = urllib.request.Request("http://127.0.0.1:8080/metrics")
+        with urllib.request.urlopen(req, timeout=3) as response:
+            content = response.read().decode('utf-8')
+        if content:
             for line in content.splitlines():
                 if "last_handshake_time_sec=" in line:
                     parts = line.strip().split("=")
@@ -216,11 +215,11 @@ def get_status():
 def validate_config(wg_conf):
     if not wg_conf:
         return
-    if not re.search(r'PrivateKey\s*=', wg_conf, re.IGNORECASE):
+    if not re.search(r'^\s*(?!#|;)\s*PrivateKey\s*=', wg_conf, re.IGNORECASE | re.MULTILINE):
         raise ValueError("Missing 'PrivateKey' property.")
-    if not re.search(r'Address\s*=', wg_conf, re.IGNORECASE):
+    if not re.search(r'^\s*(?!#|;)\s*Address\s*=', wg_conf, re.IGNORECASE | re.MULTILINE):
         raise ValueError("Missing 'Address' property.")
-    if not re.search(r'Endpoint\s*=', wg_conf, re.IGNORECASE):
+    if not re.search(r'^\s*(?!#|;)\s*Endpoint\s*=', wg_conf, re.IGNORECASE | re.MULTILINE):
         raise ValueError("Missing 'Endpoint' routing property.")
     if not re.search(r'#\s*(?:VPNPort|Port Forwarding):\s*\d+', wg_conf, re.IGNORECASE):
         raise ValueError("Missing port-forwarding metadata (e.g., # Port Forwarding: XXXXX).")
