@@ -1,7 +1,7 @@
 # Builder stage for wireproxy
 FROM golang:alpine AS builder
 RUN apk add --no-cache git
-RUN git clone --depth 1 --branch v1.1.1 https://github.com/windtf/wireproxy.git /wireproxy && \
+RUN git clone --depth 1 --branch v1.1.1 https://github.com/octeep/wireproxy.git /wireproxy && \
     cd /wireproxy && \
     go build -o /wireproxy-bin ./cmd/wireproxy
 
