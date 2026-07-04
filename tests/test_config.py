@@ -168,5 +168,22 @@ class TestBridgeConfigCLI(unittest.TestCase):
         self.assertEqual(output["depends-on"], {"lnd": []})
         mock_atomic_write.assert_called_once()
 
+    @patch('os.path.exists')
+    @patch('builtins.open', new_callable=mock_open, read_data='{invalid_json: "yes"}')
+    @patch('sys.stdout', new_callable=MagicMock)
+    @patch('sys.argv', ['bridge.py', 'config', 'get'])
+    def test_config_get_corrupted_json(self, mock_stdout, mock_file_open, mock_exists):
+        mock_exists.return_value = True
+        
+        bridge.main()
+        
+        args, kwargs = mock_stdout.write.call_args_list[0]
+        output = json.loads(args[0])
+        
+        # Should catch JSONDecodeError and fallback to defaults
+        self.assertEqual(output["config"]["target-node"], "lnd")
+        self.assertEqual(output["config"]["enabled"], False)
+        self.assertEqual(output["depends-on"], {"lnd": []})
+
 if __name__ == '__main__':
     unittest.main()

@@ -845,8 +845,11 @@ def main():
             
             # StartOS calls this to populate the UI
             if os.path.exists(APP_CONFIG_PATH):
-                with open(APP_CONFIG_PATH, 'r') as f:
-                    config_data = json.load(f)
+                try:
+                    with open(APP_CONFIG_PATH, 'r') as f:
+                        config_data = json.load(f)
+                except Exception:
+                    config_data = None
             else:
                 config_data = None
 
