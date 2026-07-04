@@ -109,11 +109,13 @@ class TestBridgeLifecycle(unittest.TestCase):
         valid_conf = "[Interface]\nPrivateKey = hidden_key\nAddress = 10.x.x.x/32\n# Port Forwarding: 54321\n[Peer]\nEndpoint = 198.51.100.1:51820"
         bridge.validate_config(valid_conf) # Should work cleanly now
 
+    @patch('os.path.exists')
     @patch('bridge.get_wg_ip')
     @patch('subprocess.run')
     @patch('builtins.open', new_callable=unittest.mock.mock_open, read_data='[Interface]\nPrivateKey = hidden_key\n# VPNPort: 54321\n[Peer]\nEndpoint = 198.51.100.1:51820')
     @patch('sys.stdout', new_callable=unittest.mock.MagicMock)
-    def test_get_properties_success(self, mock_stdout, mock_open, mock_run, mock_get_ip):
+    def test_get_properties_success(self, mock_stdout, mock_open, mock_run, mock_get_ip, mock_exists):
+        mock_exists.return_value = True
         mock_get_ip.return_value = "10.9.9.45"
         
         # Mock `wg pubkey`
