@@ -388,9 +388,13 @@ def is_enabled():
                 if mtime != _enabled_cache_mtime:
                     with open(APP_CONFIG_PATH, 'r') as f:
                         config_data = json.load(f)
-                    _enabled_cache = config_data.get("enabled", False)
+                    if "enabled" in config_data:
+                        _enabled_cache = config_data["enabled"]
+                    else:
+                        _enabled_cache = None
                     _enabled_cache_mtime = mtime
-                return _enabled_cache
+                if _enabled_cache is not None:
+                    return _enabled_cache
             except Exception:
                 pass
         # Default to True if a v3 config exists (upgrade path/existing configurations)
