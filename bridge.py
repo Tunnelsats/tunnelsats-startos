@@ -232,12 +232,10 @@ class DashboardHTTPRequestHandler(BaseHTTPRequestHandler):
             # Prevent unauthorized container-to-container scraping from within the same network
             client_ip = self.client_address[0]
             is_local = client_ip in ("127.0.0.1", "::1", "localhost")
+            has_proxy_headers = "x-forwarded-for" in self.headers or "x-forwarded-host" in self.headers
             
-            # Identify the unspoofable network gateway IP (the reverse proxy host gateway)
-            gateway_ip = get_default_gateway()
-            
-            # Enforce that remote connections must only originate from the host gateway
-            if not is_local and gateway_ip and client_ip != gateway_ip:
+            # Non-local requests must go through the StartOS HTTP reverse proxy
+            if not is_local and not has_proxy_headers:
                 self.send_error(403, "Access denied")
                 return
 
@@ -824,7 +822,11 @@ def main():
                 enabled = config_data.get("enabled", False)
                 wg_conf = config_data.get("tunnelsats-conf") or ""
                 
-                if enabled or wg_conf:
+                if enabled and not wg_conf:
+                    print("Invalid WireGuard Configuration: enabled tunnels require a WireGuard configuration", file=sys.stderr)
+                    sys.exit(1)
+                
+                if wg_conf:
                     try:
                         validate_config(wg_conf)
                     except ValueError as ve:
@@ -839,6 +841,12 @@ def main():
                 if wg_conf:
                     with open(CONFIG_PATH, 'w') as f:
                         f.write(wg_conf)
+                elif "tunnelsats-conf" in config_data and config_data["tunnelsats-conf"] == "":
+                    if os.path.exists(CONFIG_PATH):
+                        try:
+                            os.remove(CONFIG_PATH)
+                        except Exception:
+                            pass
                 
 
                 
