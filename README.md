@@ -1,29 +1,41 @@
-# ⚠️ WORK IN PROGRESS - DO NOT USE ⚠️
+<img src="https://raw.githubusercontent.com/Tunnelsats/tunnelsats/ffb4732328045922dc90eb5580654077e8d3f246/images/brand/logos/ts_logo_rectangle.svg" alt="TunnelSats Logo" width="400"/>
 
-> [!WARNING]
-> This service is currently under active development and is **not functional** on the `main` branch. 
-> Please do not attempt to sideload or install this service yet. 
-> 
-> Development is taking place on the [feat/startos-integration](https://github.com/Tunnelsats/tunnelsats-startos/tree/feat/startos-integration) branch.
+<br/>
+
+<div align="center">
+  <img src="https://img.shields.io/github/actions/workflow/status/Tunnelsats/tunnelsats-startos/build.yml?branch=main&label=Build%20Status&style=flat-square" alt="Build Status"/>
+  <img src="https://img.shields.io/github/license/Tunnelsats/tunnelsats-startos?style=flat-square&color=blue" alt="License"/>
+  <a href="https://tunnelsats.com/join-telegram"><img src="https://img.shields.io/badge/Telegram-Join%20Community-blue?style=flat-square&logo=telegram" alt="Telegram"/></a>
+</div>
+
+<br/>
 
 # TunnelSats for StartOS
 
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+This repository contains the containerized version of [TunnelSats](https://tunnelsats.com/) optimized for [StartOS](https://start9.com) (fully compatible with v0.3.5.x and later).
 
-Privacy-preserving VPN tunnel for Lightning Network nodes on [StartOS](https://start9.com). Route your clearnet traffic through TunnelSats infrastructure while keeping your real IP hidden.
+## ⚡ What it Solves
+Running a Lightning Network node (LND/CLN) over Tor ensures privacy but introduces latency and routing reliability issues. Conversely, running purely on Clearnet exposes your home IP address. 
 
-## Features
+TunnelSats provides a hybrid solution: **Privacy-preserving clearnet connectivity**. 
+By establishing a secure WireGuard tunnel to one of our global servers, your node's Lightning traffic is routed through our IP address. Your home IP remains hidden while you benefit from the speed and reliability of the Clearnet.
 
-- 🔒 **Hybrid Mode**: Run Tor + Clearnet simultaneously for better routing performance
-- ⚡ **Lightning Optimized**: Pre-configured for LND/CLN nodes
-- 🌍 **Global Infrastructure**: Multiple VPN regions available
-- 🧅 **Privacy First**: No KYC, pay with Lightning
+---
 
-## How It Works
+## 🚀 Features
+- **In-App Web Dashboard**: Manage and verify your connection, inspect subscription status, and monitor data limits via a sleek, dark-themed responsive UI.
+- **Dynamic Dependency Mapping**: Automatically configured and integrated into StartOS's service manager. The system dynamically updates dependency states (LND or Core Lightning) based on your selected target.
+- **Zero Sudo Host Routing**: Operates entirely in userspace using `wireproxy` inside the isolated container namespace. No modification of host-level `iptables` or system network interfaces is required.
+
+---
+
+## 🛠 Architecture & Dataplane
+
+StartOS strictly isolates services. Apps cannot manipulate host-level routing or run in host network mode. TunnelSats implements a **Proxy & Forwarding Model** strictly confined to the `tunnelsats` container:
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│                        StartOS                               │
+│                        StartOS                              │
 │  ┌─────────────┐     ┌──────────────────────┐               │
 │  │  LND / CLN  │────▶│  TunnelSats Service  │               │
 │  └─────────────┘     │  ┌────────────────┐  │               │
@@ -31,10 +43,10 @@ Privacy-preserving VPN tunnel for Lightning Network nodes on [StartOS](https://s
 │        │             │  │  (userspace)   │  │ (VPN Server)  │
 │        ▼             │  ├────────────────┤  │               │
 │   Tor Daemon ───────▶│  │ SOCKS5 Proxy   │  │               │
-│        │             │  │ (port 1080)    │  │               │
-│        ▼             │  ├────────────────┤  │               │
-│   Tor Network        │  │ Server Tunnel  │  │               │
-│                      │  │ (inbound port) │  │               │
+│   (optional)         │  │ (port 1080)    │  │               │
+│                      │  ├────────────────┤  │               │
+│                      │  │ Inbound Port   │  │               │
+│                      │  │ (port 9735)    │  │               │
 │                      └──────────────────────┘               │
 │                                  │                          │
 │                                  ▼                          │
@@ -42,34 +54,34 @@ Privacy-preserving VPN tunnel for Lightning Network nodes on [StartOS](https://s
 └─────────────────────────────────────────────────────────────┘
 ```
 
-## Prerequisites
+1. **Outbound (SOCKS5)**: `wireproxy` connects to the TunnelSats WireGuard server and exposes a local SOCKS5 proxy on port `1080`. Your Lightning Node (LND/CLN) is configured to route outbound peer-to-peer connections through this proxy.
+2. **Inbound (Port Forwarding)**: Traffic arriving on your assigned TunnelSats external port is forwarded through the userspace WireGuard tunnel directly to your target Lightning service (`lnd.embassy` or `c-lightning.embassy`) on port `9735`.
 
-1. A StartOS server (v0.3.5.x or later)
-2. LND or Core Lightning installed
-3. A TunnelSats subscription from [tunnelsats.com](https://tunnelsats.com)
+---
 
-## Installation
+## 📦 Installation & Configuration
 
-### From StartOS Marketplace
-*Coming soon*
+### Prerequisites
+1. A StartOS server (v0.3.5.x or later).
+2. LND or Core Lightning installed.
+3. An active TunnelSats subscription from [tunnelsats.com](https://tunnelsats.com).
 
-### Sideload (Development)
-1. Download the latest `.s9pk` from [Releases](https://github.com/Tunnelsats/tunnelsats-startos/releases)
-2. Go to StartOS Dashboard → System → Sideload Service
-3. Upload the `.s9pk` file
+### Step 1: Install TunnelSats
+- **Sideload (Development)**:
+  1. Download the latest `.s9pk` from [Releases](https://github.com/Tunnelsats/tunnelsats-startos/releases) or build it from source.
+  2. In your StartOS dashboard, navigate to **System** → **Sideload Service** and upload the package.
 
-## Configuration
+### Step 2: Configure the Tunnel
+1. Purchase a subscription at [tunnelsats.com](https://tunnelsats.com) or renew an existing one.
+2. Download your WireGuard `.conf` configuration file.
+3. In your StartOS dashboard, click on the **TunnelSats** service, open **Config**, and paste the entire content of the `.conf` file.
+4. Toggle **Enable TunnelSats** to `On`, choose your **Target Lightning Node** (LND or CLN), and click **Save**.
+5. Start the service.
 
-1. Purchase a subscription at [tunnelsats.com](https://tunnelsats.com)
-2. Download your WireGuard configuration file
-3. In StartOS, go to TunnelSats → Config
-4. Paste your entire configuration file
-5. Start the service
+### Step 3: Configure LND or Core Lightning
 
-### LND Configuration
-
-Add these settings to your LND config:
-
+#### LND Config Changes
+Add the following options to your LND configuration (`lnd.conf`):
 ```ini
 [Application Options]
 externalhosts=<your-vpn-server>:<your-vpn-port>
@@ -79,53 +91,62 @@ tor.skip-proxy-for-clearnet-targets=true
 tor.streamisolation=false
 ```
 
-## Building from Source
+#### Core Lightning (CLN) Config Changes
+Add the following options to your Core Lightning configuration (`config`):
+```ini
+bind-addr=0.0.0.0:9735
+announce-addr=<your-vpn-server>:<your-vpn-port>
+```
+
+---
+
+## 🛠 Diagnostic Tool (`verify.sh`)
+
+We bundle a secure python-powered test suite inside the container that you can run to verify that your tunnel and ports are aligned:
+
+```bash
+# Run the verification script on your StartOS host
+sudo start-cli package action tunnelsats verify
+```
+
+Example Output:
+```text
+=== TunnelSats Dataplane Verification ===
+Target: ch1.tunnelsats.com (198.51.100.1) : 24556
+----------------------------------------------------------------
+[0/3] Discovering Home IP...                    PASS (82.165.12.34)
+[1/3] Testing Outbound Tunnel Alignment...      PASS (Verified via 198.51.100.1)
+[2/3] Testing Inbound Port (via IP)...          PASS (Connected to 198.51.100.1:24556)
+[3/3] Testing Inbound Port (via Hostname)...    PASS (Connected to ch1.tunnelsats.com:24556)
+----------------------------------------------------------------
+Verification Successful! Your node is routing securely.
+```
+
+---
+
+## 💻 Developer Guide
 
 ### Requirements
-- Docker with buildx
+- Docker (with buildx support)
 - [start-sdk](https://github.com/Start9Labs/start-os/tree/master/core)
 - Make
 
-### Build
+### Building the Package
 ```bash
 git clone https://github.com/Tunnelsats/tunnelsats-startos.git
 cd tunnelsats-startos
 make
 ```
+This produces `tunnelsats.s9pk`, which you can sideload directly onto your server.
 
-The resulting `tunnelsats.s9pk` can be sideloaded into StartOS.
-
-## Testing & Development
-
-For details on local development setups, unit testing, and container-level routing verification on live StartOS nodes, refer to the [DEVELOPMENT.md](DEVELOPMENT.md) guide.
-
+### Running Unit Tests
 ```bash
-# Run unit tests
 python3 -m unittest discover -s tests -p "test_*.py"
 ```
 
-## Contributing
-
-We welcome contributions! Please see [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
-
-### Development Setup
-1. Fork the repository
-2. Clone your fork
-3. Create a feature branch
-4. Make your changes
-5. Run tests
-6. Submit a pull request
-
-## Support
-
-- 📖 [FAQ](https://tunnelsats.com/faq)
-- 💬 [Telegram](https://tunnelsats.com/join-telegram)
-- 🐛 [GitHub Issues](https://github.com/Tunnelsats/tunnelsats-startos/issues)
-
-## License
-
-MIT License - see [LICENSE](LICENSE) for details.
-
 ---
 
-Made with ⚡ by the [TunnelSats](https://tunnelsats.com) team
+## 💬 Support & Links
+- **Official Website**: [tunnelsats.com](https://tunnelsats.com)
+- **Help & FAQ**: [tunnelsats.com/faq](https://tunnelsats.com/faq)
+- **Telegram Group**: [TunnelSats Community](https://tunnelsats.com/join-telegram)

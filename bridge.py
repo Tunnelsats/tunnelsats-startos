@@ -380,6 +380,8 @@ class DashboardHTTPRequestHandler(BaseHTTPRequestHandler):
                 self.send_header("Content-Type", "image/svg+xml")
             elif safe_path.endswith(".png"):
                 self.send_header("Content-Type", "image/png")
+            elif safe_path.endswith(".ico"):
+                self.send_header("Content-Type", "image/x-icon")
             else:
                 self.send_header("Content-Type", "application/octet-stream")
             self.end_headers()
@@ -843,19 +845,32 @@ def main():
             
             # StartOS calls this to populate the UI
             if os.path.exists(APP_CONFIG_PATH):
-                with open(APP_CONFIG_PATH, 'r') as f:
-                    config_data = json.load(f)
+                try:
+                    with open(APP_CONFIG_PATH, 'r') as f:
+                        config_data = json.load(f)
+                except Exception:
+                    config_data = None
             else:
+                config_data = None
+
+            if not isinstance(config_data, dict):
                 config_data = {
                     "enabled": False,
                     "target-node": "lnd",
                     "tunnelsats-conf": ""
                 }
                 
+            target_node = config_data.get("target-node", "lnd")
+            depends_on = {}
+            if target_node == "lnd":
+                depends_on["lnd"] = []
+            elif target_node in ("cln", "c-lightning"):
+                depends_on["c-lightning"] = []
+
             print(json.dumps({
                 "config": config_data,
                 "spec": spec,
-                "depends-on": {}
+                "depends-on": depends_on
             }))
                 
         elif subcommand == "set":
@@ -871,6 +886,9 @@ def main():
                     config_data = raw_input
                     depends_on = {}
                 
+                if not isinstance(config_data, dict):
+                    config_data = {}
+
                 enabled = config_data.get("enabled", False)
                 wg_conf = config_data.get("tunnelsats-conf") or ""
                 
@@ -901,10 +919,17 @@ def main():
                 
 
                 
+                target_node = config_data.get("target-node", "lnd")
+                depends_on = {}
+                if target_node == "lnd":
+                    depends_on["lnd"] = []
+                elif target_node in ("cln", "c-lightning"):
+                    depends_on["c-lightning"] = []
+
                 # StartOS always expects the wrapped format with top-level depends-on
                 print(json.dumps({
                     "config": config_data,
-                    "depends-on": {}
+                    "depends-on": depends_on
                 }))
                     
             except Exception as e:
