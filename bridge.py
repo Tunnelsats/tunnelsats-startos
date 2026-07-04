@@ -29,6 +29,30 @@ def parse_config_comments(config_content):
             meta["vpnPort"] = int(match.group(1))
     return meta
 
+def is_valid_iso_expiry(expiry_str):
+    if not expiry_str:
+        return False
+    try:
+        # ISO format like "2026-10-02T21:18:07.000Z"
+        datetime.fromisoformat(expiry_str.replace("Z", "+00:00"))
+        return True
+    except Exception:
+        return False
+
+def atomic_write_json(filepath, data):
+    tmp_path = filepath + ".tmp"
+    try:
+        with open(tmp_path, 'w') as f:
+            json.dump(data, f, indent=2)
+        os.replace(tmp_path, filepath)
+    except Exception as e:
+        if os.path.exists(tmp_path):
+            try:
+                os.remove(tmp_path)
+            except Exception:
+                pass
+        raise e
+
 def lazy_sync(wg_pubkey):
     if not wg_pubkey or wg_pubkey == "Unknown" or wg_pubkey == "Not available":
         return
@@ -48,30 +72,34 @@ def lazy_sync(wg_pubkey):
     )
     
     meta = {}
+    loaded_existing = False
     try:
         # Load existing metadata if it exists
         if os.path.exists(META_FILE_PATH):
             try:
                 with open(META_FILE_PATH, 'r') as f:
                     meta = json.load(f)
+                    loaded_existing = True
             except Exception:
                 pass
 
         response_data = None
+        api_success = False
         for attempt in range(5):
             try:
                 with urllib.request.urlopen(req, timeout=10) as response:
                     if response.status == 200:
                         response_data = json.loads(response.read().decode("utf-8"))
+                        api_success = True
                         break
             except Exception as e:
                 if attempt == 4:
                     raise e
                 time.sleep(5)
 
-        if response_data and isinstance(response_data, dict):
+        if api_success and response_data and isinstance(response_data, dict):
             expiry = response_data.get("expiry")
-            if expiry:
+            if expiry and is_valid_iso_expiry(expiry):
                 meta["expiresAt"] = expiry
             
             server_domain = response_data.get("server_domain")
@@ -88,14 +116,15 @@ def lazy_sync(wg_pubkey):
                 with open(CONFIG_PATH, 'r') as f:
                     config_content = f.read()
                 parsed = parse_config_comments(config_content)
-                if parsed.get("expiresAt"):
-                    meta["expiresAt"] = parsed["expiresAt"]
+                expiry = parsed.get("expiresAt")
+                if expiry and is_valid_iso_expiry(expiry):
+                    meta["expiresAt"] = expiry
             except Exception:
                 pass
 
-        # Write metadata back
-        with open(META_FILE_PATH, 'w') as f:
-            json.dump(meta, f, indent=2)
+        # Write metadata back atomically if we successfully loaded/updated something
+        if meta or not loaded_existing:
+            atomic_write_json(META_FILE_PATH, meta)
             
     except Exception as e:
         print(f"Error during lazy subscription sync: {e}", file=sys.stderr)
@@ -106,10 +135,10 @@ def lazy_sync(wg_pubkey):
                 with open(CONFIG_PATH, 'r') as f:
                     config_content = f.read()
                 parsed = parse_config_comments(config_content)
-                if parsed.get("expiresAt"):
-                    meta["expiresAt"] = parsed["expiresAt"]
-                    with open(META_FILE_PATH, 'w') as f:
-                        json.dump(meta, f, indent=2)
+                expiry = parsed.get("expiresAt")
+                if expiry and is_valid_iso_expiry(expiry):
+                    meta["expiresAt"] = expiry
+                    atomic_write_json(META_FILE_PATH, meta)
             except Exception:
                 pass
 
@@ -159,7 +188,7 @@ def subscription_sync_loop():
             if os.path.exists(CONFIG_PATH):
                 with open(CONFIG_PATH, 'r') as f:
                     config_content = f.read()
-                private_key_match = re.search(r'PrivateKey\s*=\s*(.+)', config_content, re.IGNORECASE)
+                private_key_match = re.search(r'^\s*(?!#|;)\s*PrivateKey\s*=\s*(.+)', config_content, re.IGNORECASE | re.MULTILINE)
                 if private_key_match:
                     try:
                         proc = subprocess.run(["wg", "pubkey"], input=private_key_match.group(1).strip().encode(), capture_output=True)

@@ -144,9 +144,10 @@ class TestBridgeLifecycle(unittest.TestCase):
             
         mock_vpn_up.assert_not_called()
 
+    @patch('os.replace')
     @patch('urllib.request.urlopen')
     @patch('builtins.open', new_callable=unittest.mock.mock_open)
-    def test_lazy_sync_success(self, mock_open, mock_urlopen):
+    def test_lazy_sync_success(self, mock_open, mock_urlopen, mock_replace):
         mock_response = MagicMock()
         mock_response.status = 200
         mock_response.read.return_value = b'{"expiry": "2026-12-31T23:59:59Z"}'
@@ -156,7 +157,7 @@ class TestBridgeLifecycle(unittest.TestCase):
         
         bridge.lazy_sync("mock_pubkey_123")
         
-        mock_open.assert_called_with(bridge.META_FILE_PATH, 'w')
+        mock_open.assert_called_with(bridge.META_FILE_PATH + ".tmp", 'w')
         handle = mock_open()
         written_data = "".join([call.args[0] for call in handle.write.call_args_list])
         import json
