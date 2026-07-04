@@ -215,9 +215,14 @@ class DashboardHTTPRequestHandler(BaseHTTPRequestHandler):
     def do_GET(self):
         path_only = self.path.partition('?')[0].partition('#')[0]
         if path_only == "/api/status":
-            # Prevent unauthorized container-to-container scraping from within the same Podman network
-            host_header = self.headers.get("Host", "")
-            if "tunnelsats.embassy" in host_header.lower():
+            # Prevent unauthorized container-to-container scraping from within the same network
+            client_ip = self.client_address[0]
+            is_local = client_ip in ("127.0.0.1", "::1", "localhost")
+            host_header = self.headers.get("Host", "").lower()
+            allowed_suffixes = (".local", ".lan", ".onion", "localhost", "127.0.0.1", "[::1]")
+            is_allowed_host = any(host_header.endswith(suffix) or f"{suffix}:" in host_header for suffix in allowed_suffixes)
+            
+            if not is_local and not is_allowed_host:
                 self.send_error(403, "Access denied")
                 return
 
