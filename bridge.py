@@ -468,6 +468,12 @@ def vpn_down(config_path):
             wireproxy_process.kill()
         wireproxy_process = None
         print("wireproxy stopped.")
+    
+    # Fallback to pkill to clean up any orphaned wireproxy processes
+    try:
+        subprocess.run(["pkill", "-f", "wireproxy"])
+    except Exception:
+        pass
 
 def is_wireproxy_running():
     try:
@@ -628,8 +634,11 @@ def main():
 
             if not is_enabled():
                 print("TunnelSats is disabled. Staying idle...", file=sys.stderr)
-                while True:
+                while not is_enabled():
                     time.sleep(1)
+                print("TunnelSats has been enabled. Reloading service...", file=sys.stderr)
+                sys.exit(0)
+
             if not os.path.exists(CONFIG_PATH):
                 print(f"WireGuard config not found at {CONFIG_PATH}. Waiting for user setup...", file=sys.stderr)
                 while not os.path.exists(CONFIG_PATH):
@@ -645,6 +654,14 @@ def main():
             
             # Stay alive and monitor the wireproxy process
             while True:
+                if not is_enabled():
+                    print("TunnelSats has been disabled. Stopping VPN and entering idle state...", file=sys.stderr)
+                    vpn_down(CONFIG_PATH)
+                    while not is_enabled():
+                        time.sleep(1)
+                    print("TunnelSats has been re-enabled. Reloading service...", file=sys.stderr)
+                    sys.exit(0)
+
                 if wireproxy_process and wireproxy_process.poll() is not None:
                     print("wireproxy process exited unexpectedly.", file=sys.stderr)
                     sys.exit(1)
@@ -797,12 +814,7 @@ def main():
                     with open(CONFIG_PATH, 'w') as f:
                         f.write(wg_conf)
                 
-                # 3. If disabled, terminate any running wireproxy process to force container reload
-                if not enabled:
-                    try:
-                        subprocess.run(["pkill", "-f", "wireproxy"])
-                    except Exception:
-                        pass
+
                 
                 # StartOS always expects the wrapped format with top-level depends-on
                 print(json.dumps({
