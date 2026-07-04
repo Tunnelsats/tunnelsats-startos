@@ -75,7 +75,7 @@ class TestHTTPHandler(unittest.TestCase):
         bridge.DashboardHTTPRequestHandler.do_GET(handler_untrusted)
         handler_untrusted.send_error.assert_called_with(403, "Access denied")
         
-        # Test trusted embassy proxy IP: returns 200
+        # Test trusted embassy proxy IP (with standard .local Host): returns 200
         wfile_trusted = BytesIO()
         handler_trusted = bridge.DashboardHTTPRequestHandler.__new__(bridge.DashboardHTTPRequestHandler)
         handler_trusted.client_address = ("172.18.0.1", 12345)
@@ -94,6 +94,45 @@ class TestHTTPHandler(unittest.TestCase):
         bridge.DashboardHTTPRequestHandler.do_GET(handler_trusted)
         handler_trusted.send_error.assert_not_called()
         handler_trusted.send_response.assert_called_with(200)
+
+        # Test trusted embassy proxy IP (with RFC 1918 private IP Host): returns 200
+        wfile_ip = BytesIO()
+        handler_ip = bridge.DashboardHTTPRequestHandler.__new__(bridge.DashboardHTTPRequestHandler)
+        handler_ip.client_address = ("172.18.0.1", 12345)
+        handler_ip.path = "/api/status"
+        handler_ip.headers = DummyHeaders({
+            "Host": "192.168.1.150:443",
+            "X-Forwarded-For": "1.2.3.4",
+            "X-Forwarded-Host": "192.168.1.150"
+        })
+        handler_ip.wfile = wfile_ip
+        handler_ip.send_response = MagicMock()
+        handler_ip.send_header = MagicMock()
+        handler_ip.end_headers = MagicMock()
+        handler_ip.send_error = MagicMock()
+        
+        bridge.DashboardHTTPRequestHandler.do_GET(handler_ip)
+        handler_ip.send_error.assert_not_called()
+        handler_ip.send_response.assert_called_with(200)
+
+        # Test trusted embassy proxy IP (with invalid public IP Host): returns 403
+        wfile_pub_ip = BytesIO()
+        handler_pub_ip = bridge.DashboardHTTPRequestHandler.__new__(bridge.DashboardHTTPRequestHandler)
+        handler_pub_ip.client_address = ("172.18.0.1", 12345)
+        handler_pub_ip.path = "/api/status"
+        handler_pub_ip.headers = DummyHeaders({
+            "Host": "8.8.8.8",
+            "X-Forwarded-For": "1.2.3.4",
+            "X-Forwarded-Host": "8.8.8.8"
+        })
+        handler_pub_ip.wfile = wfile_pub_ip
+        handler_pub_ip.send_response = MagicMock()
+        handler_pub_ip.send_header = MagicMock()
+        handler_pub_ip.end_headers = MagicMock()
+        handler_pub_ip.send_error = MagicMock()
+        
+        bridge.DashboardHTTPRequestHandler.do_GET(handler_pub_ip)
+        handler_pub_ip.send_error.assert_called_with(403, "Access denied")
 
 if __name__ == '__main__':
     unittest.main()

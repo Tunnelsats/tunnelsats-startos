@@ -54,37 +54,43 @@ function updateUI() {
     
     if (statusData.expires_at && statusData.expires_at !== 'Unknown') {
         const expiryDate = new Date(statusData.expires_at);
-        expiryRaw.textContent = expiryDate.toLocaleString();
-        
-        // Start countdown
-        countdownInterval = setInterval(() => {
-            const now = new Date();
-            const timeDiff = expiryDate - now;
+        if (!isNaN(expiryDate.getTime())) {
+            expiryRaw.textContent = expiryDate.toLocaleString();
             
-            if (timeDiff <= 0) {
-                timerEl.textContent = "Expired";
-                timerEl.style.color = '#ff7b72';
-                progressEl.style.width = '0%';
-                clearInterval(countdownInterval);
-            } else {
-                timerEl.style.color = '';
-                const days = Math.floor(timeDiff / (1000 * 60 * 60 * 24));
-                const hours = Math.floor((timeDiff % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60));
-                const minutes = Math.floor((timeDiff % (1000 * 60 * 60)) / (1000 * 60));
-                const seconds = Math.floor((timeDiff % (1000 * 60)) / 1000);
+            // Start countdown
+            countdownInterval = setInterval(() => {
+                const now = new Date();
+                const timeDiff = expiryDate - now;
                 
-                if (days > 0) {
-                    timerEl.textContent = `${days}d ${hours}h ${minutes}m`;
+                if (timeDiff <= 0) {
+                    timerEl.textContent = "Expired";
+                    timerEl.style.color = '#ff7b72';
+                    progressEl.style.width = '0%';
+                    clearInterval(countdownInterval);
                 } else {
-                    timerEl.textContent = `${hours}h ${minutes}m ${seconds}s`;
+                    timerEl.style.color = '';
+                    const days = Math.floor(timeDiff / (1000 * 60 * 60 * 24));
+                    const hours = Math.floor((timeDiff % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60));
+                    const minutes = Math.floor((timeDiff % (1000 * 60 * 60)) / (1000 * 60));
+                    const seconds = Math.floor((timeDiff % (1000 * 60)) / 1000);
+                    
+                    if (days > 0) {
+                        timerEl.textContent = `${days}d ${hours}h ${minutes}m`;
+                    } else {
+                        timerEl.textContent = `${hours}h ${minutes}m ${seconds}s`;
+                    }
+                    
+                    // Progress Bar (assume 30 days max subscription)
+                    const maxTerm = 30 * 24 * 60 * 60 * 1000;
+                    const percentage = Math.min(100, Math.max(0, (timeDiff / maxTerm) * 100));
+                    progressEl.style.width = `${percentage}%`;
                 }
-                
-                // Progress Bar (assume 30 days max subscription)
-                const maxTerm = 30 * 24 * 60 * 60 * 1000;
-                const percentage = Math.min(100, Math.max(0, (timeDiff / maxTerm) * 100));
-                progressEl.style.width = `${percentage}%`;
-            }
-        }, 1000);
+            }, 1000);
+        } else {
+            expiryRaw.textContent = 'Invalid Expiry Date';
+            timerEl.textContent = 'No Active Subscription';
+            progressEl.style.width = '0%';
+        }
     } else {
         expiryRaw.textContent = 'Unconfigured / Inactive';
         timerEl.textContent = 'No Active Subscription';
