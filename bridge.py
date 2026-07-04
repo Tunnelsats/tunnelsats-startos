@@ -858,7 +858,7 @@ def main():
             depends_on = {}
             if target_node == "lnd":
                 depends_on["lnd"] = []
-            elif target_node == "cln":
+            elif target_node in ("cln", "c-lightning"):
                 depends_on["c-lightning"] = []
 
             print(json.dumps({
@@ -914,7 +914,7 @@ def main():
                 depends_on = {}
                 if target_node == "lnd":
                     depends_on["lnd"] = []
-                elif target_node == "cln":
+                elif target_node in ("cln", "c-lightning"):
                     depends_on["c-lightning"] = []
 
                 # StartOS always expects the wrapped format with top-level depends-on

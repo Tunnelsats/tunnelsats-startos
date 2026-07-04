@@ -90,5 +90,46 @@ class TestBridgeConfigCLI(unittest.TestCase):
         self.assertEqual(output["depends-on"], {"c-lightning": []})
         mock_atomic_write.assert_called_once()
 
+    @patch('os.path.exists')
+    @patch('builtins.open', new_callable=mock_open, read_data='{"enabled": true, "target-node": "c-lightning", "tunnelsats-conf": "Interface..."}')
+    @patch('sys.stdout', new_callable=MagicMock)
+    @patch('sys.argv', ['bridge.py', 'config', 'get'])
+    def test_config_get_c_lightning(self, mock_stdout, mock_file_open, mock_exists):
+        mock_exists.return_value = True
+        
+        bridge.main()
+        
+        args, kwargs = mock_stdout.write.call_args_list[0]
+        output = json.loads(args[0])
+        
+        self.assertEqual(output["config"]["target-node"], "c-lightning")
+        self.assertEqual(output["depends-on"], {"c-lightning": []})
+
+    @patch('sys.stdin')
+    @patch('bridge.atomic_write_json')
+    @patch('bridge.validate_config')
+    @patch('builtins.open', new_callable=mock_open)
+    @patch('sys.stdout', new_callable=MagicMock)
+    @patch('sys.argv', ['bridge.py', 'config', 'set'])
+    def test_config_set_c_lightning(self, mock_stdout, mock_file_open, mock_validate, mock_atomic_write, mock_stdin):
+        # Mock stdin to supply input JSON for c-lightning alias
+        stdin_payload = {
+            "config": {
+                "enabled": True,
+                "target-node": "c-lightning",
+                "tunnelsats-conf": "[Interface]\nPrivateKey = hidden_key\nAddress = 10.x.x.x/32\n# VPNPort: 54321\n[Peer]\nEndpoint = 1.1.1.1:51820"
+            }
+        }
+        mock_stdin.read.return_value = json.dumps(stdin_payload)
+        
+        bridge.main()
+        
+        args, kwargs = mock_stdout.write.call_args_list[0]
+        output = json.loads(args[0])
+        
+        self.assertEqual(output["config"]["target-node"], "c-lightning")
+        self.assertEqual(output["depends-on"], {"c-lightning": []})
+        mock_atomic_write.assert_called_once()
+
 if __name__ == '__main__':
     unittest.main()
