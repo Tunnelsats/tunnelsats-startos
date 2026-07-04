@@ -1,5 +1,6 @@
 let statusData = {};
 let countdownInterval = null;
+let targetExpiry = null;
 
 async function fetchStatus() {
     try {
@@ -46,55 +47,62 @@ function updateUI() {
     portElements.forEach(el => el.textContent = statusData.vpn_port || '<Forwarding Port>');
 
     // 4. Expiry / Countdown
-    if (countdownInterval) clearInterval(countdownInterval);
-    
     const expiryRaw = document.getElementById('expiry-date-raw');
     const timerEl = document.getElementById('countdown-timer');
     const progressEl = document.getElementById('subscription-progress');
     
     if (statusData.expires_at && statusData.expires_at !== 'Unknown') {
-        const expiryDate = new Date(statusData.expires_at);
-        if (!isNaN(expiryDate.getTime())) {
-            expiryRaw.textContent = expiryDate.toLocaleString();
-            
-            // Start countdown
-            countdownInterval = setInterval(() => {
-                const now = new Date();
-                const timeDiff = expiryDate - now;
-                
-                if (timeDiff <= 0) {
-                    timerEl.textContent = "Expired";
-                    timerEl.style.color = '#ff7b72';
-                    progressEl.style.width = '0%';
-                    clearInterval(countdownInterval);
-                } else {
-                    timerEl.style.color = '';
-                    const days = Math.floor(timeDiff / (1000 * 60 * 60 * 24));
-                    const hours = Math.floor((timeDiff % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60));
-                    const minutes = Math.floor((timeDiff % (1000 * 60 * 60)) / (1000 * 60));
-                    const seconds = Math.floor((timeDiff % (1000 * 60)) / 1000);
-                    
-                    if (days > 0) {
-                        timerEl.textContent = `${days}d ${hours}h ${minutes}m`;
-                    } else {
-                        timerEl.textContent = `${hours}h ${minutes}m ${seconds}s`;
-                    }
-                    
-                    // Progress Bar (assume 30 days max subscription)
-                    const maxTerm = 30 * 24 * 60 * 60 * 1000;
-                    const percentage = Math.min(100, Math.max(0, (timeDiff / maxTerm) * 100));
-                    progressEl.style.width = `${percentage}%`;
-                }
-            }, 1000);
+        const parsedDate = new Date(statusData.expires_at);
+        if (!isNaN(parsedDate.getTime())) {
+            expiryRaw.textContent = parsedDate.toLocaleString();
+            targetExpiry = parsedDate;
         } else {
+            targetExpiry = null;
             expiryRaw.textContent = 'Invalid Expiry Date';
             timerEl.textContent = 'No Active Subscription';
             progressEl.style.width = '0%';
         }
     } else {
+        targetExpiry = null;
         expiryRaw.textContent = 'Unconfigured / Inactive';
         timerEl.textContent = 'No Active Subscription';
         progressEl.style.width = '0%';
+    }
+
+    if (!countdownInterval) {
+        countdownInterval = setInterval(() => {
+            if (!targetExpiry) return;
+            
+            const now = new Date();
+            const timeDiff = targetExpiry - now;
+            
+            const tEl = document.getElementById('countdown-timer');
+            const pEl = document.getElementById('subscription-progress');
+            if (!tEl || !pEl) return;
+            
+            if (timeDiff <= 0) {
+                tEl.textContent = "Expired";
+                tEl.style.color = '#ff7b72';
+                pEl.style.width = '0%';
+            } else {
+                tEl.style.color = '';
+                const days = Math.floor(timeDiff / (1000 * 60 * 60 * 24));
+                const hours = Math.floor((timeDiff % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60));
+                const minutes = Math.floor((timeDiff % (1000 * 60 * 60)) / (1000 * 60));
+                const seconds = Math.floor((timeDiff % (1000 * 60)) / 1000);
+                
+                if (days > 0) {
+                    tEl.textContent = `${days}d ${hours}h ${minutes}m`;
+                } else {
+                    tEl.textContent = `${hours}h ${minutes}m ${seconds}s`;
+                }
+                
+                // Progress Bar (assume 30 days max subscription)
+                const maxTerm = 30 * 24 * 60 * 60 * 1000;
+                const percentage = Math.min(100, Math.max(0, (timeDiff / maxTerm) * 100));
+                pEl.style.width = `${percentage}%`;
+            }
+        }, 1000);
     }
 }
 

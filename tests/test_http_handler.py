@@ -56,6 +56,27 @@ class TestHTTPHandler(unittest.TestCase):
         handler.send_error.assert_not_called()
         handler.send_response.assert_called_with(200)
         
+        # Test local address with port and IPv6 formats
+        for host in ["localhost:8080", "[::1]", "[::1]:8080", "127.0.0.1:8080"]:
+            req_host = MagicMock()
+            req_host.client_address = ("127.0.0.1", 12345)
+            req_host.path = "/api/status"
+            req_host.headers = DummyHeaders({"Host": host})
+            wfile_host = BytesIO()
+            handler_host = bridge.DashboardHTTPRequestHandler.__new__(bridge.DashboardHTTPRequestHandler)
+            handler_host.client_address = req_host.client_address
+            handler_host.path = req_host.path
+            handler_host.headers = req_host.headers
+            handler_host.wfile = wfile_host
+            handler_host.send_response = MagicMock()
+            handler_host.send_header = MagicMock()
+            handler_host.end_headers = MagicMock()
+            handler_host.send_error = MagicMock()
+            
+            bridge.DashboardHTTPRequestHandler.do_GET(handler_host)
+            handler_host.send_error.assert_not_called()
+            handler_host.send_response.assert_called_with(200)
+        
         # Test untrusted subnet peer container: returns 403
         wfile_untrusted = BytesIO()
         handler_untrusted = bridge.DashboardHTTPRequestHandler.__new__(bridge.DashboardHTTPRequestHandler)
@@ -114,6 +135,45 @@ class TestHTTPHandler(unittest.TestCase):
         bridge.DashboardHTTPRequestHandler.do_GET(handler_ip)
         handler_ip.send_error.assert_not_called()
         handler_ip.send_response.assert_called_with(200)
+
+        # Test trusted embassy proxy IP (with RFC 4193 private IPv6 Host): returns 200
+        wfile_ipv6_private = BytesIO()
+        handler_ipv6_private = bridge.DashboardHTTPRequestHandler.__new__(bridge.DashboardHTTPRequestHandler)
+        handler_ipv6_private.client_address = ("172.18.0.1", 12345)
+        handler_ipv6_private.path = "/api/status"
+        handler_ipv6_private.headers = DummyHeaders({
+            "Host": "[fd00::1]:8443",
+            "X-Forwarded-For": "1.2.3.4",
+            "X-Forwarded-Host": "fd00::1"
+        })
+        handler_ipv6_private.wfile = wfile_ipv6_private
+        handler_ipv6_private.send_response = MagicMock()
+        handler_ipv6_private.send_header = MagicMock()
+        handler_ipv6_private.end_headers = MagicMock()
+        handler_ipv6_private.send_error = MagicMock()
+        
+        bridge.DashboardHTTPRequestHandler.do_GET(handler_ipv6_private)
+        handler_ipv6_private.send_error.assert_not_called()
+        handler_ipv6_private.send_response.assert_called_with(200)
+
+        # Test trusted embassy proxy IP (with invalid public IPv6 Host): returns 403
+        wfile_ipv6_public = BytesIO()
+        handler_ipv6_public = bridge.DashboardHTTPRequestHandler.__new__(bridge.DashboardHTTPRequestHandler)
+        handler_ipv6_public.client_address = ("172.18.0.1", 12345)
+        handler_ipv6_public.path = "/api/status"
+        handler_ipv6_public.headers = DummyHeaders({
+            "Host": "[2001:4860:4860::8888]",
+            "X-Forwarded-For": "1.2.3.4",
+            "X-Forwarded-Host": "2001:4860:4860::8888"
+        })
+        handler_ipv6_public.wfile = wfile_ipv6_public
+        handler_ipv6_public.send_response = MagicMock()
+        handler_ipv6_public.send_header = MagicMock()
+        handler_ipv6_public.end_headers = MagicMock()
+        handler_ipv6_public.send_error = MagicMock()
+        
+        bridge.DashboardHTTPRequestHandler.do_GET(handler_ipv6_public)
+        handler_ipv6_public.send_error.assert_called_with(403, "Access denied")
 
         # Test trusted embassy proxy IP (with invalid public IP Host): returns 403
         wfile_pub_ip = BytesIO()

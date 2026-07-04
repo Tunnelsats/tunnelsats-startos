@@ -81,7 +81,8 @@ def get_wg_pubkey():
             private_key_match = re.search(r'^\s*(?!#|;)\s*PrivateKey\s*=\s*(.+)', config_content, re.IGNORECASE | re.MULTILINE)
             if private_key_match:
                 proc = subprocess.run(["wg", "pubkey"], input=private_key_match.group(1).strip().encode(), capture_output=True)
-                return proc.stdout.decode().strip()
+                if proc.returncode == 0:
+                    return proc.stdout.decode().strip()
         except Exception:
             pass
     return "Unknown"
@@ -287,17 +288,23 @@ class DashboardHTTPRequestHandler(BaseHTTPRequestHandler):
                 return
 
             host_header = self.headers.get("Host", "").lower()
+            if host_header.startswith('['):
+                host_name = host_header.partition(']')[0] + ']'
+            else:
+                host_name = host_header.partition(':')[0]
+
             if is_local:
-                allowed_suffixes = ("localhost", "127.0.0.1", "[::1]")
-                is_allowed_host = any(host_header.endswith(suffix) or f"{suffix}:" in host_header for suffix in allowed_suffixes)
+                is_allowed_host = host_name in ("localhost", "127.0.0.1", "[::1]")
             else:
                 allowed_suffixes = (".local", ".lan", ".onion")
-                is_allowed_host = any(host_header.endswith(suffix) or f"{suffix}:" in host_header for suffix in allowed_suffixes)
+                is_allowed_host = any(host_name.endswith(suffix) for suffix in allowed_suffixes)
                 if not is_allowed_host:
-                    host_name = host_header.partition(':')[0]
+                    ip_str = host_name
+                    if ip_str.startswith('[') and ip_str.endswith(']'):
+                        ip_str = ip_str[1:-1]
                     import ipaddress
                     try:
-                        is_allowed_host = ipaddress.ip_address(host_name).is_private
+                        is_allowed_host = ipaddress.ip_address(ip_str).is_private
                     except ValueError:
                         pass
             

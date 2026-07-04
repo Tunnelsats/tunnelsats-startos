@@ -119,7 +119,7 @@ class TestBridgeLifecycle(unittest.TestCase):
         mock_get_ip.return_value = "10.9.9.45"
         
         # Mock `wg pubkey`
-        mock_run.return_value = MagicMock(stdout=b'public_key_abc123\n')
+        mock_run.return_value = MagicMock(stdout=b'public_key_abc123\n', returncode=0)
         
         bridge.get_properties()
         
