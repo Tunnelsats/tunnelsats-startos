@@ -848,6 +848,9 @@ def main():
                 with open(APP_CONFIG_PATH, 'r') as f:
                     config_data = json.load(f)
             else:
+                config_data = None
+
+            if not isinstance(config_data, dict):
                 config_data = {
                     "enabled": False,
                     "target-node": "lnd",
@@ -880,6 +883,9 @@ def main():
                     config_data = raw_input
                     depends_on = {}
                 
+                if not isinstance(config_data, dict):
+                    config_data = {}
+
                 enabled = config_data.get("enabled", False)
                 wg_conf = config_data.get("tunnelsats-conf") or ""
                 

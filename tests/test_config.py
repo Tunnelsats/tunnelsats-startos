@@ -131,5 +131,42 @@ class TestBridgeConfigCLI(unittest.TestCase):
         self.assertEqual(output["depends-on"], {"c-lightning": []})
         mock_atomic_write.assert_called_once()
 
+    @patch('os.path.exists')
+    @patch('builtins.open', new_callable=mock_open, read_data='"not-a-dictionary-string"')
+    @patch('sys.stdout', new_callable=MagicMock)
+    @patch('sys.argv', ['bridge.py', 'config', 'get'])
+    def test_config_get_invalid_type(self, mock_stdout, mock_file_open, mock_exists):
+        mock_exists.return_value = True
+        
+        bridge.main()
+        
+        args, kwargs = mock_stdout.write.call_args_list[0]
+        output = json.loads(args[0])
+        
+        # Should fallback to defaults
+        self.assertEqual(output["config"]["target-node"], "lnd")
+        self.assertEqual(output["config"]["enabled"], False)
+        self.assertEqual(output["depends-on"], {"lnd": []})
+
+    @patch('sys.stdin')
+    @patch('bridge.atomic_write_json')
+    @patch('bridge.validate_config')
+    @patch('builtins.open', new_callable=mock_open)
+    @patch('sys.stdout', new_callable=MagicMock)
+    @patch('sys.argv', ['bridge.py', 'config', 'set'])
+    def test_config_set_invalid_type(self, mock_stdout, mock_file_open, mock_validate, mock_atomic_write, mock_stdin):
+        # Mock stdin to supply non-dictionary JSON
+        mock_stdin.read.return_value = '"not-a-dictionary-string"'
+        
+        bridge.main()
+        
+        args, kwargs = mock_stdout.write.call_args_list[0]
+        output = json.loads(args[0])
+        
+        # Should fallback config to empty dict, and depends-on to empty dict as well
+        self.assertEqual(output["config"], {})
+        self.assertEqual(output["depends-on"], {"lnd": []})
+        mock_atomic_write.assert_called_once()
+
 if __name__ == '__main__':
     unittest.main()

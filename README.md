@@ -95,7 +95,7 @@ tor.streamisolation=false
 Add the following options to your Core Lightning configuration (`config`):
 ```ini
 bind-addr=0.0.0.0:9735
-announceto=<your-vpn-server>:<your-vpn-port>
+announce-addr=<your-vpn-server>:<your-vpn-port>
 ```
 
 ---
