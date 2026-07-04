@@ -232,9 +232,17 @@ class DashboardHTTPRequestHandler(BaseHTTPRequestHandler):
             # Prevent unauthorized container-to-container scraping from within the same network
             client_ip = self.client_address[0]
             is_local = client_ip in ("127.0.0.1", "::1", "localhost")
-            has_proxy_headers = "x-forwarded-for" in self.headers or "x-forwarded-host" in self.headers
             
-            # Non-local requests must go through the StartOS HTTP reverse proxy
+            # Identify the unspoofable network gateway IP (the reverse proxy host gateway)
+            gateway_ip = get_default_gateway()
+            is_trusted_proxy = (gateway_ip and client_ip == gateway_ip)
+            
+            # Enforce that remote connections must only originate from the host gateway
+            if not is_local and not is_trusted_proxy:
+                self.send_error(403, "Access denied")
+                return
+
+            has_proxy_headers = "x-forwarded-for" in self.headers or "x-forwarded-host" in self.headers
             if not is_local and not has_proxy_headers:
                 self.send_error(403, "Access denied")
                 return
