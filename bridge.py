@@ -215,6 +215,12 @@ class DashboardHTTPRequestHandler(BaseHTTPRequestHandler):
     def do_GET(self):
         path_only = self.path.partition('?')[0].partition('#')[0]
         if path_only == "/api/status":
+            # Prevent unauthorized container-to-container scraping from within the same Podman network
+            host_header = self.headers.get("Host", "")
+            if "tunnelsats.embassy" in host_header.lower():
+                self.send_error(403, "Access denied")
+                return
+
             self.send_response(200)
             self.send_header("Content-Type", "application/json")
             self.end_headers()
@@ -320,7 +326,11 @@ def is_enabled():
         if os.path.exists(APP_CONFIG_PATH):
             with open(APP_CONFIG_PATH, 'r') as f:
                 config_data = json.load(f)
-                return config_data.get("enabled", False)
+                if "enabled" in config_data:
+                    return config_data["enabled"]
+        # Default to True if a v3 config exists (upgrade path/existing configurations)
+        if os.path.exists(CONFIG_PATH):
+            return True
     except Exception as e:
         print(f"Error checking enabled status: {e}", file=sys.stderr)
     return False
@@ -655,8 +665,24 @@ def main():
         target = sys.argv[2] if len(sys.argv) > 2 else "vpn"
         
         if not is_enabled():
-            print(json.dumps({"result": "ok"}))
-            sys.exit(0)
+            if target == "vpn":
+                if not is_wireproxy_running():
+                    print(json.dumps({"result": "ok"}))
+                    sys.exit(0)
+                else:
+                    print(json.dumps({"result": "VPN is running but should be stopped"}))
+                    sys.exit(1)
+            elif target == "proxy":
+                status = check_proxy_health()
+                if not status["proxy_ready"]:
+                    print(json.dumps({"result": "ok"}))
+                    sys.exit(0)
+                else:
+                    print(json.dumps({"result": "Proxy is active but should be stopped"}))
+                    sys.exit(1)
+            else:
+                print(json.dumps({"result": "ok"}))
+                sys.exit(0)
             
         if target == "vpn":
             status = get_status()
@@ -765,9 +791,11 @@ def main():
                 if wg_conf:
                     with open(CONFIG_PATH, 'w') as f:
                         f.write(wg_conf)
-                elif os.path.exists(CONFIG_PATH):
+                
+                # 3. If disabled, terminate any running wireproxy process to force container reload
+                if not enabled:
                     try:
-                        os.remove(CONFIG_PATH)
+                        subprocess.run(["pkill", "-f", "wireproxy"])
                     except Exception:
                         pass
                 
