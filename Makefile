@@ -1,5 +1,5 @@
 PKG_ID := tunnelsats
-PKG_VERSION := 0.2.0
+PKG_VERSION := 0.3.0
 PLATFORM ?= $(shell uname -m)
 
 # Detect architecture

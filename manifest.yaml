@@ -1,7 +1,7 @@
 id: tunnelsats
 title: "TunnelSats"
-version: 0.2.0
-release-notes: "v0.2.0: Adds web dashboard UI with subscription expiry tracking, enable/disable tunnel toggle, and automatic port-forwarding configuration."
+version: 0.3.0
+release-notes: "v0.3.0: Fixes StartOS status page configuration loop ('Needs Config') via dynamic dependency tracking; adds multiple resolution browser favicons; ports GitHub issue templates."
 license: "MIT"
 wrapper-repo: "https://github.com/Tunnelsats/tunnelsats-startos"
 upstream-repo: "https://github.com/Tunnelsats/tunnelsats"

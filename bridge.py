@@ -380,6 +380,8 @@ class DashboardHTTPRequestHandler(BaseHTTPRequestHandler):
                 self.send_header("Content-Type", "image/svg+xml")
             elif safe_path.endswith(".png"):
                 self.send_header("Content-Type", "image/png")
+            elif safe_path.endswith(".ico"):
+                self.send_header("Content-Type", "image/x-icon")
             else:
                 self.send_header("Content-Type", "application/octet-stream")
             self.end_headers()
@@ -852,10 +854,17 @@ def main():
                     "tunnelsats-conf": ""
                 }
                 
+            target_node = config_data.get("target-node", "lnd")
+            depends_on = {}
+            if target_node == "lnd":
+                depends_on["lnd"] = []
+            elif target_node == "cln":
+                depends_on["c-lightning"] = []
+
             print(json.dumps({
                 "config": config_data,
                 "spec": spec,
-                "depends-on": {}
+                "depends-on": depends_on
             }))
                 
         elif subcommand == "set":
@@ -901,10 +910,17 @@ def main():
                 
 
                 
+                target_node = config_data.get("target-node", "lnd")
+                depends_on = {}
+                if target_node == "lnd":
+                    depends_on["lnd"] = []
+                elif target_node == "cln":
+                    depends_on["c-lightning"] = []
+
                 # StartOS always expects the wrapped format with top-level depends-on
                 print(json.dumps({
                     "config": config_data,
-                    "depends-on": {}
+                    "depends-on": depends_on
                 }))
                     
             except Exception as e:
