@@ -19,6 +19,9 @@ APP_CONFIG_PATH = os.path.join(DATA_DIR, "config.json")
 META_FILE_PATH = os.path.join(DATA_DIR, "tunnelsats-meta.json")
 TUNNELSATS_API_URL = "https://tunnelsats.com/api/public/v1"
 
+_enabled_cache = None
+_enabled_cache_mtime = 0
+
 def parse_config_comments(config_content):
     meta = {}
     for line in config_content.splitlines():
@@ -99,13 +102,19 @@ def lazy_sync(wg_pubkey):
 
         response_data = None
         api_success = False
+        import urllib.error
         for attempt in range(5):
             try:
                 with urllib.request.urlopen(req, timeout=10) as response:
-                    if response.status == 200:
-                        response_data = json.loads(response.read().decode("utf-8"))
-                        api_success = True
-                        break
+                    response_data = json.loads(response.read().decode("utf-8"))
+                    api_success = True
+                    break
+            except urllib.error.HTTPError as e:
+                if 400 <= e.code < 500:
+                    raise e
+                if attempt == 4:
+                    raise e
+                time.sleep(5)
             except Exception as e:
                 if attempt == 4:
                     raise e
@@ -231,6 +240,8 @@ class DashboardHTTPRequestHandler(BaseHTTPRequestHandler):
         if path_only == "/api/status":
             # Prevent unauthorized container-to-container scraping from within the same network
             client_ip = self.client_address[0]
+            if client_ip.startswith("::ffff:"):
+                client_ip = client_ip[7:]
             is_local = client_ip in ("127.0.0.1", "::1", "localhost")
             
             # Identify the unspoofable network gateway IP (the reverse proxy host gateway)
@@ -359,12 +370,19 @@ def web_server_thread():
         print(f"Failed to start web server on port 80: {e}", file=sys.stderr)
 
 def is_enabled():
+    global _enabled_cache, _enabled_cache_mtime
     try:
         if os.path.exists(APP_CONFIG_PATH):
-            with open(APP_CONFIG_PATH, 'r') as f:
-                config_data = json.load(f)
-                if "enabled" in config_data:
-                    return config_data["enabled"]
+            try:
+                mtime = os.path.getmtime(APP_CONFIG_PATH)
+                if mtime != _enabled_cache_mtime:
+                    with open(APP_CONFIG_PATH, 'r') as f:
+                        config_data = json.load(f)
+                    _enabled_cache = config_data.get("enabled", False)
+                    _enabled_cache_mtime = mtime
+                return _enabled_cache
+            except Exception:
+                pass
         # Default to True if a v3 config exists (upgrade path/existing configurations)
         if os.path.exists(CONFIG_PATH):
             return True

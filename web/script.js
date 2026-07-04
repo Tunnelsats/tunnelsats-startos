@@ -67,6 +67,7 @@ function updateUI() {
                 progressEl.style.width = '0%';
                 clearInterval(countdownInterval);
             } else {
+                timerEl.style.color = '';
                 const days = Math.floor(timeDiff / (1000 * 60 * 60 * 24));
                 const hours = Math.floor((timeDiff % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60));
                 const minutes = Math.floor((timeDiff % (1000 * 60 * 60)) / (1000 * 60));
@@ -91,30 +92,52 @@ function updateUI() {
     }
 }
 
+function handleCopySuccess(btn, successText) {
+    const originalText = btn.textContent;
+    btn.textContent = successText;
+    btn.classList.add('copied');
+    setTimeout(() => {
+        btn.textContent = originalText;
+        btn.classList.remove('copied');
+    }, 1500);
+}
+
+function executeCopy(text, btn, successText) {
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(text).then(() => {
+            handleCopySuccess(btn, successText);
+        }).catch(() => {
+            fallbackCopy(text, btn, successText);
+        });
+    } else {
+        fallbackCopy(text, btn, successText);
+    }
+}
+
+function fallbackCopy(text, btn, successText) {
+    const textarea = document.createElement("textarea");
+    textarea.value = text;
+    textarea.style.position = "fixed";
+    textarea.style.opacity = "0";
+    document.body.appendChild(textarea);
+    textarea.select();
+    try {
+        document.execCommand("copy");
+        handleCopySuccess(btn, successText);
+    } catch (err) {
+        console.error("Fallback copy failed", err);
+    }
+    document.body.removeChild(textarea);
+}
+
 function copyText(elementId, btn) {
     const text = document.getElementById(elementId).title || document.getElementById(elementId).textContent;
-    navigator.clipboard.writeText(text).then(() => {
-        const originalText = btn.textContent;
-        btn.textContent = 'Copied!';
-        btn.classList.add('copied');
-        setTimeout(() => {
-            btn.textContent = originalText;
-            btn.classList.remove('copied');
-        }, 1500);
-    });
+    executeCopy(text, btn, "Copied!");
 }
 
 function copyCode(elementId, btn) {
     const text = document.getElementById(elementId).textContent;
-    navigator.clipboard.writeText(text).then(() => {
-        const originalText = btn.textContent;
-        btn.textContent = 'Copied Block!';
-        btn.classList.add('copied');
-        setTimeout(() => {
-            btn.textContent = originalText;
-            btn.classList.remove('copied');
-        }, 1500);
-    });
+    executeCopy(text, btn, "Copied Block!");
 }
 
 function switchTab(tabId, btn) {
