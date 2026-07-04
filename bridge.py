@@ -219,13 +219,23 @@ def subscription_sync_loop():
                     except Exception:
                         pass
             
+            sync_success = False
             if pubkey and pubkey != "Unknown":
                 lazy_sync(pubkey)
+                if os.path.exists(META_FILE_PATH):
+                    try:
+                        with open(META_FILE_PATH, 'r') as f:
+                            meta = json.load(f)
+                        if meta.get("expiresAt"):
+                            sync_success = True
+                    except Exception:
+                        pass
         except Exception as e:
             print(f"Error in subscription sync loop: {e}", file=sys.stderr)
         
         try:
-            time.sleep(86400)
+            sleep_time = 86400 if sync_success else 300
+            time.sleep(sleep_time)
         except KeyboardInterrupt:
             break
 
@@ -330,13 +340,13 @@ class DashboardHTTPRequestHandler(BaseHTTPRequestHandler):
             self.wfile.write(json.dumps(response).encode("utf-8"))
             return
 
-        web_dir = os.path.join(os.path.dirname(__file__), "web")
+        web_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "web"))
         target_path = path_only.lstrip("/")
         if not target_path or target_path == "":
             target_path = "index.html"
             
         safe_path = os.path.abspath(os.path.join(web_dir, target_path))
-        if os.path.commonpath([web_dir, safe_path]) != os.path.abspath(web_dir):
+        if os.path.commonpath([web_dir, safe_path]) != web_dir:
             self.send_error(403, "Access denied")
             return
 
@@ -860,8 +870,7 @@ def main():
                         sys.exit(1)
                 
                 # 1. Save the JSON config for future "get" calls
-                with open(APP_CONFIG_PATH, 'w') as f:
-                    json.dump(config_data, f, indent=2)
+                atomic_write_json(APP_CONFIG_PATH, config_data)
                 
                 # 2. Extract the .conf blob and write it to the WireGuard path
                 if wg_conf:
