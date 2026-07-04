@@ -57,21 +57,30 @@ def lazy_sync(wg_pubkey):
             except Exception:
                 pass
 
-        with urllib.request.urlopen(req, timeout=10) as response:
-            if response.status == 200:
-                res_data = json.loads(response.read().decode("utf-8"))
-                if isinstance(res_data, dict):
-                    expiry = res_data.get("expiry")
-                    if expiry:
-                        meta["expiresAt"] = expiry
-                    
-                    server_domain = res_data.get("server_domain")
-                    if server_domain:
-                        meta["serverDomain"] = server_domain
-                    
-                    vpn_port = res_data.get("vpn_port")
-                    if vpn_port:
-                        meta["vpnPort"] = vpn_port
+        response_data = None
+        for attempt in range(5):
+            try:
+                with urllib.request.urlopen(req, timeout=10) as response:
+                    if response.status == 200:
+                        response_data = json.loads(response.read().decode("utf-8"))
+                        break
+            except Exception as e:
+                if attempt == 4:
+                    raise e
+                time.sleep(5)
+
+        if response_data and isinstance(response_data, dict):
+            expiry = response_data.get("expiry")
+            if expiry:
+                meta["expiresAt"] = expiry
+            
+            server_domain = response_data.get("server_domain")
+            if server_domain:
+                meta["serverDomain"] = server_domain
+            
+            vpn_port = response_data.get("vpn_port")
+            if vpn_port:
+                meta["vpnPort"] = vpn_port
 
         # Fallback to comments parsing if config file exists and we don't have expiresAt
         if not meta.get("expiresAt") and os.path.exists(CONFIG_PATH):
@@ -175,7 +184,8 @@ class DashboardHTTPRequestHandler(BaseHTTPRequestHandler):
         pass
 
     def do_GET(self):
-        if self.path == "/api/status":
+        path_only = self.path.partition('?')[0].partition('#')[0]
+        if path_only == "/api/status":
             self.send_response(200)
             self.send_header("Content-Type", "application/json")
             self.end_headers()
@@ -187,7 +197,7 @@ class DashboardHTTPRequestHandler(BaseHTTPRequestHandler):
                 try:
                     with open(CONFIG_PATH, 'r') as f:
                         config_content = f.read()
-                    private_key_match = re.search(r'PrivateKey\s*=\s*(.+)', config_content, re.IGNORECASE)
+                    private_key_match = re.search(r'^\s*(?!#|;)\s*PrivateKey\s*=\s*(.+)', config_content, re.IGNORECASE | re.MULTILINE)
                     if private_key_match:
                         proc = subprocess.run(["wg", "pubkey"], input=private_key_match.group(1).strip().encode(), capture_output=True)
                         pubkey = proc.stdout.decode().strip()
@@ -212,7 +222,7 @@ class DashboardHTTPRequestHandler(BaseHTTPRequestHandler):
                     with open(CONFIG_PATH, 'r') as f:
                         config_content = f.read()
                     vpn_port = extract_vpn_port(config_content)
-                    endpoint_match = re.search(r'Endpoint\s*=\s*([^:\s]+):\d+', config_content, re.IGNORECASE)
+                    endpoint_match = re.search(r'^\s*(?!#|;)\s*Endpoint\s*=\s*([^:\s]+):\d+', config_content, re.IGNORECASE | re.MULTILINE)
                     public_ip = endpoint_match.group(1) if endpoint_match else "Unknown"
                 except Exception:
                     pass
@@ -238,12 +248,12 @@ class DashboardHTTPRequestHandler(BaseHTTPRequestHandler):
             return
 
         web_dir = os.path.join(os.path.dirname(__file__), "web")
-        target_path = self.path.lstrip("/")
+        target_path = path_only.lstrip("/")
         if not target_path or target_path == "":
             target_path = "index.html"
             
         safe_path = os.path.abspath(os.path.join(web_dir, target_path))
-        if not safe_path.startswith(os.path.abspath(web_dir)):
+        if os.path.commonpath([web_dir, safe_path]) != os.path.abspath(web_dir):
             self.send_error(403, "Access denied")
             return
 
@@ -490,10 +500,10 @@ def get_properties():
             
         vpn_port = extract_vpn_port(config_content)
         
-        endpoint_match = re.search(r'Endpoint\s*=\s*([^:\s]+):\d+', config_content, re.IGNORECASE)
+        endpoint_match = re.search(r'^\s*(?!#|;)\s*Endpoint\s*=\s*([^:\s]+):\d+', config_content, re.IGNORECASE | re.MULTILINE)
         public_ip = endpoint_match.group(1) if endpoint_match else "Unknown"
         
-        private_key_match = re.search(r'PrivateKey\s*=\s*(.+)', config_content, re.IGNORECASE)
+        private_key_match = re.search(r'^\s*(?!#|;)\s*PrivateKey\s*=\s*(.+)', config_content, re.IGNORECASE | re.MULTILINE)
         pubkey = "Unknown"
         if private_key_match:
             try:
