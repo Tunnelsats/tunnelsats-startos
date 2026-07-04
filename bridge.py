@@ -389,7 +389,8 @@ def is_enabled():
                     with open(APP_CONFIG_PATH, 'r') as f:
                         config_data = json.load(f)
                     if "enabled" in config_data:
-                        _enabled_cache = config_data["enabled"]
+                        val = config_data["enabled"]
+                        _enabled_cache = val if val is not None else False
                     else:
                         _enabled_cache = None
                     _enabled_cache_mtime = mtime
