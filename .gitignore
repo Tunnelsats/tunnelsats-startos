@@ -31,3 +31,11 @@ tmp/
 .env.local
 startOS-context.md
 deploy-sideload.sh
+
+# Python cache & temp
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+test_spec.json
+

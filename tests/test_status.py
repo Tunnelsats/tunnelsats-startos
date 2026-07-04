@@ -52,5 +52,37 @@ class TestBridgeStatus(unittest.TestCase):
         self.assertFalse(status["vpn_connected"])
         self.assertEqual(status["handshake"], "none")
 
+    @patch('bridge.is_enabled')
+    @patch('sys.stdout', new_callable=MagicMock)
+    @patch('sys.argv', ['bridge.py', 'health', 'vpn'])
+    def test_health_vpn_disabled(self, mock_stdout, mock_is_enabled):
+        mock_is_enabled.return_value = False
+        
+        with self.assertRaises(SystemExit) as cm:
+            bridge.main()
+            
+        self.assertEqual(cm.exception.code, 0)
+        
+        args, kwargs = mock_stdout.write.call_args_list[0]
+        import json
+        output = json.loads(args[0])
+        self.assertEqual(output["result"], "ok")
+
+    @patch('bridge.is_enabled')
+    @patch('sys.stdout', new_callable=MagicMock)
+    @patch('sys.argv', ['bridge.py', 'health', 'proxy'])
+    def test_health_proxy_disabled(self, mock_stdout, mock_is_enabled):
+        mock_is_enabled.return_value = False
+        
+        with self.assertRaises(SystemExit) as cm:
+            bridge.main()
+            
+        self.assertEqual(cm.exception.code, 0)
+        
+        args, kwargs = mock_stdout.write.call_args_list[0]
+        import json
+        output = json.loads(args[0])
+        self.assertEqual(output["result"], "ok")
+
 if __name__ == '__main__':
     unittest.main()
