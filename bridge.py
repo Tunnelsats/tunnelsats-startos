@@ -53,6 +53,20 @@ def atomic_write_json(filepath, data):
                 pass
         raise e
 
+def get_default_gateway():
+    try:
+        with open("/proc/net/route", "r") as f:
+            for line in f.read().splitlines()[1:]:
+                parts = line.split()
+                if len(parts) >= 3 and parts[1] == "00000000":
+                    hex_gw = parts[2]
+                    octets = [int(hex_gw[i:i+2], 16) for i in range(0, 8, 2)]
+                    octets.reverse()
+                    return ".".join(map(str, octets))
+    except Exception:
+        pass
+    return None
+
 def lazy_sync(wg_pubkey):
     if not wg_pubkey or wg_pubkey == "Unknown" or wg_pubkey == "Not available":
         return
@@ -218,15 +232,22 @@ class DashboardHTTPRequestHandler(BaseHTTPRequestHandler):
             # Prevent unauthorized container-to-container scraping from within the same network
             client_ip = self.client_address[0]
             is_local = client_ip in ("127.0.0.1", "::1", "localhost")
-            host_header = self.headers.get("Host", "").lower()
             
+            # Identify the unspoofable network gateway IP (the reverse proxy host gateway)
+            gateway_ip = get_default_gateway()
+            
+            # Enforce that remote connections must only originate from the host gateway
+            if not is_local and gateway_ip and client_ip != gateway_ip:
+                self.send_error(403, "Access denied")
+                return
+
+            host_header = self.headers.get("Host", "").lower()
             if is_local:
                 allowed_suffixes = ("localhost", "127.0.0.1", "[::1]")
             else:
                 allowed_suffixes = (".local", ".lan", ".onion")
                 
             is_allowed_host = any(host_header.endswith(suffix) or f"{suffix}:" in host_header for suffix in allowed_suffixes)
-            
             if not is_allowed_host:
                 self.send_error(403, "Access denied")
                 return
