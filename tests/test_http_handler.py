@@ -116,6 +116,24 @@ class TestHTTPHandler(unittest.TestCase):
         handler_trusted.send_error.assert_not_called()
         handler_trusted.send_response.assert_called_with(200)
 
+        # Test trusted embassy proxy IP without proxy headers (e.g. startd proxy behavior): returns 200
+        wfile_trusted_no_headers = BytesIO()
+        handler_trusted_no_headers = bridge.DashboardHTTPRequestHandler.__new__(bridge.DashboardHTTPRequestHandler)
+        handler_trusted_no_headers.client_address = ("172.18.0.1", 12345)
+        handler_trusted_no_headers.path = "/api/status"
+        handler_trusted_no_headers.headers = DummyHeaders({
+            "Host": "tunnelsats.local"
+        })
+        handler_trusted_no_headers.wfile = wfile_trusted_no_headers
+        handler_trusted_no_headers.send_response = MagicMock()
+        handler_trusted_no_headers.send_header = MagicMock()
+        handler_trusted_no_headers.end_headers = MagicMock()
+        handler_trusted_no_headers.send_error = MagicMock()
+        
+        bridge.DashboardHTTPRequestHandler.do_GET(handler_trusted_no_headers)
+        handler_trusted_no_headers.send_error.assert_not_called()
+        handler_trusted_no_headers.send_response.assert_called_with(200)
+
         # Test trusted embassy proxy IP (with RFC 1918 private IP Host): returns 200
         wfile_ip = BytesIO()
         handler_ip = bridge.DashboardHTTPRequestHandler.__new__(bridge.DashboardHTTPRequestHandler)

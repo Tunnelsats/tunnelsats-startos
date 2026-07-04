@@ -29,7 +29,7 @@ function updateUI() {
         }
     } else {
         badge.className = 'status-badge inactive';
-        badgeText.textContent = 'TUNNEL DISABLED';
+        badgeText.textContent = 'TUNNEL DISABLED (Turn on in settings)';
     }
 
     // 2. Properties
