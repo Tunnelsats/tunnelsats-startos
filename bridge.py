@@ -282,11 +282,6 @@ class DashboardHTTPRequestHandler(BaseHTTPRequestHandler):
                 self.send_error(403, "Access denied")
                 return
 
-            has_proxy_headers = "x-forwarded-for" in self.headers or "x-forwarded-host" in self.headers
-            if not is_local and not has_proxy_headers:
-                self.send_error(403, "Access denied")
-                return
-
             host_header = self.headers.get("Host", "").lower()
             if host_header.startswith('['):
                 host_name = host_header.partition(']')[0] + ']'
@@ -472,7 +467,7 @@ def generate_wireproxy_config():
 BindAddress = 0.0.0.0:1080
 
 [TCPServerTunnel]
-ListenPort = {vpn_port}
+ListenPort = {target_port}
 Target = {target_host}:{target_port}
 """
         with open(WIREPROXY_CONFIG_PATH, 'w') as f:
