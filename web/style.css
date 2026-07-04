@@ -511,17 +511,23 @@ code {
     border: none;
     padding: 0;
     background: transparent;
-    /* Full-screen overlay */
+    /* Full-screen overlay positioning */
     position: fixed;
     inset: 0;
     width: 100%;
     height: 100%;
     max-width: 100%;
     max-height: 100%;
+    z-index: 1000;
+    /* NOTE: do NOT set display: flex here — it overrides the browser's
+       native display:none for a closed <dialog>. Flex is set on [open]. */
+}
+
+/* Only apply flex-centering when the dialog is actually open */
+.faq-modal[open] {
     display: flex;
     align-items: center;
     justify-content: center;
-    z-index: 1000;
 }
 
 /* Backdrop via the native ::backdrop pseudo-element */
@@ -790,7 +796,7 @@ code {
         right: 0;
         max-width: 100%;
     }
-    .faq-modal {
+    .faq-modal[open] {
         align-items: flex-end;
     }
 }
