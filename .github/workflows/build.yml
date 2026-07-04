@@ -5,8 +5,16 @@ on:
     branches: [main, develop]
     tags:
       - 'v*'
+    paths-ignore:
+      - '**.md'
+      - 'LICENSE'
+      - '.gitignore'
   pull_request:
     branches: [main, develop]
+    paths-ignore:
+      - '**.md'
+      - 'LICENSE'
+      - '.gitignore'
 
 jobs:
   build:
@@ -35,6 +43,8 @@ jobs:
         run: |
           docker buildx build \
             --platform linux/${{ matrix.platform }} \
+            --cache-from=type=gha \
+            --cache-to=type=gha,mode=max \
             -o type=docker,dest=image-${{ matrix.platform }}.tar \
             .
       
@@ -49,13 +59,21 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Run Python unit tests
+        run: python3 -m unittest discover -s tests -p "test_*.py"
       
       - name: Install bats
         run: |
           sudo apt-get update
           sudo apt-get install -y bats
       
-      - name: Run tests
+      - name: Run bats tests
         run: bats tests/
 
   release:
