@@ -219,10 +219,15 @@ class DashboardHTTPRequestHandler(BaseHTTPRequestHandler):
             client_ip = self.client_address[0]
             is_local = client_ip in ("127.0.0.1", "::1", "localhost")
             host_header = self.headers.get("Host", "").lower()
-            allowed_suffixes = (".local", ".lan", ".onion", "localhost", "127.0.0.1", "[::1]")
+            
+            if is_local:
+                allowed_suffixes = ("localhost", "127.0.0.1", "[::1]")
+            else:
+                allowed_suffixes = (".local", ".lan", ".onion")
+                
             is_allowed_host = any(host_header.endswith(suffix) or f"{suffix}:" in host_header for suffix in allowed_suffixes)
             
-            if not is_local and not is_allowed_host:
+            if not is_allowed_host:
                 self.send_error(403, "Access denied")
                 return
 
