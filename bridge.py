@@ -849,7 +849,7 @@ def main():
                 if wg_conf:
                     with open(CONFIG_PATH, 'w') as f:
                         f.write(wg_conf)
-                elif "tunnelsats-conf" in config_data and config_data["tunnelsats-conf"] == "":
+                elif "tunnelsats-conf" in config_data and config_data["tunnelsats-conf"] in ("", None):
                     if os.path.exists(CONFIG_PATH):
                         try:
                             os.remove(CONFIG_PATH)
