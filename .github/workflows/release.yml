@@ -1,18 +1,9 @@
-name: Build StartOS Package
+name: Release StartOS Package
 
 on:
   push:
-    branches: [main, develop]
-    paths-ignore:
-      - '**.md'
-      - 'LICENSE'
-      - '.gitignore'
-  pull_request:
-    branches: [main, develop]
-    paths-ignore:
-      - '**.md'
-      - 'LICENSE'
-      - '.gitignore'
+    tags:
+      - 'v*'
 
 jobs:
   build:
@@ -39,16 +30,10 @@ jobs:
       
       - name: Build Docker Image
         run: |
-          # Determine cache-to parameters based on pull request origin to prevent write token failures on forks
-          CACHE_TO=""
-          if [ "${{ github.event_name }}" != "pull_request" ] || [ "${{ github.event.pull_request.head.repo.full_name }}" = "${{ github.repository }}" ]; then
-            CACHE_TO="--cache-to=type=gha,mode=max"
-          fi
-          
           docker buildx build \
             --platform linux/${{ matrix.platform }} \
             --cache-from=type=gha \
-            $CACHE_TO \
+            --cache-to=type=gha,mode=max \
             -o type=docker,dest=image-${{ matrix.platform }}.tar \
             .
       
@@ -79,3 +64,23 @@ jobs:
       
       - name: Run bats tests
         run: bats tests/
+
+  release:
+    needs: [build, test]
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      
+      - name: Download artifacts
+        uses: actions/download-artifact@v4
+      
+      - name: Create Release
+        uses: softprops/action-gh-release@v1
+        with:
+          files: |
+            *.s9pk
+          draft: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
