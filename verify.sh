@@ -55,20 +55,36 @@ fi
 # 2. Query API status
 log_info "Querying API status from the orchestrator..."
 if [ "$ENGINE" != "inside" ]; then
-    API_DATA=$(sudo $ENGINE exec -i $CONTAINER_NAME wget -qO- --header='Host: localhost' http://127.0.0.1/api/status 2>/dev/null | tr -d '\r' || true)
+    API_DATA=$(sudo $ENGINE exec -i $CONTAINER_NAME python3 -c "
+import urllib.request
+req = urllib.request.Request('http://127.0.0.1/api/status', headers={'Host': 'localhost'})
+try:
+    with urllib.request.urlopen(req, timeout=5) as r:
+        print(r.read().decode('utf-8'))
+except Exception:
+    pass
+" 2>/dev/null | tr -d '\r' || true)
 else
-    API_DATA=$(wget -qO- --header='Host: localhost' http://127.0.0.1/api/status 2>/dev/null | tr -d '\r' || true)
+    API_DATA=$(python3 -c "
+import urllib.request
+req = urllib.request.Request('http://127.0.0.1/api/status', headers={'Host': 'localhost'})
+try:
+    with urllib.request.urlopen(req, timeout=5) as r:
+        print(r.read().decode('utf-8'))
+except Exception:
+    pass
+" 2>/dev/null | tr -d '\r' || true)
 fi
 
 if [ -n "$API_DATA" ]; then
-    # Parse properties using Python JSON parser (guaranteed to be installed)
-    PARSED_VALUES=$(python3 -c "
+    # Parse properties using Python JSON parser (guaranteed to be installed) via stdin
+    PARSED_VALUES=$(printf '%s\n' "$API_DATA" | python3 -c "
 import json, sys
 try:
-    data = json.loads('''$API_DATA''')
-    print(f\"{data.get('enabled')}|{data.get('public_ip')}|{data.get('vpn_port')}|{data.get('pubkey')}\")
+    data = json.load(sys.stdin)
+    print('|'.join([str(data.get(k)) for k in ['enabled', 'public_ip', 'vpn_port', 'pubkey']]))
 except Exception as e:
-    print(f'ERROR|None|None|None|{str(e)}')
+    print('ERROR|None|None|None|' + str(e))
 " 2>/dev/null | tr -d '\r' || true)
     
     IFS='|' read -r ENABLED PUBLIC_IP VPN_PORT PUBKEY ERROR_MSG <<< "$PARSED_VALUES"
@@ -105,7 +121,7 @@ def check_proxy():
         request = b'\x05\x01\x00\x03' + bytes([len(domain)]) + domain + b'\x00\x50'
         s.sendall(request)
         resp2 = s.recv(10)
-        if resp2[1] != 0:
+        if len(resp2) < 2 or resp2[1] != 0:
             print('ERROR: Connection through proxy rejected')
             return
         
@@ -117,7 +133,11 @@ def check_proxy():
                 break
             http_resp += chunk
         
-        body = http_resp.split(b'\r\n\r\n')[1].decode('utf-8').strip()
+        parts = http_resp.split(b'\r\n\r\n')
+        if len(parts) < 2:
+            print('ERROR: Invalid HTTP response')
+            return
+        body = parts[1].decode('utf-8').strip()
         print('SUCCESS_IP:' + body)
     except Exception as e:
         print('ERROR:' + str(e))
@@ -135,8 +155,8 @@ if [[ "$PROXY_IP" == SUCCESS_IP:* ]]; then
     ACTUAL_IP=${PROXY_IP#SUCCESS_IP:}
     log_info "Outbound SOCKS5 proxy resolves via IP: $ACTUAL_IP"
     
-    # Resolve expected IP if it is a hostname (like ch1.tunnelsats.com)
-    RESOLVED_VPN_IP=$(python3 -c "import socket; print(socket.gethostbyname('$PUBLIC_IP') if '$PUBLIC_IP' else '')" 2>/dev/null | tr -d '\r' || true)
+    # Resolve expected IP if it is a hostname (like ch1.tunnelsats.com) safely via env variable
+    RESOLVED_VPN_IP=$(PUBLIC_IP="$PUBLIC_IP" python3 -c "import socket, os; ip = os.environ.get('PUBLIC_IP', ''); print(socket.gethostbyname(ip) if ip else '')" 2>/dev/null | tr -d '\r' || true)
     
     if [ "$ACTUAL_IP" == "$PUBLIC_IP" ] || [ "$ACTUAL_IP" == "$RESOLVED_VPN_IP" ]; then
         log_info "Datapath Verification: Outbound alignment is CORRECT (matches VPN IP)."
@@ -152,7 +172,15 @@ if [ -n "$VPN_PORT" ] && [ "$VPN_PORT" != "None" ] && [ -n "$PUBLIC_IP" ] && [ "
     log_info "Testing inbound port connectivity to $PUBLIC_IP:$VPN_PORT..."
     
     if [ "$ENGINE" != "inside" ]; then
-        INBOUND_TEST=$(timeout 5s bash -c "true > /dev/tcp/$PUBLIC_IP/$VPN_PORT" 2>&1 | tr -d '\r' || true)
+        INBOUND_TEST=$(PUBLIC_IP="$PUBLIC_IP" VPN_PORT="$VPN_PORT" python3 -c "
+import socket, os
+try:
+    s = socket.socket()
+    s.settimeout(5)
+    s.connect((os.environ['PUBLIC_IP'], int(os.environ['VPN_PORT'])))
+except Exception as e:
+    print(e)
+" 2>&1 | tr -d '\r' || true)
         if [ -z "$INBOUND_TEST" ]; then
             log_info "Inbound port check: SUCCESS (Port $VPN_PORT is open on $PUBLIC_IP)."
         else
