@@ -4,6 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>TunnelSats Dashboard</title>
+    <meta name="description" content="TunnelSats VPN dashboard for Lightning Network nodes on StartOS. Monitor tunnel status, subscription expiry, and connection properties.">
     <!-- Outfit, Inter & JetBrains Mono Fonts -->
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -133,9 +134,182 @@ tor.streamisolation=false</code></pre>
         </main>
         
         <footer class="dashboard-footer">
-            <p>Need to renew? Visit the official <a href="https://tunnelsats.com" target="_blank" rel="noopener">TunnelSats Website</a></p>
+            <div class="footer-links">
+                <a href="https://tunnelsats.com" target="_blank" rel="noopener" class="footer-link" id="link-website">
+                    <svg class="footer-link-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                        <circle cx="12" cy="12" r="10"></circle>
+                        <line x1="2" y1="12" x2="22" y2="12"></line>
+                        <path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"></path>
+                    </svg>
+                    TunnelSats.com
+                </a>
+                <span class="footer-divider" aria-hidden="true">·</span>
+                <a href="https://status.tunnelsats.com" target="_blank" rel="noopener" class="footer-link" id="link-status">
+                    <svg class="footer-link-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                        <polyline points="22 12 18 12 15 21 9 3 6 12 2 12"></polyline>
+                    </svg>
+                    Server Status
+                </a>
+                <span class="footer-divider" aria-hidden="true">·</span>
+                <button class="footer-link footer-btn-faq" id="btn-open-faq" onclick="openFaqModal()" aria-haspopup="dialog">
+                    <svg class="footer-link-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                        <circle cx="12" cy="12" r="10"></circle>
+                        <path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"></path>
+                        <line x1="12" y1="17" x2="12.01" y2="17"></line>
+                    </svg>
+                    FAQ &amp; Help
+                </button>
+            </div>
         </footer>
     </div>
+
+    <!-- ════════════════════════════════════════════ -->
+    <!-- FAQ Modal                                    -->
+    <!-- ════════════════════════════════════════════ -->
+    <dialog id="faq-modal" class="faq-modal" aria-labelledby="faq-modal-title" aria-modal="true">
+        <div class="faq-dialog-inner">
+            <div class="faq-modal-header">
+                <div class="faq-modal-title-row">
+                    <svg class="faq-title-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                        <circle cx="12" cy="12" r="10"></circle>
+                        <path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"></path>
+                        <line x1="12" y1="17" x2="12.01" y2="17"></line>
+                    </svg>
+                    <h2 id="faq-modal-title">Frequently Asked Questions</h2>
+                </div>
+                <button class="faq-close-btn" id="btn-close-faq" onclick="closeFaqModal()" aria-label="Close FAQ">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                        <line x1="18" y1="6" x2="6" y2="18"></line>
+                        <line x1="6" y1="6" x2="18" y2="18"></line>
+                    </svg>
+                </button>
+            </div>
+
+            <div class="faq-body">
+                <!-- Q1 -->
+                <details class="faq-item">
+                    <summary class="faq-question">How do I activate my TunnelSats subscription?</summary>
+                    <div class="faq-answer">
+                        <p>You need two things: your WireGuard <code>.conf</code> file and the <strong>Enable TunnelSats</strong> toggle.</p>
+                        <ol>
+                            <li>Open the <strong>TunnelSats config page</strong> in StartOS (⚙ → Configure).</li>
+                            <li>Log in to <a href="https://tunnelsats.com" target="_blank" rel="noopener">tunnelsats.com</a>, download your <code>.conf</code> file, and paste its full contents into the <strong>WireGuard Configuration</strong> field.</li>
+                            <li>Set the <strong>Enable TunnelSats</strong> toggle to <strong>On</strong>.</li>
+                            <li>Select your Lightning node (LND or Core Lightning) and click <strong>Save</strong>.</li>
+                        </ol>
+                        <p class="faq-note">⚡ Don't forget to also update your <code>lnd.conf</code> or CLN config file — see the <em>Setup Guides</em> section on this dashboard for the exact lines to add.</p>
+                    </div>
+                </details>
+
+                <!-- Q2 -->
+                <details class="faq-item">
+                    <summary class="faq-question">I saved my config but the tunnel shows "Disconnected" — what do I do?</summary>
+                    <div class="faq-answer">
+                        <p>This is the most common setup issue. Work through these checks in order:</p>
+                        <ol>
+                            <li><strong>Check the Enable toggle.</strong> Go to ⚙ → Configure and confirm <em>Enable TunnelSats</em> is <strong>On</strong>. Saving the config does not automatically enable the tunnel.</li>
+                            <li><strong>Verify your lnd.conf / CLN config.</strong> The tunnel can be connected but your Lightning node won't broadcast correctly until you've added the <code>externalhosts=</code> (LND) or <code>announce-addr=</code> (CLN) lines and restarted the service.</li>
+                            <li><strong>Check the VPN endpoint.</strong> The WireGuard handshake needs outbound internet access. If your node is behind a strict firewall, UDP port 51820 must be reachable.</li>
+                            <li><strong>Restart the TunnelSats service.</strong> In StartOS, stop and restart TunnelSats after any config change.</li>
+                        </ol>
+                        <p class="faq-note">Still stuck? Open an issue on <a href="https://github.com/Tunnelsats/tunnelsats-startos/issues/new" target="_blank" rel="noopener">GitHub</a> with your dashboard status screenshot.</p>
+                    </div>
+                </details>
+
+                <!-- Q3 -->
+                <details class="faq-item">
+                    <summary class="faq-question">Where do I find and edit my lnd.conf and CLN config files?</summary>
+                    <div class="faq-answer">
+                        <p>On StartOS, Lightning node config files are managed through the node's own configuration page, not by editing files directly.</p>
+                        <p><strong>For LND:</strong></p>
+                        <ol>
+                            <li>In the StartOS dashboard, click on <strong>LND</strong>.</li>
+                            <li>Go to <strong>⚙ Configure → Advanced → Additional Arguments</strong>.</li>
+                            <li>Add the lines shown in the <em>LND Setup Guide</em> tab on this dashboard (with your actual IP and port filled in from Connection Properties above).</li>
+                            <li>Save and restart LND.</li>
+                        </ol>
+                        <p><strong>For Core Lightning (CLN):</strong></p>
+                        <ol>
+                            <li>In the StartOS dashboard, click on <strong>Core Lightning</strong>.</li>
+                            <li>Go to <strong>⚙ Configure</strong> and find the <strong>Additional Config</strong> field.</li>
+                            <li>Add the <code>announce-addr=</code> line shown in the <em>CLN Setup Guide</em> tab on this dashboard.</li>
+                            <li>Save and restart CLN.</li>
+                        </ol>
+                        <p class="faq-note">💡 Use the <strong>Copy</strong> buttons in the Connection Properties section above to copy your exact IP and port before editing.</p>
+                    </div>
+                </details>
+
+                <!-- Q4 -->
+                <details class="faq-item">
+                    <summary class="faq-question">Is TunnelSats a general VPN for all my StartOS traffic?</summary>
+                    <div class="faq-answer">
+                        <p><strong>No.</strong> TunnelSats is purpose-built exclusively for Lightning Network routing.</p>
+                        <p>It tunnels only your Lightning node's <strong>inbound peer connections</strong> (LND or CLN) — not your Bitcoin node, not your other StartOS apps, and not your general internet traffic. Your Bitcoin node (bitcoind) continues to use Tor as normal.</p>
+                        <p>This is by design: TunnelSats gives your Lightning node a stable, reachable clearnet identity for channel gossip, without exposing your home IP or routing all your traffic through a third party.</p>
+                        <p class="faq-note">If you need a general-purpose VPN for all StartOS system traffic, look for WireGuard or OpenVPN packages in the StartOS app store.</p>
+                    </div>
+                </details>
+
+                <!-- Q5 -->
+                <details class="faq-item">
+                    <summary class="faq-question">What happens if my subscription expires while the tunnel is active?</summary>
+                    <div class="faq-answer">
+                        <p>This is the most important thing to plan for. When your subscription expires:</p>
+                        <ol>
+                            <li>The WireGuard tunnel drops — your node can no longer receive inbound connections via the TunnelSats IP.</li>
+                            <li>However, your Lightning node's config files (<code>externalhosts=</code> / <code>announce-addr=</code>) still point to that now-dead IP.</li>
+                            <li>Your node will broadcast an <strong>unreachable address</strong> to the network, causing peers to fail to connect and potentially affecting channel health.</li>
+                        </ol>
+                        <p><strong>What to do before expiry:</strong></p>
+                        <ul>
+                            <li>Watch the countdown timer on this dashboard — it turns amber when under 30 days remain.</li>
+                            <li>Renew at <a href="https://tunnelsats.com" target="_blank" rel="noopener">tunnelsats.com</a> and paste your new config before the old one expires.</li>
+                            <li>Or, if you won't renew: disable TunnelSats via ⚙ → Configure (set Enable to Off), remove the <code>externalhosts=</code> / <code>announce-addr=</code> lines from your node config, and restart your Lightning node.</li>
+                        </ul>
+                    </div>
+                </details>
+
+                <!-- Q6 -->
+                <details class="faq-item">
+                    <summary class="faq-question">Are my WireGuard config and settings preserved if I uninstall the app?</summary>
+                    <div class="faq-answer">
+                        <p><strong>No — uninstalling TunnelSats from StartOS will delete your configuration data</strong>, including your pasted WireGuard config and the enabled/disabled state.</p>
+                        <p>This is a StartOS platform behaviour: when a package is uninstalled, its data volume (<code>/data</code>) is removed along with the container.</p>
+                        <p><strong>Before uninstalling, you should:</strong></p>
+                        <ol>
+                            <li>Copy your WireGuard <code>.conf</code> content from ⚙ → Configure → WireGuard Configuration and save it somewhere safe.</li>
+                            <li>Disable the TunnelSats tunnel (set Enable to Off and save) so your Lightning node falls back to Tor/clearnet.</li>
+                            <li>Remove the <code>externalhosts=</code> / <code>announce-addr=</code> lines from your Lightning node config and restart it.</li>
+                            <li>Only then uninstall TunnelSats.</li>
+                        </ol>
+                        <p class="faq-note">⚠ Your subscription itself (purchased at tunnelsats.com) is not affected by uninstalling the StartOS app. If you reinstall, simply paste your <code>.conf</code> file again.</p>
+                    </div>
+                </details>
+
+                <!-- Q7 -->
+                <details class="faq-item">
+                    <summary class="faq-question">Where can I report a bug or ask a question?</summary>
+                    <div class="faq-answer">
+                        <p>The best place is the <strong>GitHub Issues</strong> tracker for this package:</p>
+                        <p>
+                            <a href="https://github.com/Tunnelsats/tunnelsats-startos/issues/new" target="_blank" rel="noopener" class="faq-cta-link" id="link-github-issue">
+                                → Open a new issue on GitHub
+                            </a>
+                        </p>
+                        <p>When reporting, please include:</p>
+                        <ul>
+                            <li>Your StartOS version</li>
+                            <li>The TunnelSats package version (shown in the StartOS app list)</li>
+                            <li>A screenshot of this dashboard's status section</li>
+                            <li>Any error messages shown in the StartOS logs for TunnelSats</li>
+                        </ul>
+                        <p>For subscription and account questions, contact <a href="https://tunnelsats.com" target="_blank" rel="noopener">tunnelsats.com</a> support directly.</p>
+                    </div>
+                </details>
+            </div><!-- /faq-body -->
+        </div><!-- /faq-dialog-inner -->
+    </dialog>
+
     <script src="script.js"></script>
 </body>
 </html>

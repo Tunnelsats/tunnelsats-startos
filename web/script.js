@@ -132,6 +132,53 @@ function switchTab(tabId, btn) {
     btn.classList.add('active');
 }
 
+// ─────────────────────────────────────────────
+// FAQ Modal
+// ─────────────────────────────────────────────
+
+const faqModal = document.getElementById('faq-modal');
+
+function openFaqModal() {
+    if (faqModal) {
+        faqModal.showModal();
+        // Trap focus within modal on open
+        faqModal.querySelector('.faq-close-btn').focus();
+    }
+}
+
+function closeFaqModal() {
+    if (faqModal) {
+        // Animate out then close
+        const inner = faqModal.querySelector('.faq-dialog-inner');
+        if (inner) {
+            inner.style.animation = 'faq-slide-in 0.18s cubic-bezier(0.4, 0, 1, 1) reverse both';
+            setTimeout(() => {
+                faqModal.close();
+                inner.style.animation = '';
+            }, 160);
+        } else {
+            faqModal.close();
+        }
+    }
+}
+
+// Close when clicking the backdrop (outside .faq-dialog-inner)
+if (faqModal) {
+    faqModal.addEventListener('click', (e) => {
+        // The dialog element itself is the backdrop area
+        if (e.target === faqModal) {
+            closeFaqModal();
+        }
+    });
+
+    // Native Escape key support is built into <dialog>, but we hook it
+    // to use our animated close instead of the abrupt browser default
+    faqModal.addEventListener('cancel', (e) => {
+        e.preventDefault();
+        closeFaqModal();
+    });
+}
+
 // Initial fetch and set interval
 fetchStatus();
 setInterval(fetchStatus, 15000);
