@@ -57,6 +57,8 @@ def atomic_write_json(filepath, data):
         raise e
 
 def get_default_gateway():
+    if hasattr(get_default_gateway, "_cache"):
+        return get_default_gateway._cache
     try:
         with open("/proc/net/route", "r") as f:
             for line in f.read().splitlines()[1:]:
@@ -65,10 +67,24 @@ def get_default_gateway():
                     hex_gw = parts[2]
                     octets = [int(hex_gw[i:i+2], 16) for i in range(0, 8, 2)]
                     octets.reverse()
-                    return ".".join(map(str, octets))
+                    get_default_gateway._cache = ".".join(map(str, octets))
+                    return get_default_gateway._cache
     except Exception:
         pass
     return None
+
+def get_wg_pubkey():
+    if os.path.exists(CONFIG_PATH):
+        try:
+            with open(CONFIG_PATH, 'r') as f:
+                config_content = f.read()
+            private_key_match = re.search(r'^\s*(?!#|;)\s*PrivateKey\s*=\s*(.+)', config_content, re.IGNORECASE | re.MULTILINE)
+            if private_key_match:
+                proc = subprocess.run(["wg", "pubkey"], input=private_key_match.group(1).strip().encode(), capture_output=True)
+                return proc.stdout.decode().strip()
+        except Exception:
+            pass
+    return "Unknown"
 
 def lazy_sync(wg_pubkey):
     if not wg_pubkey or wg_pubkey == "Unknown" or wg_pubkey == "Not available":
@@ -207,17 +223,7 @@ def subscription_sync_loop():
         return
     while True:
         try:
-            pubkey = "Unknown"
-            if os.path.exists(CONFIG_PATH):
-                with open(CONFIG_PATH, 'r') as f:
-                    config_content = f.read()
-                private_key_match = re.search(r'^\s*(?!#|;)\s*PrivateKey\s*=\s*(.+)', config_content, re.IGNORECASE | re.MULTILINE)
-                if private_key_match:
-                    try:
-                        proc = subprocess.run(["wg", "pubkey"], input=private_key_match.group(1).strip().encode(), capture_output=True)
-                        pubkey = proc.stdout.decode().strip()
-                    except Exception:
-                        pass
+            pubkey = get_wg_pubkey()
             
             sync_success = False
             if pubkey and pubkey != "Unknown":
@@ -254,11 +260,17 @@ class DashboardHTTPRequestHandler(BaseHTTPRequestHandler):
                 client_ip = client_ip[7:]
             is_local = client_ip in ("127.0.0.1", "::1", "localhost")
             
-            # Identify the unspoofable network gateway IP (the reverse proxy host gateway)
+            # Identify the network gateway IP
             gateway_ip = get_default_gateway()
-            is_trusted_proxy = (gateway_ip and client_ip == gateway_ip)
             
-            # Enforce that remote connections must only originate from the host gateway
+            # Enforce that remote connections must only originate from the same /24 subnet as the gateway
+            is_trusted_proxy = False
+            if gateway_ip:
+                g_parts = gateway_ip.split('.')
+                c_parts = client_ip.split('.')
+                if len(g_parts) >= 3 and len(c_parts) >= 3:
+                    is_trusted_proxy = (g_parts[0] == c_parts[0] and g_parts[1] == c_parts[1] and g_parts[2] == c_parts[2])
+            
             if not is_local and not is_trusted_proxy:
                 self.send_error(403, "Access denied")
                 return
@@ -285,17 +297,7 @@ class DashboardHTTPRequestHandler(BaseHTTPRequestHandler):
             
             status_data = get_status()
             
-            pubkey = "Unknown"
-            if os.path.exists(CONFIG_PATH):
-                try:
-                    with open(CONFIG_PATH, 'r') as f:
-                        config_content = f.read()
-                    private_key_match = re.search(r'^\s*(?!#|;)\s*PrivateKey\s*=\s*(.+)', config_content, re.IGNORECASE | re.MULTILINE)
-                    if private_key_match:
-                        proc = subprocess.run(["wg", "pubkey"], input=private_key_match.group(1).strip().encode(), capture_output=True)
-                        pubkey = proc.stdout.decode().strip()
-                except Exception:
-                    pass
+            pubkey = get_wg_pubkey()
             
             expiry = "Unknown"
             if os.path.exists(META_FILE_PATH):
@@ -618,14 +620,7 @@ def get_properties():
         endpoint_match = re.search(r'^\s*(?!#|;)\s*Endpoint\s*=\s*([^:\s]+):\d+', config_content, re.IGNORECASE | re.MULTILINE)
         public_ip = endpoint_match.group(1) if endpoint_match else "Unknown"
         
-        private_key_match = re.search(r'^\s*(?!#|;)\s*PrivateKey\s*=\s*(.+)', config_content, re.IGNORECASE | re.MULTILINE)
-        pubkey = "Unknown"
-        if private_key_match:
-            try:
-                proc = subprocess.run(["wg", "pubkey"], input=private_key_match.group(1).strip().encode(), capture_output=True)
-                pubkey = proc.stdout.decode().strip()
-            except Exception:
-                pass
+        pubkey = get_wg_pubkey()
                 
         wg_ip = get_wg_ip()
         internal_octet = wg_ip.split('.')[-1] if wg_ip else "Unknown"
