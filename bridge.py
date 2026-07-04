@@ -263,13 +263,19 @@ class DashboardHTTPRequestHandler(BaseHTTPRequestHandler):
             # Identify the network gateway IP
             gateway_ip = get_default_gateway()
             
-            # Enforce that remote connections must only originate from the same /24 subnet as the gateway
-            is_trusted_proxy = False
-            if gateway_ip:
-                g_parts = gateway_ip.split('.')
-                c_parts = client_ip.split('.')
-                if len(g_parts) >= 3 and len(c_parts) >= 3:
-                    is_trusted_proxy = (g_parts[0] == c_parts[0] and g_parts[1] == c_parts[1] and g_parts[2] == c_parts[2])
+            # Resolve the StartOS host/proxy IP
+            embassy_ip = None
+            try:
+                import socket
+                embassy_ip = socket.gethostbyname("embassy")
+            except Exception:
+                pass
+                
+            # Enforce that remote connections must strictly originate from the host gateway or the embassy proxy IP
+            is_trusted_proxy = (
+                (gateway_ip and client_ip == gateway_ip) or
+                (embassy_ip and client_ip == embassy_ip)
+            )
             
             if not is_local and not is_trusted_proxy:
                 self.send_error(403, "Access denied")
