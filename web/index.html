@@ -255,8 +255,8 @@ tor.streamisolation=false</code></pre>
                     <div class="faq-answer">
                         <p>On StartOS, manual changes to configuration files (like <code>lnd.conf</code> or CLN's <code>config</code>) are normally overwritten on restarts or configuration saves. Use the persistence workarounds below based on your Lightning Node implementation.</p>
 
-                        <div style="margin-top:16px; border-left: 3px solid var(--primary); padding-left: 12px;">
-                            <h4 style="color:var(--primary); font-size:14px; margin-bottom:8px;">Option A: LND Node Configuration</h4>
+                        <div style="margin-top:16px; border-left: 3px solid var(--accent-bitcoin); padding-left: 12px;">
+                            <h4 style="color:var(--accent-bitcoin); font-size:14px; margin-bottom:8px;">Option A: LND Node Configuration</h4>
                             
                             <p style="font-size:12px; font-weight:bold; color:var(--text-secondary);">For StartOS 0.3.5.x (Active Version)</p>
                             <p>Inject the custom host into LND's configuration YAML to prevent the configurator from overwriting it:</p>
@@ -265,10 +265,10 @@ tor.streamisolation=false</code></pre>
                                 <li>Open LND's UI configuration:
                                     <pre style="background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.08);border-radius:6px;padding:8px 10px;font-size:11px;overflow-x:auto;margin-top:4px;"><code style="font-family:'JetBrains Mono',monospace;color:#f3f4f6;">sudo nano /embassy-data/package-data/volumes/lnd/data/main/start9/config.yaml</code></pre>
                                 </li>
-                                <li>Locate <code style="color:var(--primary);">peer-tor-address</code>, wrap the onion address in quotes, and append a newline (<code style="color:var(--accent);">\n</code>) along with your external host setting (replace with your values from Connection Properties above):
+                                <li>Locate <code style="color:var(--accent-bitcoin);">peer-tor-address</code>, wrap the onion address in quotes, and append a newline (<code style="color:var(--accent-bitcoin);">\n</code>) along with your external host setting (replace with your values from Connection Properties above):
                                     <pre style="background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.08);border-radius:6px;padding:8px 10px;font-size:11px;overflow-x:auto;margin-top:4px;"><code style="font-family:'JetBrains Mono',monospace;color:#f3f4f6;">peer-tor-address: "youronionaddress.onion\nexternalhosts=<span class="highlight-ip">tunnelsats_ip</span>:<span class="highlight-port">tunnelsats_port</span>"</code></pre>
                                 </li>
-                                <li>Save (<kbd>Ctrl+O</kbd>, <kbd>Ctrl+X</kbd>) and restart LND in the StartOS dashboard. The configurator will generate two valid <code style="color:var(--primary);">externalhosts</code> entries in LND's configuration.</li>
+                                <li>Save (<kbd>Ctrl+O</kbd>, <kbd>Ctrl+X</kbd>) and restart LND in the StartOS dashboard. The configurator will generate two valid <code style="color:var(--accent-bitcoin);">externalhosts</code> entries in LND's configuration.</li>
                             </ol>
 
                             <p style="font-size:12px; font-weight:bold; color:var(--text-secondary); margin-top:12px;">For StartOS 0.4.x (Upcoming Version)</p>
@@ -280,8 +280,8 @@ tor.streamisolation=false</code></pre>
                             </ol>
                         </div>
 
-                        <div style="margin-top:20px; border-left: 3px solid var(--accent); padding-left: 12px;">
-                            <h4 style="color:var(--accent); font-size:14px; margin-bottom:8px;">Option B: Core Lightning (CLN) Node Configuration</h4>
+                        <div style="margin-top:20px; border-left: 3px solid var(--accent-bitcoin); padding-left: 12px;">
+                            <h4 style="color:var(--accent-bitcoin); font-size:14px; margin-bottom:8px;">Option B: Core Lightning (CLN) Node Configuration</h4>
 
                             <p style="font-size:12px; font-weight:bold; color:var(--text-secondary);">For StartOS 0.3.5.x (Active Version)</p>
                             <p>Inject a config-updating hook into the persistent startup script of the CLN volume:</p>
