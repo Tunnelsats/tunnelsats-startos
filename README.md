@@ -139,24 +139,28 @@ In StartOS 0.4.x, the CLN configuration is rebuilt dynamically by `watchHosts.ts
 
 ## 🛠 Diagnostic Tool (`verify.sh`)
 
-We bundle a secure python-powered test suite inside the container that you can run to verify that your tunnel and ports are aligned:
+We bundle a secure diagnostic tool inside the container that you can run on your StartOS host to verify that your tunnel and ports are aligned:
 
 ```bash
-# Run the verification script on your StartOS host
-sudo start-cli package action tunnelsats verify
+# Run the verification script inside the container namespace from your host
+sudo podman exec -it tunnelsats.embassy /app/verify.sh
 ```
 
 Example Output:
 ```text
-=== TunnelSats Dataplane Verification ===
-Target: ch1.tunnelsats.com (198.51.100.1) : 24556
-----------------------------------------------------------------
-[0/3] Discovering Home IP...                    PASS (82.165.12.34)
-[1/3] Testing Outbound Tunnel Alignment...      PASS (Verified via 198.51.100.1)
-[2/3] Testing Inbound Port (via IP)...          PASS (Connected to 198.51.100.1:24556)
-[3/3] Testing Inbound Port (via Hostname)...    PASS (Connected to ch1.tunnelsats.com:24556)
-----------------------------------------------------------------
-Verification Successful! Your node is routing securely.
+[INFO] Running diagnostic checks from inside the container namespace.
+[INFO] Querying API status from the orchestrator...
+[INFO] Current Properties:
+  - Enabled: True
+  - Public IP: ch1.tunnelsats.com
+  - VPN Port: 24556
+  - PubKey: Wh+WdZHLty4p3BHbeWZioeEVbhFLlS1H/5dj/++QmSw=
+[INFO] Verifying outbound SOCKS5 proxy routing...
+[INFO] Outbound SOCKS5 proxy resolves via IP: 83.228.229.56
+[INFO] Datapath Verification: Outbound alignment is CORRECT (matches VPN IP).
+[INFO] Testing inbound port connectivity to ch1.tunnelsats.com:24556...
+[INFO] Inbound port check: SUCCESS (Port 24556 is open on ch1.tunnelsats.com).
+[INFO] Diagnostics completed.
 ```
 
 ---
