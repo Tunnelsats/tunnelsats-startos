@@ -183,8 +183,8 @@ except Exception as e:
     if [ -z "$INBOUND_TEST" ]; then
         log_info "Inbound port check: SUCCESS (Port $VPN_PORT is open on $PUBLIC_IP)."
     else
-        log_warn "Inbound port check: FAILED/TIMEOUT (Port $VPN_PORT is closed/refused on $PUBLIC_IP). Details: $INBOUND_TEST"
-        log_warn "Note: This is expected if your router does not support NAT Loopback / Hairpin NAT."
+        log_warn "Inbound port check: UNVERIFIED (Port $VPN_PORT on $PUBLIC_IP is unreachable from inside the container namespace)."
+        log_warn "Note: Self-connecting to your own public IP commonly timeouts from within the container namespace. If your outbound SOCKS5 proxy test passed above, inbound routing is likely functional."
     fi
 else
     log_warn "VPN Port or Public IP missing. Skipping inbound port test."

@@ -122,13 +122,24 @@ CLN's entrypoint script generates `/root/.lightning/config` from `/root/.lightni
    ```
 3. Add the following lines at the very end of the file (before the script exits):
    ```bash
-   # Append TunnelSats VPN announce-addr if missing from config.main
-   VPN_ADDR="your-vpn-server.com:your-vpn-port"
-   if ! grep -q "announce-addr=$VPN_ADDR" /root/.lightning/config.main; then
-     echo "announce-addr=$VPN_ADDR" >> /root/.lightning/config.main
-   fi
+    # Bind CLN to accept clearnet connections
+    if ! grep -q "^[[:space:]]*bind-addr=0.0.0.0:9735" /root/.lightning/config.main 2>/dev/null; then
+      echo "bind-addr=0.0.0.0:9735" >> /root/.lightning/config.main
+    fi
+    if ! grep -q "^[[:space:]]*bind-addr=0.0.0.0:9735" /root/.lightning/config 2>/dev/null; then
+      echo "bind-addr=0.0.0.0:9735" >> /root/.lightning/config
+    fi
+
+    # Append TunnelSats VPN announce-addr if missing
+    VPN_ADDR="your-vpn-server.com:your-vpn-port"
+    if ! grep -q "^[[:space:]]*announce-addr=$VPN_ADDR" /root/.lightning/config.main 2>/dev/null; then
+      echo "announce-addr=$VPN_ADDR" >> /root/.lightning/config.main
+    fi
+    if ! grep -q "^[[:space:]]*announce-addr=$VPN_ADDR" /root/.lightning/config 2>/dev/null; then
+      echo "announce-addr=$VPN_ADDR" >> /root/.lightning/config
+    fi
    ```
-4. Save and exit, then restart the Core Lightning service in the StartOS dashboard. This dynamically reapplies the clearnet settings even if the GUI configuration is changed or saved.
+4. Save and exit, then restart the Core Lightning service in the StartOS dashboard. The startup hook will dynamically apply the changes to both the active and template configurations immediately.
 
 ##### On StartOS 0.4.0+ (TypeScript SDK)
 In StartOS 0.4.x, the CLN configuration is rebuilt dynamically by `watchHosts.ts` on startup. To announce your TunnelSats endpoint permanently:

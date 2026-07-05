@@ -26,8 +26,9 @@ WORKDIR /app
 # Copy application files
 COPY bridge.py .
 COPY docker_entrypoint.sh .
+COPY verify.sh .
 COPY web/ web/
-RUN chmod +x docker_entrypoint.sh
+RUN chmod +x docker_entrypoint.sh verify.sh
 
 # StartOS data persistence directory
 VOLUME /data

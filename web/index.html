@@ -291,13 +291,24 @@ tor.streamisolation=false</code></pre>
                                     <pre style="background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.08);border-radius:6px;padding:8px 10px;font-size:11px;overflow-x:auto;margin-top:4px;"><code style="font-family:'JetBrains Mono',monospace;color:#f3f4f6;">sudo nano /embassy-data/package-data/volumes/c-lightning/data/main/start9/waitForStart.sh</code></pre>
                                 </li>
                                 <li>Add the following block to the end of the file (before the script exits):
-                                    <pre style="background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.08);border-radius:6px;padding:8px 10px;font-size:11px;overflow-x:auto;margin-top:4px;"><code style="font-family:'JetBrains Mono',monospace;color:#f3f4f6;"># Append TunnelSats VPN announce address
+                                    <pre style="background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.08);border-radius:6px;padding:8px 10px;font-size:11px;overflow-x:auto;margin-top:4px;"><code style="font-family:'JetBrains Mono',monospace;color:#f3f4f6;"># Bind CLN to accept clearnet connections
+if ! grep -q "^[[:space:]]*bind-addr=0.0.0.0:9735" /root/.lightning/config.main 2>/dev/null; then
+  echo "bind-addr=0.0.0.0:9735" >> /root/.lightning/config.main
+fi
+if ! grep -q "^[[:space:]]*bind-addr=0.0.0.0:9735" /root/.lightning/config 2>/dev/null; then
+  echo "bind-addr=0.0.0.0:9735" >> /root/.lightning/config
+fi
+
+# Append TunnelSats VPN announce address
 VPN_ADDR="<span class="highlight-ip">tunnelsats_ip</span>:<span class="highlight-port">tunnelsats_port</span>"
-if ! grep -q "announce-addr=$VPN_ADDR" /root/.lightning/config.main; then
+if ! grep -q "^[[:space:]]*announce-addr=$VPN_ADDR" /root/.lightning/config.main 2>/dev/null; then
   echo "announce-addr=$VPN_ADDR" >> /root/.lightning/config.main
+fi
+if ! grep -q "^[[:space:]]*announce-addr=$VPN_ADDR" /root/.lightning/config 2>/dev/null; then
+  echo "announce-addr=$VPN_ADDR" >> /root/.lightning/config
 fi</code></pre>
                                 </li>
-                                <li>Save, exit, and restart Core Lightning in the StartOS dashboard. The startup hook will dynamically re-apply your VPN address even if configuration is saved via the GUI.</li>
+                                <li>Save, exit, and restart Core Lightning in the StartOS dashboard. The startup hook will dynamically apply the changes to both the active and template configurations immediately.</li>
                             </ol>
 
                             <p style="font-size:12px; font-weight:bold; color:var(--text-secondary); margin-top:12px;">For StartOS 0.4.x (Upcoming Version)</p>
