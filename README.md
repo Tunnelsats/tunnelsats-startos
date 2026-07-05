@@ -78,48 +78,100 @@ StartOS strictly isolates services. Apps cannot manipulate host-level routing or
 4. Toggle **Enable TunnelSats** to `On`, choose your **Target Lightning Node** (LND or CLN), and click **Save**.
 5. Start the service.
 
-### Step 3: Configure LND or Core Lightning
+### Step 3: Configure LND or Core Lightning (Persistence Workarounds)
 
-#### LND Config Changes
-Add the following options to your LND configuration (`lnd.conf`):
-```ini
-[Application Options]
-externalhosts=<your-vpn-server>:<your-vpn-port>
+On StartOS, manual changes to configuration files (like `lnd.conf` or CLN's `config`) are normally overwritten on restarts or updates. Use the following methods to ensure your TunnelSats VPN address remains persistent.
 
-[tor]
-tor.skip-proxy-for-clearnet-targets=true
-tor.streamisolation=false
-```
+#### Option A: LND Node Configuration
 
-#### Core Lightning (CLN) Config Changes
-Add the following options to your Core Lightning configuration (`config`):
-```ini
-bind-addr=0.0.0.0:9735
-announce-addr=<your-vpn-server>:<your-vpn-port>
-```
+##### On StartOS 0.3.5.x (Active version)
+The LND wrapper runs a `configurator` utility on startup that rewrites `lnd.conf` based on LND's `config.yaml` values, wiping manual edits. You can permanently inject your TunnelSats external host by utilizing a newline injection in LND's `peer-tor-address` field:
+1. SSH into your StartOS host:
+   ```bash
+   ssh start9@<your-node-ip>
+   ```
+2. Open LND's configuration YAML:
+   ```bash
+   sudo nano /embassy-data/package-data/volumes/lnd/data/main/start9/config.yaml
+   ```
+3. Locate the `peer-tor-address` line and wrap it in quotes, appending a newline (`\n`) and your custom external host parameter:
+   ```yaml
+   peer-tor-address: "yournodeaddress.onion\nexternalhosts=your-vpn-server.com:your-vpn-port"
+   ```
+4. Save and exit (`Ctrl+O`, `Ctrl+X`), then restart the LND service in the StartOS dashboard. The configurator will generate two valid `externalhosts` entries in `lnd.conf`, advertising both Tor and your clearnet tunnel.
+
+##### On StartOS 0.4.0+ (TypeScript SDK)
+StartOS 0.4.x natively supports external hosts:
+1. In the LND service UI under the **Actions** menu, select **Custom External Host**.
+2. Enter your TunnelSats domain and port (e.g. `your-vpn-server.com:your-vpn-port`).
+3. Click submit and restart LND. This writes to `store.json` and is persistently merged into `lnd.conf` on every boot.
+
+---
+
+#### Option B: Core Lightning (CLN) Node Configuration
+
+##### On StartOS 0.3.5.x (Active version)
+CLN's entrypoint script generates `/root/.lightning/config` from `/root/.lightning/config.main` on container start, wiping manual edits. We can hook into the persistent startup script `waitForStart.sh` to automatically re-append the settings on every container boot:
+1. SSH into your StartOS host:
+   ```bash
+   ssh start9@<your-node-ip>
+   ```
+2. Open the persistent startup script:
+   ```bash
+   sudo nano /embassy-data/package-data/volumes/c-lightning/data/main/start9/waitForStart.sh
+   ```
+3. Add the following lines at the very end of the file (before the script exits):
+   ```bash
+    # Bind CLN to accept clearnet connections
+    if ! grep -q "^[[:space:]]*bind-addr=0.0.0.0:9735" /root/.lightning/config.main 2>/dev/null; then
+      echo "bind-addr=0.0.0.0:9735" >> /root/.lightning/config.main
+    fi
+    if ! grep -q "^[[:space:]]*bind-addr=0.0.0.0:9735" /root/.lightning/config 2>/dev/null; then
+      echo "bind-addr=0.0.0.0:9735" >> /root/.lightning/config
+    fi
+
+    # Append TunnelSats VPN announce-addr if missing
+    VPN_ADDR="your-vpn-server.com:your-vpn-port"
+    if ! grep -q "^[[:space:]]*announce-addr=$VPN_ADDR" /root/.lightning/config.main 2>/dev/null; then
+      echo "announce-addr=$VPN_ADDR" >> /root/.lightning/config.main
+    fi
+    if ! grep -q "^[[:space:]]*announce-addr=$VPN_ADDR" /root/.lightning/config 2>/dev/null; then
+      echo "announce-addr=$VPN_ADDR" >> /root/.lightning/config
+    fi
+   ```
+4. Save and exit, then restart the Core Lightning service in the StartOS dashboard. The startup hook will dynamically apply the changes to both the active and template configurations immediately.
+
+##### On StartOS 0.4.0+ (TypeScript SDK)
+In StartOS 0.4.x, the CLN configuration is rebuilt dynamically by `watchHosts.ts` on startup. To announce your TunnelSats endpoint permanently:
+- A future enhancement PR has been proposed to the official `cln-startos` repository to introduce a "Custom External Host" UI action identical to LND.
+- Until natively merged, you can implement this by appending the TunnelSats endpoint directly to the `announce-addr` list in `/root/.lightning/config` using a container startup hook.
 
 ---
 
 ## 🛠 Diagnostic Tool (`verify.sh`)
 
-We bundle a secure python-powered test suite inside the container that you can run to verify that your tunnel and ports are aligned:
+We bundle a secure diagnostic tool inside the container that you can run on your StartOS host to verify that your tunnel and ports are aligned:
 
 ```bash
-# Run the verification script on your StartOS host
-sudo start-cli package action tunnelsats verify
+# Run the verification script inside the container namespace from your host
+sudo podman exec -it tunnelsats.embassy /app/verify.sh
 ```
 
 Example Output:
 ```text
-=== TunnelSats Dataplane Verification ===
-Target: ch1.tunnelsats.com (198.51.100.1) : 24556
-----------------------------------------------------------------
-[0/3] Discovering Home IP...                    PASS (82.165.12.34)
-[1/3] Testing Outbound Tunnel Alignment...      PASS (Verified via 198.51.100.1)
-[2/3] Testing Inbound Port (via IP)...          PASS (Connected to 198.51.100.1:24556)
-[3/3] Testing Inbound Port (via Hostname)...    PASS (Connected to ch1.tunnelsats.com:24556)
-----------------------------------------------------------------
-Verification Successful! Your node is routing securely.
+[INFO] Running diagnostic checks from inside the container namespace.
+[INFO] Querying API status from the orchestrator...
+[INFO] Current Properties:
+  - Enabled: True
+  - Public IP: ch1.tunnelsats.com
+  - VPN Port: 24556
+  - PubKey: Wh+WdZHLty4p3BHbeWZioeEVbhFLlS1H/5dj/++QmSw=
+[INFO] Verifying outbound SOCKS5 proxy routing...
+[INFO] Outbound SOCKS5 proxy resolves via IP: 83.228.229.56
+[INFO] Datapath Verification: Outbound alignment is CORRECT (matches VPN IP).
+[INFO] Testing inbound port connectivity to ch1.tunnelsats.com:24556...
+[INFO] Inbound port check: SUCCESS (Port 24556 is open on ch1.tunnelsats.com).
+[INFO] Diagnostics completed.
 ```
 
 ---

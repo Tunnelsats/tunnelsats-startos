@@ -251,46 +251,69 @@ tor.streamisolation=false</code></pre>
                 <!-- Q3 -->
                 <details class="faq-item">
                     <summary class="faq-question">How do I add the externalhosts / announce-addr lines to my Lightning
-                        node?</summary>
+                        node persistently?</summary>
                     <div class="faq-answer">
-                        <p>On StartOS, there is <strong>no UI field</strong> in the LND or CLN config pages for custom
-                            external hosts — you need to edit the config files directly via SSH. The files live in the
-                            persistent data volume, so your changes survive restarts and updates.</p>
+                        <p>On StartOS, manual changes to configuration files (like <code>lnd.conf</code> or CLN's <code>config</code>) are normally overwritten on restarts or configuration saves. Use the persistence workarounds below based on your Lightning Node implementation.</p>
 
-                        <p><strong>Step 1: SSH into your StartOS node</strong></p>
-                        <p>Use a terminal on your computer:</p>
-                        <pre
-                            style="background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.08);border-radius:6px;padding:10px 12px;font-size:11.5px;overflow-x:auto;margin-top:8px;"><code style="font-family:'JetBrains Mono',monospace;color:#f3f4f6;">ssh start9@&lt;your-node-ip&gt;</code></pre>
+                        <div style="margin-top:16px; border-left: 3px solid var(--accent-bitcoin); padding-left: 12px;">
+                            <h4 style="color:var(--accent-bitcoin); font-size:14px; margin-bottom:8px;">Option A: LND Node Configuration</h4>
+                            
+                            <p style="font-size:12px; font-weight:bold; color:var(--text-secondary);">For StartOS 0.3.5.x (Active Version)</p>
+                            <p>Inject the custom host into LND's configuration YAML to prevent the configurator from overwriting it:</p>
+                            <ol style="font-size:12.5px; padding-left:16px; margin-top:4px;">
+                                <li>SSH into your StartOS host: <code style="font-size:11.5px;">ssh start9@&lt;your-node-ip&gt;</code></li>
+                                <li>Open LND's UI configuration:
+                                    <pre style="background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.08);border-radius:6px;padding:8px 10px;font-size:11px;overflow-x:auto;margin-top:4px;"><code style="font-family:'JetBrains Mono',monospace;color:#f3f4f6;">sudo nano /embassy-data/package-data/volumes/lnd/data/main/start9/config.yaml</code></pre>
+                                </li>
+                                <li>Locate <code style="color:var(--accent-bitcoin);">peer-tor-address</code>, wrap the onion address in quotes, and append a newline (<code style="color:var(--accent-bitcoin);">\n</code>) along with your external host setting (replace with your values from Connection Properties above):
+                                    <pre style="background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.08);border-radius:6px;padding:8px 10px;font-size:11px;overflow-x:auto;margin-top:4px;"><code style="font-family:'JetBrains Mono',monospace;color:#f3f4f6;">peer-tor-address: "youronionaddress.onion\nexternalhosts=<span class="highlight-ip">tunnelsats_ip</span>:<span class="highlight-port">tunnelsats_port</span>"</code></pre>
+                                </li>
+                                <li>Save (<kbd>Ctrl+O</kbd>, <kbd>Ctrl+X</kbd>) and restart LND in the StartOS dashboard. The configurator will generate two valid <code style="color:var(--accent-bitcoin);">externalhosts</code> entries in LND's configuration.</li>
+                            </ol>
 
-                        <p style="margin-top:12px;"><strong>For LND</strong> — edit <code>lnd.conf</code>:</p>
-                        <pre
-                            style="background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.08);border-radius:6px;padding:10px 12px;font-size:11.5px;overflow-x:auto;margin-top:8px;"><code style="font-family:'JetBrains Mono',monospace;color:#f3f4f6;">sudo nano /embassy-data/package-data/volumes/lnd/data/main/lnd.conf</code></pre>
-                        <p style="margin-top:8px;">Add these lines under <code>[Application Options]</code> — replace
-                            with your actual values from the <em>Connection Properties</em> section above:</p>
-                        <pre
-                            style="background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.08);border-radius:6px;padding:10px 12px;font-size:11.5px;overflow-x:auto;margin-top:8px;"><code style="font-family:'JetBrains Mono',monospace;color:#f3f4f6;">externalhosts=<span class="highlight-ip">tunnelsats_ip</span>:<span class="highlight-port">tunnelsats_port</span>
+                            <p style="font-size:12px; font-weight:bold; color:var(--text-secondary); margin-top:12px;">For StartOS 0.4.x (Upcoming Version)</p>
+                            <p>Configure LND natively via UI actions:</p>
+                            <ol style="font-size:12.5px; padding-left:16px; margin-top:4px;">
+                                <li>In the StartOS dashboard under the LND service, open the <strong>Actions</strong> menu.</li>
+                                <li>Select <strong>Custom External Host</strong> and enter: <code style="font-size:12px;"><span class="highlight-ip">tunnelsats_ip</span>:<span class="highlight-port">tunnelsats_port</span></code></li>
+                                <li>Submit and restart LND. This writes to <code>store.json</code> and persistently merges the host on startup.</li>
+                            </ol>
+                        </div>
 
-# [tor]
-tor.skip-proxy-for-clearnet-targets=true
-tor.streamisolation=false</code></pre>
-                        <p style="margin-top:8px;">Save with <kbd>Ctrl+O</kbd>, exit with <kbd>Ctrl+X</kbd>, then
-                            restart LND in the StartOS UI.</p>
+                        <div style="margin-top:20px; border-left: 3px solid var(--accent-bitcoin); padding-left: 12px;">
+                            <h4 style="color:var(--accent-bitcoin); font-size:14px; margin-bottom:8px;">Option B: Core Lightning (CLN) Node Configuration</h4>
 
-                        <p style="margin-top:12px;"><strong>For Core Lightning (CLN)</strong> — edit the
-                            <code>config</code> file:
-                        </p>
-                        <pre
-                            style="background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.08);border-radius:6px;padding:10px 12px;font-size:11.5px;overflow-x:auto;margin-top:8px;"><code style="font-family:'JetBrains Mono',monospace;color:#f3f4f6;">sudo nano /embassy-data/package-data/volumes/c-lightning/data/main/config</code></pre>
-                        <p style="margin-top:8px;">Add this line at the end — replace with your actual values:</p>
-                        <pre
-                            style="background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.08);border-radius:6px;padding:10px 12px;font-size:11.5px;overflow-x:auto;margin-top:8px;"><code style="font-family:'JetBrains Mono',monospace;color:#f3f4f6;">announce-addr=<span class="highlight-ip">tunnelsats_ip</span>:<span class="highlight-port">tunnelsats_port</span></code></pre>
-                        <p style="margin-top:8px;">Save, then restart Core Lightning in the StartOS UI.</p>
+                            <p style="font-size:12px; font-weight:bold; color:var(--text-secondary);">For StartOS 0.3.5.x (Active Version)</p>
+                            <p>Inject a config-updating hook into the persistent startup script of the CLN volume:</p>
+                            <ol style="font-size:12.5px; padding-left:16px; margin-top:4px;">
+                                <li>SSH into your StartOS host: <code style="font-size:11.5px;">ssh start9@&lt;your-node-ip&gt;</code></li>
+                                <li>Open the persistent startup script:
+                                    <pre style="background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.08);border-radius:6px;padding:8px 10px;font-size:11px;overflow-x:auto;margin-top:4px;"><code style="font-family:'JetBrains Mono',monospace;color:#f3f4f6;">sudo nano /embassy-data/package-data/volumes/c-lightning/data/main/start9/waitForStart.sh</code></pre>
+                                </li>
+                                <li>Add the following block to the end of the file (before the script exits):
+                                    <pre style="background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.08);border-radius:6px;padding:8px 10px;font-size:11px;overflow-x:auto;margin-top:4px;"><code style="font-family:'JetBrains Mono',monospace;color:#f3f4f6;"># Bind CLN to accept clearnet connections
+if ! grep -q "^[[:space:]]*bind-addr=0.0.0.0:9735" /root/.lightning/config.main 2>/dev/null; then
+  echo "bind-addr=0.0.0.0:9735" >> /root/.lightning/config.main
+fi
+if ! grep -q "^[[:space:]]*bind-addr=0.0.0.0:9735" /root/.lightning/config 2>/dev/null; then
+  echo "bind-addr=0.0.0.0:9735" >> /root/.lightning/config
+fi
 
-                        <p class="faq-note">⚠️ <strong>Important:</strong> These changes persist in the volume but may
-                            be overwritten if you use StartOS's own LND/CLN config UI to save settings. If you save via
-                            the StartOS UI after making these changes, re-apply the lines above and restart the node
-                            again. Use the <strong>Copy</strong> buttons in Connection Properties to get your exact IP
-                            and port.</p>
+# Append TunnelSats VPN announce address
+VPN_ADDR="<span class="highlight-ip">tunnelsats_ip</span>:<span class="highlight-port">tunnelsats_port</span>"
+if ! grep -q "^[[:space:]]*announce-addr=$VPN_ADDR" /root/.lightning/config.main 2>/dev/null; then
+  echo "announce-addr=$VPN_ADDR" >> /root/.lightning/config.main
+fi
+if ! grep -q "^[[:space:]]*announce-addr=$VPN_ADDR" /root/.lightning/config 2>/dev/null; then
+  echo "announce-addr=$VPN_ADDR" >> /root/.lightning/config
+fi</code></pre>
+                                </li>
+                                <li>Save, exit, and restart Core Lightning in the StartOS dashboard. The startup hook will dynamically apply the changes to both the active and template configurations immediately.</li>
+                            </ol>
+
+                            <p style="font-size:12px; font-weight:bold; color:var(--text-secondary); margin-top:12px;">For StartOS 0.4.x (Upcoming Version)</p>
+                            <p>An enhancement PR has been proposed to the official <code>cln-startos</code> repository to natively introduce a "Custom External Host" UI action identical to LND. Until natively merged, the <code>waitForStart.sh</code> hook can be used to persistently modify CLN's settings.</p>
+                        </div>
                     </div>
                 </details>
 
