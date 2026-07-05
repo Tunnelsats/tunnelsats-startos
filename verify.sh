@@ -171,8 +171,7 @@ fi
 if [ -n "$VPN_PORT" ] && [ "$VPN_PORT" != "None" ] && [ -n "$PUBLIC_IP" ] && [ "$PUBLIC_IP" != "None" ]; then
     log_info "Testing inbound port connectivity to $PUBLIC_IP:$VPN_PORT..."
     
-    if [ "$ENGINE" != "inside" ]; then
-        INBOUND_TEST=$(PUBLIC_IP="$PUBLIC_IP" VPN_PORT="$VPN_PORT" python3 -c "
+    INBOUND_TEST=$(PUBLIC_IP="$PUBLIC_IP" VPN_PORT="$VPN_PORT" python3 -c "
 import socket, os
 try:
     s = socket.socket()
@@ -181,13 +180,11 @@ try:
 except Exception as e:
     print(e)
 " 2>&1 | tr -d '\r' || true)
-        if [ -z "$INBOUND_TEST" ]; then
-            log_info "Inbound port check: SUCCESS (Port $VPN_PORT is open on $PUBLIC_IP)."
-        else
-            log_error "Inbound port check: FAILED (Port $VPN_PORT is closed/refused on $PUBLIC_IP). Details: $INBOUND_TEST"
-        fi
+    if [ -z "$INBOUND_TEST" ]; then
+        log_info "Inbound port check: SUCCESS (Port $VPN_PORT is open on $PUBLIC_IP)."
     else
-        log_warn "Inbound port test skipped when running inside container namespace."
+        log_warn "Inbound port check: FAILED/TIMEOUT (Port $VPN_PORT is closed/refused on $PUBLIC_IP). Details: $INBOUND_TEST"
+        log_warn "Note: This is expected if your router does not support NAT Loopback / Hairpin NAT."
     fi
 else
     log_warn "VPN Port or Public IP missing. Skipping inbound port test."
