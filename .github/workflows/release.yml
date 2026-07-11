@@ -6,44 +6,8 @@ on:
       - 'v*'
 
 jobs:
-  build:
-    runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        platform: [amd64, arm64]
-    
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-      
-      - name: Set up QEMU
-        uses: docker/setup-qemu-action@v3
-      
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
-      
-      - name: Install start-sdk
-        run: |
-          # Install start-sdk (placeholder - adjust for actual install)
-          echo "Installing start-sdk..."
-          # curl -fsSL https://install.start9.com/sdk | bash
-      
-      - name: Build Docker Image
-        run: |
-          docker buildx build \
-            --platform linux/${{ matrix.platform }} \
-            --cache-from=type=gha \
-            --cache-to=type=gha,mode=max \
-            -o type=docker,dest=image-${{ matrix.platform }}.tar \
-            .
-      
-      - name: Upload artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: docker-image-${{ matrix.platform }}
-          path: image-${{ matrix.platform }}.tar
-
   test:
+    name: Run Unit Tests
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -56,31 +20,158 @@ jobs:
 
       - name: Run Python unit tests
         run: python3 -m unittest discover -s tests -p "test_*.py"
-      
+
       - name: Install bats
         run: |
           sudo apt-get update
           sudo apt-get install -y bats
-      
+
       - name: Run bats tests
         run: bats tests/
 
-  release:
-    needs: [build, test]
+  build:
+    name: Build s9pk packages
+    needs: test
     runs-on: ubuntu-latest
-    
+    strategy:
+      matrix:
+        arch: [x86_64, aarch64]
+
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-      
-      - name: Download artifacts
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+
+      - name: Install Node dependencies
+        run: npm ci
+
+      - name: Install System dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y squashfs-tools jq
+
+      - name: Install start-cli
+        run: |
+          curl -L -o start-cli https://github.com/Start9Labs/start-technologies/releases/download/start-cli%2Fv1.0.1/start-cli_x86_64-linux
+          chmod +x start-cli
+          mkdir -p ~/.local/bin
+          mv start-cli ~/.local/bin/
+          echo "$HOME/.local/bin" >> $GITHUB_PATH
+
+      - name: Initialize Developer Key
+        run: |
+          mkdir -p ~/.startos
+          if [ -n "${{ secrets.STARTOS_DEVELOPER_KEY }}" ]; then
+            echo "${{ secrets.STARTOS_DEVELOPER_KEY }}" > ~/.startos/developer.key.pem
+          else
+            start-cli init-key
+          fi
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build and Pack s9pk
+        run: make arch/${{ matrix.arch }}
+
+      - name: Upload Package Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: tunnelsats-${{ matrix.arch }}
+          path: tunnelsats_${{ matrix.arch }}.s9pk
+
+  release:
+    name: Publish Release
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Download Artifacts
         uses: actions/download-artifact@v4
-      
-      - name: Create Release
+        with:
+          merge-multiple: true
+
+      - name: Install start-cli
+        run: |
+          curl -L -o start-cli https://github.com/Start9Labs/start-technologies/releases/download/start-cli%2Fv1.0.1/start-cli_x86_64-linux
+          chmod +x start-cli
+          mkdir -p ~/.local/bin
+          mv start-cli ~/.local/bin/
+          echo "$HOME/.local/bin" >> $GITHUB_PATH
+
+      - name: Generate Checksums
+        run: |
+          sha256sum tunnelsats_x86_64.s9pk tunnelsats_aarch64.s9pk > SHA256SUMS
+          cat SHA256SUMS
+
+      - name: Inspect Package commitments
+        id: inspect
+        run: |
+          SIGHASH_X86=$(start-cli s9pk inspect tunnelsats_x86_64.s9pk commitment | jq -r .rootSighash)
+          SIGHASH_ARM=$(start-cli s9pk inspect tunnelsats_aarch64.s9pk commitment | jq -r .rootSighash)
+          echo "sighash_x86=$SIGHASH_X86" >> $GITHUB_OUTPUT
+          echo "sighash_arm=$SIGHASH_ARM" >> $GITHUB_OUTPUT
+
+      - name: Generate Release Notes
+        id: notes
+        run: |
+          VERSION=${GITHUB_REF#refs/tags/}
+          
+          # Compute hashes for release notes body
+          HASH_X86=$(sha256sum tunnelsats_x86_64.s9pk | awk '{print $1}')
+          HASH_ARM=$(sha256sum tunnelsats_aarch64.s9pk | awk '{print $1}')
+          
+          cat <<EOF > release_notes.md
+          # TunnelSats StartOS Release $VERSION
+
+          This release packages TunnelSats for StartOS 0.4.0.
+
+          ## Pre-built Binaries & Checksums
+
+          You can download the pre-built `.s9pk` binaries or build them yourself from source.
+
+          | Platform | Filename | SHA256 Checksum | StartOS Build Signature (rootSighash) |
+          |---|---|---|---|
+          | **x86_64** | \`tunnelsats_x86_64.s9pk\` | \`$HASH_X86\` | \`${{ steps.inspect.outputs.sighash_x86 }}\` |
+          | **aarch64 (ARM64)** | \`tunnelsats_aarch64.s9pk\` | \`$HASH_ARM\` | \`${{ steps.inspect.outputs.sighash_arm }}\` |
+
+          ## How to Verify Checksums
+
+          1. Download the \`.s9pk\` file and the \`SHA256SUMS\` file.
+          2. Run the following command to verify the download's integrity:
+             \`\`\`bash
+             sha256sum -c SHA256SUMS
+             \`\`\`
+
+          ## How to Verify Build Signature
+
+          To confirm that the package was signed by the official TunnelSats builder key:
+          1. Install \`start-cli\` (from [Start9 Labs](https://github.com/Start9Labs/start-technologies/releases)).
+          2. Run the commitment inspection:
+             \`\`\`bash
+             start-cli s9pk inspect <filename.s9pk> commitment
+             \`\`\`
+          3. Confirm the output \`rootSighash\` matches the signature hash documented above.
+          4. Maintainers' signing keys are published here: [TunnelSats Keys](https://github.com/Tunnelsats/tunnelsats/tree/main/keys).
+          EOF
+
+      - name: Publish Draft Release
         uses: softprops/action-gh-release@v1
         with:
           files: |
-            *.s9pk
+            tunnelsats_x86_64.s9pk
+            tunnelsats_aarch64.s9pk
+            SHA256SUMS
+          body_path: release_notes.md
           draft: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

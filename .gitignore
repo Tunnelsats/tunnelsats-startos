@@ -17,6 +17,7 @@ Thumbs.db
 # Node (if using JS for config scripts)
 node_modules/
 package-lock.json
+javascript/
 
 # Logs
 *.log

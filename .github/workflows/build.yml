@@ -2,7 +2,7 @@ name: Build StartOS Package
 
 on:
   push:
-    branches: [main, develop]
+    branches: [main, develop, feat/startos-0.4.0]
     paths-ignore:
       - '**.md'
       - 'LICENSE'
@@ -15,50 +15,8 @@ on:
       - '.gitignore'
 
 jobs:
-  build:
-    runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        platform: [amd64, arm64]
-    
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-      
-      - name: Set up QEMU
-        uses: docker/setup-qemu-action@v3
-      
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
-      
-      - name: Install start-sdk
-        run: |
-          # Install start-sdk (placeholder - adjust for actual install)
-          echo "Installing start-sdk..."
-          # curl -fsSL https://install.start9.com/sdk | bash
-      
-      - name: Build Docker Image
-        run: |
-          # Determine cache-to parameters based on pull request origin to prevent write token failures on forks
-          CACHE_TO=""
-          if [ "${{ github.event_name }}" != "pull_request" ] || [ "${{ github.event.pull_request.head.repo.full_name }}" = "${{ github.repository }}" ]; then
-            CACHE_TO="--cache-to=type=gha,mode=max"
-          fi
-          
-          docker buildx build \
-            --platform linux/${{ matrix.platform }} \
-            --cache-from=type=gha \
-            $CACHE_TO \
-            -o type=docker,dest=image-${{ matrix.platform }}.tar \
-            .
-      
-      - name: Upload artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: docker-image-${{ matrix.platform }}
-          path: image-${{ matrix.platform }}.tar
-
   test:
+    name: Run Unit Tests
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -71,11 +29,65 @@ jobs:
 
       - name: Run Python unit tests
         run: python3 -m unittest discover -s tests -p "test_*.py"
-      
+
       - name: Install bats
         run: |
           sudo apt-get update
           sudo apt-get install -y bats
-      
+
       - name: Run bats tests
         run: bats tests/
+
+  build:
+    name: Build s9pk packages
+    needs: test
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        arch: [x86_64, aarch64]
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+
+      - name: Install Node dependencies
+        run: npm ci
+
+      - name: Install System dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y squashfs-tools jq
+
+      - name: Install start-cli
+        run: |
+          curl -L -o start-cli https://github.com/Start9Labs/start-technologies/releases/download/start-cli%2Fv1.0.1/start-cli_x86_64-linux
+          chmod +x start-cli
+          mkdir -p ~/.local/bin
+          mv start-cli ~/.local/bin/
+          echo "$HOME/.local/bin" >> $GITHUB_PATH
+
+      - name: Initialize Developer Key
+        run: |
+          mkdir -p ~/.startos
+          start-cli init-key
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build and Pack s9pk
+        run: make arch/${{ matrix.arch }}
+
+      - name: Upload Package Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: tunnelsats-${{ matrix.arch }}.s9pk
+          path: tunnelsats_${{ matrix.arch }}.s9pk
