@@ -72,10 +72,11 @@ jobs:
           mv start-cli ~/.local/bin/
           echo "$HOME/.local/bin" >> $GITHUB_PATH
 
-      - name: Initialize Developer Key
+      - name: Initialize Developer Key & Workspace
         run: |
           mkdir -p ~/.startos
           start-cli init-key
+          start-cli s9pk init-workspace ..
 
       - name: Set up QEMU
         uses: docker/setup-qemu-action@v3
