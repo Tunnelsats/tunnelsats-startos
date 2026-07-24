@@ -1,5 +1,6 @@
 {
-  "name": "tunnelsats-test-startos",
+  "name": "tunnelsats-startos",
+  "version": "0.4.0",
   "scripts": {
     "build": "rm -rf ./javascript && ncc build startos/index.ts -o ./javascript",
     "prettier": "prettier --write startos",
