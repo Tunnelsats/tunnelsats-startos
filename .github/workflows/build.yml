@@ -2,13 +2,13 @@ name: Build StartOS Package
 
 on:
   push:
-    branches: [main, develop, feat/startos-0.4.0]
+    branches: [main, main-0.4.0, develop, feat/startos-0.4.0]
     paths-ignore:
       - '**.md'
       - 'LICENSE'
       - '.gitignore'
   pull_request:
-    branches: [main, develop]
+    branches: [main, main-0.4.0, develop]
     paths-ignore:
       - '**.md'
       - 'LICENSE'
