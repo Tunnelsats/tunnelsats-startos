@@ -1,7 +1,7 @@
 id: tunnelsats
 title: "TunnelSats"
-version: 0.3.0
-release-notes: "v0.3.0: Fixes StartOS status page configuration loop ('Needs Config') via dynamic dependency tracking; adds multiple resolution browser favicons; ports GitHub issue templates."
+version: 0.3.1
+release-notes: "v0.3.1: First public release for StartOS 0.3.5.x. Includes web dashboard for connection monitoring, SOCKS5 proxy for outbound privacy routing, inbound port forwarding for clearnet Lightning connections, dynamic dependency tracking (LND/CLN), and configuration persistence across restarts."
 license: "MIT"
 wrapper-repo: "https://github.com/Tunnelsats/tunnelsats-startos"
 upstream-repo: "https://github.com/Tunnelsats/tunnelsats"
