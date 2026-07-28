@@ -342,6 +342,7 @@ class DashboardHTTPRequestHandler(BaseHTTPRequestHandler):
             internal_octet = wg_ip.split('.')[-1] if wg_ip else "Unknown"
 
             response = {
+                "version": "0.4.0",
                 "enabled": is_enabled(),
                 "status": status_data["status"],
                 "vpn_connected": status_data["vpn_connected"],

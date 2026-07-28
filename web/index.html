@@ -348,9 +348,7 @@
                 </li>
               </ol>
               <p class="faq-note">
-                ⚡ Don't forget to also update your <code>lnd.conf</code> or CLN
-                config file — see the <em>Setup Guides</em> section on this
-                dashboard for the exact lines to add.
+                ⚡ Don't forget to advertise your endpoint in your Lightning node — see the <em>Setup Guides</em> section on this dashboard for LND (StartOS UI Action) or CLN configuration.
               </p>
             </div>
           </details>
@@ -373,12 +371,11 @@
                   Saving the config does not automatically enable the tunnel.
                 </li>
                 <li>
-                  <strong>Verify your lnd.conf / CLN config.</strong> The tunnel
+                  <strong>Verify your Lightning node configuration.</strong> The tunnel
                   can be connected but your Lightning node won't broadcast
-                  correctly until you've added the
-                  <code>externalhosts=</code> (LND) or
-                  <code>announce-addr=</code> (CLN) lines and restarted the
-                  service.
+                  correctly until you've configured the
+                  <strong>Custom External Host</strong> (LND UI Action) or
+                  <code>announce-addr=</code> (CLN) and restarted the node.
                 </li>
                 <li>
                   <strong>Check the VPN endpoint.</strong> The WireGuard

@@ -43,6 +43,14 @@ function updateUI() {
 
   document.getElementById('val-octet').textContent =
     statusData.internal_octet || 'Unknown'
+
+  // Footer Version
+  if (statusData.version) {
+    const versionEl = document.getElementById('footer-version')
+    if (versionEl) {
+      versionEl.textContent = 'v' + statusData.version
+    }
+  }
   // 3. Highlighted guide config parameters
   const ipElements = document.querySelectorAll('.highlight-ip')
   const portElements = document.querySelectorAll('.highlight-port')
