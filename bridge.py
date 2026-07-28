@@ -248,16 +248,39 @@ def subscription_sync_loop():
 
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
+_package_version_cache = None
+
 def get_package_version():
+    global _package_version_cache
+    if _package_version_cache is not None:
+        return _package_version_cache
+
+    current_ts = os.path.join(os.path.dirname(__file__), "startos", "versions", "current.ts")
+    if os.path.exists(current_ts):
+        try:
+            with open(current_ts, "r") as f:
+                content = f.read()
+            match = re.search(r"version:\s*['\"]([^'\"]+)['\"]", content)
+            if match:
+                _package_version_cache = match.group(1)
+                return _package_version_cache
+        except Exception:
+            pass
+
     pkg_path = os.path.join(os.path.dirname(__file__), "package.json")
     if os.path.exists(pkg_path):
         try:
             with open(pkg_path, "r") as f:
                 data = json.load(f)
-                return data.get("version", "0.4.0")
+                ver = data.get("version")
+                if ver:
+                    _package_version_cache = ver
+                    return _package_version_cache
         except Exception:
             pass
-    return "0.4.0"
+
+    _package_version_cache = "Unknown"
+    return _package_version_cache
 
 class DashboardHTTPRequestHandler(BaseHTTPRequestHandler):
     def log_message(self, format, *args):

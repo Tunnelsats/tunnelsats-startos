@@ -177,7 +177,9 @@ function copyText(elementId, btn) {
 
 function copyCode(elementId, btn) {
   const text = document.getElementById(elementId).textContent
-  executeCopy(text, btn, 'Copied Block!')
+  const originalText = btn ? btn.textContent.trim() : ''
+  const successText = originalText ? originalText.replace(/^Copy\b/, 'Copied') + '!' : 'Copied!'
+  executeCopy(text, btn, successText)
 }
 
 function switchTab(tabId, btn) {
