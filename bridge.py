@@ -439,6 +439,14 @@ def get_target_details():
     """
     Returns (target_host, target_port) based on the target node config.
     """
+    env_addr = os.environ.get("TARGET_NODE_ADDR")
+    if env_addr:
+        try:
+            host, port = env_addr.split(":")
+            return host, int(port)
+        except Exception as e:
+            print(f"Error parsing TARGET_NODE_ADDR '{env_addr}': {e}", file=sys.stderr)
+
     target = "lnd"
     try:
         if os.path.exists(APP_CONFIG_PATH):
@@ -454,6 +462,7 @@ def get_target_details():
     else:
         hostname = "lnd.embassy"
     return hostname, 9735
+
 
 
 def generate_wireproxy_config():

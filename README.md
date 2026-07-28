@@ -3,16 +3,20 @@
 <br/>
 
 <div align="center">
-  <img src="https://img.shields.io/github/actions/workflow/status/Tunnelsats/tunnelsats-startos/build.yml?branch=main&label=Build%20Status&style=flat-square" alt="Build Status"/>
+  <img src="https://img.shields.io/github/actions/workflow/status/Tunnelsats/tunnelsats-startos/build.yml?branch=main-0.4.0&label=Build%20Status&style=flat-square" alt="Build Status"/>
   <img src="https://img.shields.io/github/license/Tunnelsats/tunnelsats-startos?style=flat-square&color=blue" alt="License"/>
   <a href="https://tunnelsats.com/join-telegram"><img src="https://img.shields.io/badge/Telegram-Join%20Community-blue?style=flat-square&logo=telegram" alt="Telegram"/></a>
 </div>
 
 <br/>
 
-# TunnelSats for StartOS
+# TunnelSats for StartOS (v0.4.0+)
 
-This repository contains the containerized version of [TunnelSats](https://tunnelsats.com/) optimized for [StartOS](https://start9.com) (fully compatible with v0.3.5.x and later).
+This branch contains the official package of [TunnelSats](https://tunnelsats.com/) built for **[StartOS 0.4.0+](https://start9.com)** using the modern StartOS TypeScript SDK (`@start9labs/start-sdk`).
+
+> **Looking for StartOS 0.3.5.x?** Please refer to the [`main`](https://github.com/Tunnelsats/tunnelsats-startos/tree/main) branch for 0.3.5.x compatible releases.
+
+---
 
 ## ⚡ What it Solves
 Running a Lightning Network node (LND/CLN) over Tor ensures privacy but introduces latency and routing reliability issues. Conversely, running purely on Clearnet exposes your home IP address. 
@@ -22,26 +26,27 @@ By establishing a secure WireGuard tunnel to one of our global servers, your nod
 
 ---
 
-## 🚀 Features
-- **In-App Web Dashboard**: Manage and verify your connection, inspect subscription status, and monitor data limits via a sleek, dark-themed responsive UI.
-- **Dynamic Dependency Mapping**: Automatically configured and integrated into StartOS's service manager. The system dynamically updates dependency states (LND or Core Lightning) based on your selected target.
-- **Zero Sudo Host Routing**: Operates entirely in userspace using `wireproxy` inside the isolated container namespace. No modification of host-level `iptables` or system network interfaces is required.
+## 🚀 Features & StartOS 0.4.0 Enhancements
+- **In-App Web Dashboard**: Manage and verify your connection, inspect subscription status, and monitor data limits via a sleek UI.
+- **StartOS 0.4.0 TypeScript SDK Architecture**: Built with strongly-typed reactive file models, lifecycle handlers, and subcontainer isolation.
+- **Dynamic Dependency Mapping**: Automatically updates dependency states (`lnd` or `c-lightning`) based on your selected target Lightning node.
+- **Zero Sudo Host Routing**: Operates entirely in userspace using `wireproxy` inside the isolated container namespace. No modification of host-level `iptables` or system network interfaces required.
 
 ---
 
 ## 🛠 Architecture & Dataplane
 
-StartOS strictly isolates services. Apps cannot manipulate host-level routing or run in host network mode. TunnelSats implements a **Proxy & Forwarding Model** strictly confined to the `tunnelsats` container:
+StartOS strictly isolates services. TunnelSats implements a **Proxy & Forwarding Model** strictly confined to the `tunnelsats` container:
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│                        StartOS                              │
+│                        StartOS 0.4.0                        │
 │  ┌─────────────┐     ┌──────────────────────┐               │
 │  │  LND / CLN  │────▶│  TunnelSats Service  │               │
-│  └─────────────┘     │  ┌────────────────┐  │               │
+│  └─────────────┘     │  (SubContainer: main)│               │
+│        │             │  ┌────────────────┐  │               │
 │        │             │  │   wireproxy    │──┼──▶ Clearnet   │
-│        │             │  │  (userspace)   │  │ (VPN Server)  │
-│        ▼             │  ├────────────────┤  │               │
+│        ▼             │  │  (userspace)   │  │ (VPN Server)  │
 │   Tor Daemon ───────▶│  │ SOCKS5 Proxy   │  │               │
 │   (optional)         │  │ (port 1080)    │  │               │
 │                      │  ├────────────────┤  │               │
@@ -55,117 +60,57 @@ StartOS strictly isolates services. Apps cannot manipulate host-level routing or
 ```
 
 1. **Outbound (SOCKS5)**: `wireproxy` connects to the TunnelSats WireGuard server and exposes a local SOCKS5 proxy on port `1080`. Your Lightning Node (LND/CLN) is configured to route outbound peer-to-peer connections through this proxy.
-2. **Inbound (Port Forwarding)**: Traffic arriving on your assigned TunnelSats external port is forwarded through the userspace WireGuard tunnel directly to your target Lightning service (`lnd.embassy` or `c-lightning.embassy`) on port `9735`.
+2. **Inbound (Port Forwarding)**: Traffic arriving on your assigned TunnelSats external port is forwarded through the userspace WireGuard tunnel directly to your target Lightning service (`lnd` or `c-lightning`) on port `9735`.
 
 ---
 
 ## 📦 Installation & Configuration
 
 ### Prerequisites
-1. A StartOS server (v0.3.5.x or later).
+1. A StartOS server running **v0.4.0+**.
 2. LND or Core Lightning installed.
 3. An active TunnelSats subscription from [tunnelsats.com](https://tunnelsats.com).
 
 ### Step 1: Install TunnelSats
-- **Sideload (Development)**:
-  1. Download the latest `.s9pk` from [Releases](https://github.com/Tunnelsats/tunnelsats-startos/releases) or build it from source.
-  2. In your StartOS dashboard, navigate to **System** → **Sideload Service** and upload the package.
+- **Sideloading (Development / Early Access)**:
+  1. Download the latest `.s9pk` from [Releases](https://github.com/Tunnelsats/tunnelsats-startos/releases) or build it locally.
+  2. In your StartOS dashboard, navigate to **System** → **Sideload Service** and upload `tunnelsats_x86_64.s9pk` (or `tunnelsats_aarch64.s9pk` for ARM64).
 
 ### Step 2: Configure the Tunnel
 1. Purchase a subscription at [tunnelsats.com](https://tunnelsats.com) or renew an existing one.
 2. Download your WireGuard `.conf` configuration file.
-3. In your StartOS dashboard, click on the **TunnelSats** service, open **Config**, and paste the entire content of the `.conf` file.
-4. Toggle **Enable TunnelSats** to `On`, choose your **Target Lightning Node** (LND or CLN), and click **Save**.
+3. In your StartOS dashboard, click on the **TunnelSats** service, open **Config**, and paste the content of your `.conf` file into the form.
+4. Toggle **Enable TunnelSats** to `On`, choose your **Target Lightning Node** (`LND` or `Core Lightning`), and click **Save**.
 5. Start the service.
 
-### Step 3: Configure LND or Core Lightning (Persistence Workarounds)
+### Step 3: Configure Target Lightning Node (LND / CLN)
 
-On StartOS, manual changes to configuration files (like `lnd.conf` or CLN's `config`) are normally overwritten on restarts or updates. Use the following methods to ensure your TunnelSats VPN address remains persistent.
-
-#### Option A: LND Node Configuration
-
-##### On StartOS 0.3.5.x (Active version)
-The LND wrapper runs a `configurator` utility on startup that rewrites `lnd.conf` based on LND's `config.yaml` values, wiping manual edits. You can permanently inject your TunnelSats external host by utilizing a newline injection in LND's `peer-tor-address` field:
-1. SSH into your StartOS host:
-   ```bash
-   ssh start9@<your-node-ip>
-   ```
-2. Open LND's configuration YAML:
-   ```bash
-   sudo nano /embassy-data/package-data/volumes/lnd/data/main/start9/config.yaml
-   ```
-3. Locate the `peer-tor-address` line and wrap it in quotes, appending a newline (`\n`) and your custom external host parameter:
-   ```yaml
-   peer-tor-address: "yournodeaddress.onion\nexternalhosts=your-vpn-server.com:your-vpn-port"
-   ```
-4. Save and exit (`Ctrl+O`, `Ctrl+X`), then restart the LND service in the StartOS dashboard. The configurator will generate two valid `externalhosts` entries in `lnd.conf`, advertising both Tor and your clearnet tunnel.
-
-##### On StartOS 0.4.0+ (TypeScript SDK)
+#### Option A: LND Node Configuration (StartOS 0.4.0+)
 StartOS 0.4.x natively supports external hosts:
-1. In the LND service UI under the **Actions** menu, select **Custom External Host**.
-2. Enter your TunnelSats domain and port (e.g. `your-vpn-server.com:your-vpn-port`).
-3. Click submit and restart LND. This writes to `store.json` and is persistently merged into `lnd.conf` on every boot.
-
----
+1. Open the LND service UI, click the **Actions** menu, and select **Custom External Host**.
+2. Enter your TunnelSats domain and assigned port (e.g. `your-vpn-server.com:your-vpn-port`).
+3. Submit and restart LND. This writes to `store.json` and persistently merges into `lnd.conf` on every boot.
 
 #### Option B: Core Lightning (CLN) Node Configuration
-
-##### On StartOS 0.3.5.x (Active version)
-CLN's entrypoint script generates `/root/.lightning/config` from `/root/.lightning/config.main` on container start, wiping manual edits. We can hook into the persistent startup script `waitForStart.sh` to automatically re-append the settings on every container boot:
-1. SSH into your StartOS host:
-   ```bash
-   ssh start9@<your-node-ip>
-   ```
-2. Open the persistent startup script:
-   ```bash
-   sudo nano /embassy-data/package-data/volumes/c-lightning/data/main/start9/waitForStart.sh
-   ```
-3. Add the following lines at the very end of the file (before the script exits):
-   ```bash
-    # Bind CLN to accept clearnet connections
-    if ! grep -q "^[[:space:]]*bind-addr=0.0.0.0:9735" /root/.lightning/config.main 2>/dev/null; then
-      echo "bind-addr=0.0.0.0:9735" >> /root/.lightning/config.main
-    fi
-    if ! grep -q "^[[:space:]]*bind-addr=0.0.0.0:9735" /root/.lightning/config 2>/dev/null; then
-      echo "bind-addr=0.0.0.0:9735" >> /root/.lightning/config
-    fi
-
-    # Append TunnelSats VPN announce-addr if missing
-    VPN_ADDR="your-vpn-server.com:your-vpn-port"
-    if ! grep -q "^[[:space:]]*announce-addr=$VPN_ADDR" /root/.lightning/config.main 2>/dev/null; then
-      echo "announce-addr=$VPN_ADDR" >> /root/.lightning/config.main
-    fi
-    if ! grep -q "^[[:space:]]*announce-addr=$VPN_ADDR" /root/.lightning/config 2>/dev/null; then
-      echo "announce-addr=$VPN_ADDR" >> /root/.lightning/config
-    fi
-   ```
-4. Save and exit, then restart the Core Lightning service in the StartOS dashboard. The startup hook will dynamically apply the changes to both the active and template configurations immediately.
-
-##### On StartOS 0.4.0+ (TypeScript SDK)
-In StartOS 0.4.x, the CLN configuration is rebuilt dynamically by `watchHosts.ts` on startup. To announce your TunnelSats endpoint permanently:
-- A future enhancement PR has been proposed to the official `cln-startos` repository to introduce a "Custom External Host" UI action identical to LND.
-- Until natively merged, you can implement this by appending the TunnelSats endpoint directly to the `announce-addr` list in `/root/.lightning/config` using a container startup hook.
+In StartOS 0.4.x, CLN configuration is rebuilt dynamically on startup. Append your TunnelSats endpoint to `announce-addr` in `/root/.lightning/config` using a container startup hook or wait for the upstream CLN UI action.
 
 ---
 
-## 🛠 Diagnostic Tool (`verify.sh`)
+## 🛠 Diagnostic Verification Tool
 
-We bundle a secure diagnostic tool inside the container that you can run on your StartOS host to verify that your tunnel and ports are aligned:
+To run container diagnostics on a StartOS 0.4.0 server:
 
 ```bash
-# Run the verification script inside the container namespace from your host
-sudo podman exec -it tunnelsats.embassy /app/verify.sh
+start-cli package attach tunnelsats -n main -- /app/verify.sh
 ```
 
 Example Output:
 ```text
 [INFO] Running diagnostic checks from inside the container namespace.
-[INFO] Querying API status from the orchestrator...
 [INFO] Current Properties:
   - Enabled: True
   - Public IP: ch1.tunnelsats.com
   - VPN Port: 24556
-  - PubKey: Wh+WdZHLty4p3BHbeWZioeEVbhFLlS1H/5dj/++QmSw=
 [INFO] Verifying outbound SOCKS5 proxy routing...
 [INFO] Outbound SOCKS5 proxy resolves via IP: 83.228.229.56
 [INFO] Datapath Verification: Outbound alignment is CORRECT (matches VPN IP).
@@ -176,25 +121,13 @@ Example Output:
 
 ---
 
-## 💻 Developer Guide
+## 🏷 Versioning Strategy
 
-### Requirements
-- Docker (with buildx support)
-- [start-sdk](https://github.com/Start9Labs/start-os/tree/master/core)
-- Make
+TunnelSats follows StartOS SemVer versioning specifications (`<version>:<revision>`):
+- Current Package Version: `0.4.0:0` (declared in [`startos/versions/current.ts`](file:///home/admin/Development/tunnelsats-startos/startos/versions/current.ts) and [`package.json`](file:///home/admin/Development/tunnelsats-startos/package.json)).
+- Revisions (`:0`, `:1`) indicate packaging/wrapper updates for the same upstream release.
 
-### Building the Package
-```bash
-git clone https://github.com/Tunnelsats/tunnelsats-startos.git
-cd tunnelsats-startos
-make
-```
-This produces `tunnelsats.s9pk`, which you can sideload directly onto your server.
-
-### Running Unit Tests
-```bash
-python3 -m unittest discover -s tests -p "test_*.py"
-```
+For detailed developer instructions, SDK file layouts, and build guidelines, refer to [`DEVELOPMENT.md`](file:///home/admin/Development/tunnelsats-startos/DEVELOPMENT.md).
 
 ---
 

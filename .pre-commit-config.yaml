@@ -1,0 +1,23 @@
+repos:
+  - repo: local
+    hooks:
+      - id: prettier
+        name: Prettier Formatting Check
+        entry: npx prettier --check "startos/**/*.ts" "web/**/*.html" "web/**/*.js" "web/**/*.css"
+        language: system
+        pass_filenames: false
+      - id: tsc-check
+        name: TypeScript Check
+        entry: npm run check
+        language: system
+        pass_filenames: false
+      - id: python-tests
+        name: Python Unit Tests
+        entry: python3 -m unittest discover -s tests -p "test_*.py"
+        language: system
+        pass_filenames: false
+      - id: bats-tests
+        name: BATS Integration Tests
+        entry: bats tests/
+        language: system
+        pass_filenames: false

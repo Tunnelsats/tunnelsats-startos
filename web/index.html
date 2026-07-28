@@ -1,297 +1,609 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
-
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Tunnel⚡Sats</title>
-    <meta name="description"
-        content="TunnelSats VPN dashboard for Lightning Network nodes on StartOS. Monitor tunnel status, subscription expiry, and connection properties.">
-    <link rel="icon" type="image/svg+xml" href="favicon.svg">
-    <link rel="icon" type="image/png" sizes="32x32" href="favicon-32x32.png">
-    <link rel="icon" type="image/png" sizes="16x16" href="favicon-16x16.png">
-    <link rel="apple-touch-icon" sizes="180x180" href="apple-touch-icon.png">
+    <meta
+      name="description"
+      content="TunnelSats VPN dashboard for Lightning Network nodes on StartOS. Monitor tunnel status, subscription expiry, and connection properties."
+    />
+    <link rel="icon" type="image/svg+xml" href="favicon.svg" />
+    <link rel="icon" type="image/png" sizes="32x32" href="favicon-32x32.png" />
+    <link rel="icon" type="image/png" sizes="16x16" href="favicon-16x16.png" />
+    <link rel="apple-touch-icon" sizes="180x180" href="apple-touch-icon.png" />
     <!-- System font fallbacks are used to ensure complete offline and Tor compatibility -->
-    <link rel="stylesheet" href="style.css">
-</head>
+    <link rel="stylesheet" href="style.css" />
+  </head>
 
-<body>
+  <body>
     <div class="background-glow"></div>
     <div class="dashboard-container">
-        <!-- Header -->
-        <header class="dashboard-header">
-            <div class="brand">
-                <img src="logo.svg" alt="TunnelSats Logo" class="brand-logo">
-                <div class="brand-text">
-                    <h1>TunnelSats</h1>
-                    <span class="subtext">Lightning Network VPN Router</span>
-                </div>
+      <!-- Header -->
+      <header class="dashboard-header">
+        <div class="brand">
+          <img src="logo.svg" alt="TunnelSats Logo" class="brand-logo" />
+          <div class="brand-text">
+            <h1>TunnelSats</h1>
+            <span class="subtext">Lightning Network VPN Router</span>
+          </div>
+        </div>
+        <div class="status-badge-container">
+          <span id="status-badge" class="status-badge inactive">
+            <span class="pulse-dot"></span>
+            <span class="status-text">TUNNEL INACTIVE</span>
+          </span>
+        </div>
+      </header>
+
+      <!-- Main Content Grid -->
+      <main class="dashboard-grid">
+        <!-- Subscription Card -->
+        <section class="card glass-card span-2 subscription-card">
+          <div class="card-header">
+            <h2>Subscription Status</h2>
+            <span class="info-label" id="expiry-date-raw">Unknown</span>
+          </div>
+          <div class="subscription-content">
+            <div class="countdown-container">
+              <span class="countdown-label">Time Remaining</span>
+              <div class="countdown-timer" id="countdown-timer">
+                Checking...
+              </div>
             </div>
-            <div class="status-badge-container">
-                <span id="status-badge" class="status-badge inactive">
-                    <span class="pulse-dot"></span>
-                    <span class="status-text">TUNNEL INACTIVE</span>
-                </span>
+            <div class="progress-bar-container">
+              <div
+                class="progress-bar"
+                id="subscription-progress"
+                style="width: 0%"
+              ></div>
             </div>
-        </header>
+          </div>
+        </section>
 
-        <!-- Main Content Grid -->
-        <main class="dashboard-grid">
-            <!-- Subscription Card -->
-            <section class="card glass-card span-2 subscription-card">
-                <div class="card-header">
-                    <h2>Subscription Status</h2>
-                    <span class="info-label" id="expiry-date-raw">Unknown</span>
-                </div>
-                <div class="subscription-content">
-                    <div class="countdown-container">
-                        <span class="countdown-label">Time Remaining</span>
-                        <div class="countdown-timer" id="countdown-timer">Checking...</div>
-                    </div>
-                    <div class="progress-bar-container">
-                        <div class="progress-bar" id="subscription-progress" style="width: 0%;"></div>
-                    </div>
-                </div>
-            </section>
+        <!-- Connection Details Card -->
+        <section class="card glass-card span-2 properties-card">
+          <h2>Connection Properties</h2>
+          <div class="properties-grid">
+            <div class="prop-item">
+              <div class="prop-label">TunnelSats Public IP</div>
+              <div class="prop-value-group">
+                <span class="prop-value" id="val-public-ip">...</span>
+                <button
+                  class="btn-copy"
+                  onclick="copyText('val-public-ip', this)"
+                >
+                  Copy
+                </button>
+              </div>
+            </div>
+            <div class="prop-item">
+              <div class="prop-label">Forwarding Port</div>
+              <div class="prop-value-group">
+                <span class="prop-value" id="val-vpn-port">...</span>
+                <button
+                  class="btn-copy"
+                  onclick="copyText('val-vpn-port', this)"
+                >
+                  Copy
+                </button>
+              </div>
+            </div>
+            <div class="prop-item">
+              <div class="prop-label">WireGuard Public Key</div>
+              <div class="prop-value-group">
+                <span class="prop-value truncated" id="val-pubkey">...</span>
+                <button class="btn-copy" onclick="copyText('val-pubkey', this)">
+                  Copy
+                </button>
+              </div>
+            </div>
+            <div class="prop-item">
+              <div class="prop-label">Internal IP (Last Octet)</div>
+              <div class="prop-value-group">
+                <span class="prop-value" id="val-octet">...</span>
+                <button class="btn-copy" onclick="copyText('val-octet', this)">
+                  Copy
+                </button>
+              </div>
+            </div>
+            <div class="prop-item">
+              <div class="prop-label">SOCKS5 Proxy (Outbound)</div>
+              <div class="prop-value-group">
+                <span class="prop-value" id="val-socks5">127.0.0.1:1080</span>
+                <button class="btn-copy" onclick="copyText('val-socks5', this)">
+                  Copy
+                </button>
+              </div>
+            </div>
+          </div>
+        </section>
 
-            <!-- Connection Details Card -->
-            <section class="card glass-card span-2 properties-card">
-                <h2>Connection Properties</h2>
-                <div class="properties-grid">
-                    <div class="prop-item">
-                        <div class="prop-label">TunnelSats Public IP</div>
-                        <div class="prop-value-group">
-                            <span class="prop-value" id="val-public-ip">...</span>
-                            <button class="btn-copy" onclick="copyText('val-public-ip', this)">Copy</button>
-                        </div>
-                    </div>
-                    <div class="prop-item">
-                        <div class="prop-label">Forwarding Port</div>
-                        <div class="prop-value-group">
-                            <span class="prop-value" id="val-vpn-port">...</span>
-                            <button class="btn-copy" onclick="copyText('val-vpn-port', this)">Copy</button>
-                        </div>
-                    </div>
-                    <div class="prop-item">
-                        <div class="prop-label">WireGuard Public Key</div>
-                        <div class="prop-value-group">
-                            <span class="prop-value truncated" id="val-pubkey">...</span>
-                            <button class="btn-copy" onclick="copyText('val-pubkey', this)">Copy</button>
-                        </div>
-                    </div>
-                    <div class="prop-item">
-                        <div class="prop-label">Internal IP (Last Octet)</div>
-                        <div class="prop-value-group">
-                            <span class="prop-value" id="val-octet">...</span>
-                            <button class="btn-copy" onclick="copyText('val-octet', this)">Copy</button>
-                        </div>
-                    </div>
-                    <div class="prop-item">
-                        <div class="prop-label">SOCKS5 Proxy (Outbound)</div>
-                        <div class="prop-value-group">
-                            <span class="prop-value" id="val-socks5">127.0.0.1:1080</span>
-                            <button class="btn-copy" onclick="copyText('val-socks5', this)">Copy</button>
-                        </div>
-                    </div>
-                </div>
-            </section>
+        <!-- Documentation & Guides Card -->
+        <section class="card glass-card span-2 docs-card">
+          <div class="docs-header">
+            <h2>Lightning Routing Setup Guides</h2>
+            <div class="tabs">
+              <button
+                class="tab-btn active"
+                onclick="switchTab('lnd-tab', this)"
+              >
+                LND
+              </button>
+              <button class="tab-btn" onclick="switchTab('cln-tab', this)">
+                Core Lightning (CLN)
+              </button>
+            </div>
+          </div>
 
-            <!-- Documentation & Guides Card -->
-            <section class="card glass-card span-2 docs-card">
-                <div class="docs-header">
-                    <h2>Lightning Routing Setup Guides</h2>
-                    <div class="tabs">
-                        <button class="tab-btn active" onclick="switchTab('lnd-tab', this)">LND</button>
-                        <button class="tab-btn" onclick="switchTab('cln-tab', this)">Core Lightning (CLN)</button>
-                    </div>
-                </div>
-
-                <div class="tab-content active" id="lnd-tab">
-                    <p class="guide-intro">Configure LND to announce the TunnelSats public IP and port, while ensuring
-                        normal routing for Tor/clearnet peers.</p>
-                    <div class="code-block-header">
-                        <span>Append to your <code>lnd.conf</code>:</span>
-                        <button class="btn-copy-code" onclick="copyCode('lnd-code', this)">Copy Block</button>
-                    </div>
-                    <pre><code id="lnd-code"># [Application Options]
+          <div class="tab-content active" id="lnd-tab">
+            <p class="guide-intro">
+              Configure LND to announce the TunnelSats public IP and port, while
+              ensuring normal routing for Tor/clearnet peers.
+            </p>
+            <div class="code-block-header">
+              <span>Append to your <code>lnd.conf</code>:</span>
+              <button
+                class="btn-copy-code"
+                onclick="copyCode('lnd-code', this)"
+              >
+                Copy Block
+              </button>
+            </div>
+            <pre><code id="lnd-code"># [Application Options]
 externalhosts=<span class="highlight-ip">tunnelsats_ip</span>:<span class="highlight-port">tunnelsats_port</span>
 
 # [tor]
 tor.skip-proxy-for-clearnet-targets=true
 tor.streamisolation=false</code></pre>
-                    <div class="warning-box">
-                        <strong>Important Note:</strong> Restart the LND service on StartOS after modifying its config
-                        file to apply the new announced address.
-                    </div>
-                </div>
-
-                <div class="tab-content" id="cln-tab">
-                    <p class="guide-intro">Configure Core Lightning to announce your TunnelSats external IP and port for
-                        inbound peer-to-peer connections.</p>
-                    <div class="code-block-header">
-                        <span>Append to your CLN <code>config</code> file:</span>
-                        <button class="btn-copy-code" onclick="copyCode('cln-code', this)">Copy Block</button>
-                    </div>
-                    <pre><code id="cln-code">announce-addr=<span class="highlight-ip">tunnelsats_ip</span>:<span class="highlight-port">tunnelsats_port</span></code></pre>
-                    <div class="warning-box">
-                        <strong>Important Note:</strong> Restart the Core Lightning service on StartOS after saving
-                        these modifications.
-                    </div>
-                </div>
-            </section>
-        </main>
-
-        <footer class="dashboard-footer">
-            <div class="footer-links">
-                <a href="https://tunnelsats.com" target="_blank" rel="noopener" class="footer-link" id="link-website">
-                    <svg class="footer-link-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
-                        stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-                        <circle cx="12" cy="12" r="10"></circle>
-                        <line x1="2" y1="12" x2="22" y2="12"></line>
-                        <path
-                            d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z">
-                        </path>
-                    </svg>
-                    TunnelSats.com
-                </a>
-                <span class="footer-divider" aria-hidden="true">·</span>
-                <a href="https://tunnelsats.com/status" target="_blank" rel="noopener" class="footer-link"
-                    id="link-status">
-                    <svg class="footer-link-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
-                        stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-                        <polyline points="22 12 18 12 15 21 9 3 6 12 2 12"></polyline>
-                    </svg>
-                    Server Status
-                </a>
-                <span class="footer-divider" aria-hidden="true">·</span>
-                <button class="footer-link footer-btn-faq" id="btn-open-faq" onclick="openFaqModal()"
-                    aria-haspopup="dialog">
-                    <svg class="footer-link-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
-                        stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-                        <circle cx="12" cy="12" r="10"></circle>
-                        <path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"></path>
-                        <line x1="12" y1="17" x2="12.01" y2="17"></line>
-                    </svg>
-                    FAQ &amp; Help
-                </button>
+            <div class="warning-box">
+              <strong>Important Note:</strong> Restart the LND service on
+              StartOS after modifying its config file to apply the new announced
+              address.
             </div>
-        </footer>
+          </div>
+
+          <div class="tab-content" id="cln-tab">
+            <p class="guide-intro">
+              Configure Core Lightning to announce your TunnelSats external IP
+              and port for inbound peer-to-peer connections.
+            </p>
+            <div class="code-block-header">
+              <span>Append to your CLN <code>config</code> file:</span>
+              <button
+                class="btn-copy-code"
+                onclick="copyCode('cln-code', this)"
+              >
+                Copy Block
+              </button>
+            </div>
+            <pre><code id="cln-code">announce-addr=<span class="highlight-ip">tunnelsats_ip</span>:<span class="highlight-port">tunnelsats_port</span></code></pre>
+            <div class="warning-box">
+              <strong>Important Note:</strong> Restart the Core Lightning
+              service on StartOS after saving these modifications.
+            </div>
+          </div>
+        </section>
+      </main>
+
+      <footer class="dashboard-footer">
+        <div class="footer-links">
+          <a
+            href="https://tunnelsats.com"
+            target="_blank"
+            rel="noopener"
+            class="footer-link"
+            id="link-website"
+          >
+            <svg
+              class="footer-link-icon"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              aria-hidden="true"
+            >
+              <circle cx="12" cy="12" r="10"></circle>
+              <line x1="2" y1="12" x2="22" y2="12"></line>
+              <path
+                d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"
+              ></path>
+            </svg>
+            TunnelSats.com
+          </a>
+          <span class="footer-divider" aria-hidden="true">·</span>
+          <a
+            href="https://tunnelsats.com/status"
+            target="_blank"
+            rel="noopener"
+            class="footer-link"
+            id="link-status"
+          >
+            <svg
+              class="footer-link-icon"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              aria-hidden="true"
+            >
+              <polyline points="22 12 18 12 15 21 9 3 6 12 2 12"></polyline>
+            </svg>
+            Server Status
+          </a>
+          <span class="footer-divider" aria-hidden="true">·</span>
+          <button
+            class="footer-link footer-btn-faq"
+            id="btn-open-faq"
+            onclick="openFaqModal()"
+            aria-haspopup="dialog"
+          >
+            <svg
+              class="footer-link-icon"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              aria-hidden="true"
+            >
+              <circle cx="12" cy="12" r="10"></circle>
+              <path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"></path>
+              <line x1="12" y1="17" x2="12.01" y2="17"></line>
+            </svg>
+            FAQ &amp; Help
+          </button>
+        </div>
+      </footer>
     </div>
 
     <!-- ════════════════════════════════════════════ -->
     <!-- FAQ Modal                                    -->
     <!-- ════════════════════════════════════════════ -->
-    <dialog id="faq-modal" class="faq-modal" aria-labelledby="faq-modal-title" aria-modal="true">
-        <div class="faq-dialog-inner">
-            <div class="faq-modal-header">
-                <div class="faq-modal-title-row">
-                    <svg class="faq-title-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
-                        stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-                        <circle cx="12" cy="12" r="10"></circle>
-                        <path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"></path>
-                        <line x1="12" y1="17" x2="12.01" y2="17"></line>
-                    </svg>
-                    <h2 id="faq-modal-title">Frequently Asked Questions</h2>
-                </div>
-                <button class="faq-close-btn" id="btn-close-faq" onclick="closeFaqModal()" aria-label="Close FAQ">
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"
-                        stroke-linejoin="round" aria-hidden="true">
-                        <line x1="18" y1="6" x2="6" y2="18"></line>
-                        <line x1="6" y1="6" x2="18" y2="18"></line>
-                    </svg>
-                </button>
+    <dialog
+      id="faq-modal"
+      class="faq-modal"
+      aria-labelledby="faq-modal-title"
+      aria-modal="true"
+    >
+      <div class="faq-dialog-inner">
+        <div class="faq-modal-header">
+          <div class="faq-modal-title-row">
+            <svg
+              class="faq-title-icon"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              aria-hidden="true"
+            >
+              <circle cx="12" cy="12" r="10"></circle>
+              <path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"></path>
+              <line x1="12" y1="17" x2="12.01" y2="17"></line>
+            </svg>
+            <h2 id="faq-modal-title">Frequently Asked Questions</h2>
+          </div>
+          <button
+            class="faq-close-btn"
+            id="btn-close-faq"
+            onclick="closeFaqModal()"
+            aria-label="Close FAQ"
+          >
+            <svg
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2.5"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              aria-hidden="true"
+            >
+              <line x1="18" y1="6" x2="6" y2="18"></line>
+              <line x1="6" y1="6" x2="18" y2="18"></line>
+            </svg>
+          </button>
+        </div>
+
+        <div class="faq-body">
+          <!-- Q1 -->
+          <details class="faq-item">
+            <summary class="faq-question">
+              How do I activate my TunnelSats subscription?
+            </summary>
+            <div class="faq-answer">
+              <p>
+                You need two things: your WireGuard <code>.conf</code> file and
+                the <strong>Enable TunnelSats</strong> toggle.
+              </p>
+              <ol>
+                <li>
+                  Open the <strong>TunnelSats config page</strong> in StartOS (⚙
+                  → Configure).
+                </li>
+                <li>
+                  Log in to
+                  <a
+                    href="https://tunnelsats.com"
+                    target="_blank"
+                    rel="noopener"
+                    >tunnelsats.com</a
+                  >, download your <code>.conf</code> file, and paste its full
+                  contents into the
+                  <strong>WireGuard Configuration</strong> field.
+                </li>
+                <li>
+                  Set the <strong>Enable TunnelSats</strong> toggle to
+                  <strong>On</strong>.
+                </li>
+                <li>
+                  Select your Lightning node (LND or Core Lightning) and click
+                  <strong>Save</strong>.
+                </li>
+              </ol>
+              <p class="faq-note">
+                ⚡ Don't forget to also update your <code>lnd.conf</code> or CLN
+                config file — see the <em>Setup Guides</em> section on this
+                dashboard for the exact lines to add.
+              </p>
             </div>
+          </details>
 
-            <div class="faq-body">
-                <!-- Q1 -->
-                <details class="faq-item">
-                    <summary class="faq-question">How do I activate my TunnelSats subscription?</summary>
-                    <div class="faq-answer">
-                        <p>You need two things: your WireGuard <code>.conf</code> file and the <strong>Enable
-                                TunnelSats</strong> toggle.</p>
-                        <ol>
-                            <li>Open the <strong>TunnelSats config page</strong> in StartOS (⚙ → Configure).</li>
-                            <li>Log in to <a href="https://tunnelsats.com" target="_blank"
-                                    rel="noopener">tunnelsats.com</a>, download your <code>.conf</code> file, and paste
-                                its full contents into the <strong>WireGuard Configuration</strong> field.</li>
-                            <li>Set the <strong>Enable TunnelSats</strong> toggle to <strong>On</strong>.</li>
-                            <li>Select your Lightning node (LND or Core Lightning) and click <strong>Save</strong>.</li>
-                        </ol>
-                        <p class="faq-note">⚡ Don't forget to also update your <code>lnd.conf</code> or CLN config file
-                            — see the <em>Setup Guides</em> section on this dashboard for the exact lines to add.</p>
-                    </div>
-                </details>
+          <!-- Q2 -->
+          <details class="faq-item">
+            <summary class="faq-question">
+              I saved my config but the tunnel shows "Disconnected" — what do I
+              do?
+            </summary>
+            <div class="faq-answer">
+              <p>
+                This is the most common setup issue. Work through these checks
+                in order:
+              </p>
+              <ol>
+                <li>
+                  <strong>Check the Enable toggle.</strong> Go to ⚙ → Configure
+                  and confirm <em>Enable TunnelSats</em> is <strong>On</strong>.
+                  Saving the config does not automatically enable the tunnel.
+                </li>
+                <li>
+                  <strong>Verify your lnd.conf / CLN config.</strong> The tunnel
+                  can be connected but your Lightning node won't broadcast
+                  correctly until you've added the
+                  <code>externalhosts=</code> (LND) or
+                  <code>announce-addr=</code> (CLN) lines and restarted the
+                  service.
+                </li>
+                <li>
+                  <strong>Check the VPN endpoint.</strong> The WireGuard
+                  handshake needs outbound internet access. If your node is
+                  behind a strict firewall, UDP port 51820 must be reachable.
+                </li>
+                <li>
+                  <strong>Restart the TunnelSats service.</strong> In StartOS,
+                  stop and restart TunnelSats after any config change.
+                </li>
+              </ol>
+              <p class="faq-note">
+                Still stuck? Open an issue on
+                <a
+                  href="https://github.com/Tunnelsats/tunnelsats-startos/issues/new"
+                  target="_blank"
+                  rel="noopener"
+                  >GitHub</a
+                >
+                with your dashboard status screenshot.
+              </p>
+            </div>
+          </details>
 
-                <!-- Q2 -->
-                <details class="faq-item">
-                    <summary class="faq-question">I saved my config but the tunnel shows "Disconnected" — what do I do?
-                    </summary>
-                    <div class="faq-answer">
-                        <p>This is the most common setup issue. Work through these checks in order:</p>
-                        <ol>
-                            <li><strong>Check the Enable toggle.</strong> Go to ⚙ → Configure and confirm <em>Enable
-                                    TunnelSats</em> is <strong>On</strong>. Saving the config does not automatically
-                                enable the tunnel.</li>
-                            <li><strong>Verify your lnd.conf / CLN config.</strong> The tunnel can be connected but your
-                                Lightning node won't broadcast correctly until you've added the
-                                <code>externalhosts=</code> (LND) or <code>announce-addr=</code> (CLN) lines and
-                                restarted the service.
-                            </li>
-                            <li><strong>Check the VPN endpoint.</strong> The WireGuard handshake needs outbound internet
-                                access. If your node is behind a strict firewall, UDP port 51820 must be reachable.</li>
-                            <li><strong>Restart the TunnelSats service.</strong> In StartOS, stop and restart TunnelSats
-                                after any config change.</li>
-                        </ol>
-                        <p class="faq-note">Still stuck? Open an issue on <a
-                                href="https://github.com/Tunnelsats/tunnelsats-startos/issues/new" target="_blank"
-                                rel="noopener">GitHub</a> with your dashboard status screenshot.</p>
-                    </div>
-                </details>
+          <!-- Q3 -->
+          <details class="faq-item">
+            <summary class="faq-question">
+              How do I add the externalhosts / announce-addr lines to my
+              Lightning node persistently?
+            </summary>
+            <div class="faq-answer">
+              <p>
+                On StartOS, manual changes to configuration files (like
+                <code>lnd.conf</code> or CLN's <code>config</code>) are normally
+                overwritten on restarts or configuration saves. Use the
+                persistence workarounds below based on your Lightning Node
+                implementation.
+              </p>
 
-                <!-- Q3 -->
-                <details class="faq-item">
-                    <summary class="faq-question">How do I add the externalhosts / announce-addr lines to my Lightning
-                        node persistently?</summary>
-                    <div class="faq-answer">
-                        <p>On StartOS, manual changes to configuration files (like <code>lnd.conf</code> or CLN's <code>config</code>) are normally overwritten on restarts or configuration saves. Use the persistence workarounds below based on your Lightning Node implementation.</p>
+              <div
+                style="
+                  margin-top: 16px;
+                  border-left: 3px solid var(--accent-bitcoin);
+                  padding-left: 12px;
+                "
+              >
+                <h4
+                  style="
+                    color: var(--accent-bitcoin);
+                    font-size: 14px;
+                    margin-bottom: 8px;
+                  "
+                >
+                  Option A: LND Node Configuration
+                </h4>
 
-                        <div style="margin-top:16px; border-left: 3px solid var(--accent-bitcoin); padding-left: 12px;">
-                            <h4 style="color:var(--accent-bitcoin); font-size:14px; margin-bottom:8px;">Option A: LND Node Configuration</h4>
-                            
-                            <p style="font-size:12px; font-weight:bold; color:var(--text-secondary);">For StartOS 0.3.5.x (Active Version)</p>
-                            <p>Inject the custom host into LND's configuration YAML to prevent the configurator from overwriting it:</p>
-                            <ol style="font-size:12.5px; padding-left:16px; margin-top:4px;">
-                                <li>SSH into your StartOS host: <code style="font-size:11.5px;">ssh start9@&lt;your-node-ip&gt;</code></li>
-                                <li>Open LND's UI configuration:
-                                    <pre style="background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.08);border-radius:6px;padding:8px 10px;font-size:11px;overflow-x:auto;margin-top:4px;"><code style="font-family:'JetBrains Mono',monospace;color:#f3f4f6;">sudo nano /embassy-data/package-data/volumes/lnd/data/main/start9/config.yaml</code></pre>
-                                </li>
-                                <li>Locate <code style="color:var(--accent-bitcoin);">peer-tor-address</code>, wrap the onion address in quotes, and append a newline (<code style="color:var(--accent-bitcoin);">\n</code>) along with your external host setting (replace with your values from Connection Properties above):
-                                    <pre style="background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.08);border-radius:6px;padding:8px 10px;font-size:11px;overflow-x:auto;margin-top:4px;"><code style="font-family:'JetBrains Mono',monospace;color:#f3f4f6;">peer-tor-address: "youronionaddress.onion\nexternalhosts=<span class="highlight-ip">tunnelsats_ip</span>:<span class="highlight-port">tunnelsats_port</span>"</code></pre>
-                                </li>
-                                <li>Save (<kbd>Ctrl+O</kbd>, <kbd>Ctrl+X</kbd>) and restart LND in the StartOS dashboard. The configurator will generate two valid <code style="color:var(--accent-bitcoin);">externalhosts</code> entries in LND's configuration.</li>
-                            </ol>
+                <p
+                  style="
+                    font-size: 12px;
+                    font-weight: bold;
+                    color: var(--text-secondary);
+                  "
+                >
+                  For StartOS 0.3.5.x (Active Version)
+                </p>
+                <p>
+                  Inject the custom host into LND's configuration YAML to
+                  prevent the configurator from overwriting it:
+                </p>
+                <ol
+                  style="font-size: 12.5px; padding-left: 16px; margin-top: 4px"
+                >
+                  <li>
+                    SSH into your StartOS host:
+                    <code style="font-size: 11.5px"
+                      >ssh start9@&lt;your-node-ip&gt;</code
+                    >
+                  </li>
+                  <li>
+                    Open LND's UI configuration:
+                    <pre
+                      style="
+                        background: rgba(255, 255, 255, 0.04);
+                        border: 1px solid rgba(255, 255, 255, 0.08);
+                        border-radius: 6px;
+                        padding: 8px 10px;
+                        font-size: 11px;
+                        overflow-x: auto;
+                        margin-top: 4px;
+                      "
+                    ><code style="font-family:'JetBrains Mono',monospace;color:#f3f4f6;">sudo nano /embassy-data/package-data/volumes/lnd/data/main/start9/config.yaml</code></pre>
+                  </li>
+                  <li>
+                    Locate
+                    <code style="color: var(--accent-bitcoin)"
+                      >peer-tor-address</code
+                    >, wrap the onion address in quotes, and append a newline
+                    (<code style="color: var(--accent-bitcoin)">\n</code>) along
+                    with your external host setting (replace with your values
+                    from Connection Properties above):
+                    <pre
+                      style="
+                        background: rgba(255, 255, 255, 0.04);
+                        border: 1px solid rgba(255, 255, 255, 0.08);
+                        border-radius: 6px;
+                        padding: 8px 10px;
+                        font-size: 11px;
+                        overflow-x: auto;
+                        margin-top: 4px;
+                      "
+                    ><code style="font-family:'JetBrains Mono',monospace;color:#f3f4f6;">peer-tor-address: "youronionaddress.onion\nexternalhosts=<span class="highlight-ip">tunnelsats_ip</span>:<span class="highlight-port">tunnelsats_port</span>"</code></pre>
+                  </li>
+                  <li>
+                    Save (<kbd>Ctrl+O</kbd>, <kbd>Ctrl+X</kbd>) and restart LND
+                    in the StartOS dashboard. The configurator will generate two
+                    valid
+                    <code style="color: var(--accent-bitcoin)"
+                      >externalhosts</code
+                    >
+                    entries in LND's configuration.
+                  </li>
+                </ol>
 
-                            <p style="font-size:12px; font-weight:bold; color:var(--text-secondary); margin-top:12px;">For StartOS 0.4.x (Upcoming Version)</p>
-                            <p>Configure LND natively via UI actions:</p>
-                            <ol style="font-size:12.5px; padding-left:16px; margin-top:4px;">
-                                <li>In the StartOS dashboard under the LND service, open the <strong>Actions</strong> menu.</li>
-                                <li>Select <strong>Custom External Host</strong> and enter: <code style="font-size:12px;"><span class="highlight-ip">tunnelsats_ip</span>:<span class="highlight-port">tunnelsats_port</span></code></li>
-                                <li>Submit and restart LND. This writes to <code>store.json</code> and persistently merges the host on startup.</li>
-                            </ol>
-                        </div>
+                <p
+                  style="
+                    font-size: 12px;
+                    font-weight: bold;
+                    color: var(--text-secondary);
+                    margin-top: 12px;
+                  "
+                >
+                  For StartOS 0.4.x (Upcoming Version)
+                </p>
+                <p>Configure LND natively via UI actions:</p>
+                <ol
+                  style="font-size: 12.5px; padding-left: 16px; margin-top: 4px"
+                >
+                  <li>
+                    In the StartOS dashboard under the LND service, open the
+                    <strong>Actions</strong> menu.
+                  </li>
+                  <li>
+                    Select <strong>Custom External Host</strong> and enter:
+                    <code style="font-size: 12px"
+                      ><span class="highlight-ip">tunnelsats_ip</span>:<span
+                        class="highlight-port"
+                        >tunnelsats_port</span
+                      ></code
+                    >
+                  </li>
+                  <li>
+                    Submit and restart LND. This writes to
+                    <code>store.json</code> and persistently merges the host on
+                    startup.
+                  </li>
+                </ol>
+              </div>
 
-                        <div style="margin-top:20px; border-left: 3px solid var(--accent-bitcoin); padding-left: 12px;">
-                            <h4 style="color:var(--accent-bitcoin); font-size:14px; margin-bottom:8px;">Option B: Core Lightning (CLN) Node Configuration</h4>
+              <div
+                style="
+                  margin-top: 20px;
+                  border-left: 3px solid var(--accent-bitcoin);
+                  padding-left: 12px;
+                "
+              >
+                <h4
+                  style="
+                    color: var(--accent-bitcoin);
+                    font-size: 14px;
+                    margin-bottom: 8px;
+                  "
+                >
+                  Option B: Core Lightning (CLN) Node Configuration
+                </h4>
 
-                            <p style="font-size:12px; font-weight:bold; color:var(--text-secondary);">For StartOS 0.3.5.x (Active Version)</p>
-                            <p>Inject a config-updating hook into the persistent startup script of the CLN volume:</p>
-                            <ol style="font-size:12.5px; padding-left:16px; margin-top:4px;">
-                                <li>SSH into your StartOS host: <code style="font-size:11.5px;">ssh start9@&lt;your-node-ip&gt;</code></li>
-                                <li>Open the persistent startup script:
-                                    <pre style="background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.08);border-radius:6px;padding:8px 10px;font-size:11px;overflow-x:auto;margin-top:4px;"><code style="font-family:'JetBrains Mono',monospace;color:#f3f4f6;">sudo nano /embassy-data/package-data/volumes/c-lightning/data/main/start9/waitForStart.sh</code></pre>
-                                </li>
-                                <li>Add the following block to the end of the file (before the script exits):
-                                    <pre style="background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.08);border-radius:6px;padding:8px 10px;font-size:11px;overflow-x:auto;margin-top:4px;"><code style="font-family:'JetBrains Mono',monospace;color:#f3f4f6;"># Bind CLN to accept clearnet connections
+                <p
+                  style="
+                    font-size: 12px;
+                    font-weight: bold;
+                    color: var(--text-secondary);
+                  "
+                >
+                  For StartOS 0.3.5.x (Active Version)
+                </p>
+                <p>
+                  Inject a config-updating hook into the persistent startup
+                  script of the CLN volume:
+                </p>
+                <ol
+                  style="font-size: 12.5px; padding-left: 16px; margin-top: 4px"
+                >
+                  <li>
+                    SSH into your StartOS host:
+                    <code style="font-size: 11.5px"
+                      >ssh start9@&lt;your-node-ip&gt;</code
+                    >
+                  </li>
+                  <li>
+                    Open the persistent startup script:
+                    <pre
+                      style="
+                        background: rgba(255, 255, 255, 0.04);
+                        border: 1px solid rgba(255, 255, 255, 0.08);
+                        border-radius: 6px;
+                        padding: 8px 10px;
+                        font-size: 11px;
+                        overflow-x: auto;
+                        margin-top: 4px;
+                      "
+                    ><code style="font-family:'JetBrains Mono',monospace;color:#f3f4f6;">sudo nano /embassy-data/package-data/volumes/c-lightning/data/main/start9/waitForStart.sh</code></pre>
+                  </li>
+                  <li>
+                    Add the following block to the end of the file (before the
+                    script exits):
+                    <pre
+                      style="
+                        background: rgba(255, 255, 255, 0.04);
+                        border: 1px solid rgba(255, 255, 255, 0.08);
+                        border-radius: 6px;
+                        padding: 8px 10px;
+                        font-size: 11px;
+                        overflow-x: auto;
+                        margin-top: 4px;
+                      "
+                    ><code style="font-family:'JetBrains Mono',monospace;color:#f3f4f6;"># Bind CLN to accept clearnet connections
 if ! grep -q "^[[:space:]]*bind-addr=0.0.0.0:9735" /root/.lightning/config.main 2>/dev/null; then
   echo "bind-addr=0.0.0.0:9735" >> /root/.lightning/config.main
 fi
@@ -307,116 +619,215 @@ fi
 if ! grep -q "^[[:space:]]*announce-addr=$VPN_ADDR" /root/.lightning/config 2>/dev/null; then
   echo "announce-addr=$VPN_ADDR" >> /root/.lightning/config
 fi</code></pre>
-                                </li>
-                                <li>Save, exit, and restart Core Lightning in the StartOS dashboard. The startup hook will dynamically apply the changes to both the active and template configurations immediately.</li>
-                            </ol>
+                  </li>
+                  <li>
+                    Save, exit, and restart Core Lightning in the StartOS
+                    dashboard. The startup hook will dynamically apply the
+                    changes to both the active and template configurations
+                    immediately.
+                  </li>
+                </ol>
 
-                            <p style="font-size:12px; font-weight:bold; color:var(--text-secondary); margin-top:12px;">For StartOS 0.4.x (Upcoming Version)</p>
-                            <p>An enhancement PR has been proposed to the official <code>cln-startos</code> repository to natively introduce a "Custom External Host" UI action identical to LND. Until natively merged, the <code>waitForStart.sh</code> hook can be used to persistently modify CLN's settings.</p>
-                        </div>
-                    </div>
-                </details>
+                <p
+                  style="
+                    font-size: 12px;
+                    font-weight: bold;
+                    color: var(--text-secondary);
+                    margin-top: 12px;
+                  "
+                >
+                  For StartOS 0.4.x (Upcoming Version)
+                </p>
+                <p>
+                  An enhancement PR has been proposed to the official
+                  <code>cln-startos</code> repository to natively introduce a
+                  "Custom External Host" UI action identical to LND. Until
+                  natively merged, the <code>waitForStart.sh</code> hook can be
+                  used to persistently modify CLN's settings.
+                </p>
+              </div>
+            </div>
+          </details>
 
+          <!-- Q4 -->
+          <details class="faq-item">
+            <summary class="faq-question">
+              Is TunnelSats a general VPN for all my StartOS traffic?
+            </summary>
+            <div class="faq-answer">
+              <p>
+                <strong>No.</strong> TunnelSats is purpose-built exclusively for
+                Lightning Network routing.
+              </p>
+              <p>
+                It tunnels only your Lightning node's
+                <strong>inbound peer connections</strong> (LND or CLN) — not
+                your Bitcoin node, not your other StartOS apps, and not your
+                general internet traffic. Your Bitcoin node (bitcoind) continues
+                to use Tor as normal.
+              </p>
+              <p>
+                This is by design: TunnelSats gives your Lightning node a
+                stable, reachable clearnet identity for channel gossip, without
+                exposing your home IP or routing all your traffic through a
+                third party.
+              </p>
+              <p class="faq-note">
+                If you need a general-purpose VPN for all StartOS system
+                traffic, look for WireGuard or OpenVPN packages in the StartOS
+                app store.
+              </p>
+            </div>
+          </details>
 
-                <!-- Q4 -->
-                <details class="faq-item">
-                    <summary class="faq-question">Is TunnelSats a general VPN for all my StartOS traffic?</summary>
-                    <div class="faq-answer">
-                        <p><strong>No.</strong> TunnelSats is purpose-built exclusively for Lightning Network routing.
-                        </p>
-                        <p>It tunnels only your Lightning node's <strong>inbound peer connections</strong> (LND or CLN)
-                            — not your Bitcoin node, not your other StartOS apps, and not your general internet traffic.
-                            Your Bitcoin node (bitcoind) continues to use Tor as normal.</p>
-                        <p>This is by design: TunnelSats gives your Lightning node a stable, reachable clearnet identity
-                            for channel gossip, without exposing your home IP or routing all your traffic through a
-                            third party.</p>
-                        <p class="faq-note">If you need a general-purpose VPN for all StartOS system traffic, look for
-                            WireGuard or OpenVPN packages in the StartOS app store.</p>
-                    </div>
-                </details>
+          <!-- Q5 -->
+          <details class="faq-item">
+            <summary class="faq-question">
+              What happens if my subscription expires while the tunnel is
+              active?
+            </summary>
+            <div class="faq-answer">
+              <p>
+                This is the most important thing to plan for. When your
+                subscription expires:
+              </p>
+              <ol>
+                <li>
+                  The WireGuard tunnel drops — your node can no longer receive
+                  inbound connections via the TunnelSats IP.
+                </li>
+                <li>
+                  However, your Lightning node's config files (<code
+                    >externalhosts=</code
+                  >
+                  / <code>announce-addr=</code>) still point to that now-dead
+                  IP.
+                </li>
+                <li>
+                  Your node will broadcast an
+                  <strong>unreachable address</strong> to the network, causing
+                  peers to fail to connect and potentially affecting channel
+                  health.
+                </li>
+              </ol>
+              <p><strong>What to do before expiry:</strong></p>
+              <ul>
+                <li>
+                  Watch the countdown timer on this dashboard — it turns amber
+                  when under 30 days remain.
+                </li>
+                <li>
+                  Renew at
+                  <a
+                    href="https://tunnelsats.com"
+                    target="_blank"
+                    rel="noopener"
+                    >tunnelsats.com</a
+                  >
+                  and paste your new config before the old one expires.
+                </li>
+                <li>
+                  Or, if you won't renew: disable TunnelSats via ⚙ → Configure
+                  (set Enable to Off), remove the <code>externalhosts=</code> /
+                  <code>announce-addr=</code> lines from your node config, and
+                  restart your Lightning node.
+                </li>
+              </ul>
+            </div>
+          </details>
 
-                <!-- Q5 -->
-                <details class="faq-item">
-                    <summary class="faq-question">What happens if my subscription expires while the tunnel is active?
-                    </summary>
-                    <div class="faq-answer">
-                        <p>This is the most important thing to plan for. When your subscription expires:</p>
-                        <ol>
-                            <li>The WireGuard tunnel drops — your node can no longer receive inbound connections via the
-                                TunnelSats IP.</li>
-                            <li>However, your Lightning node's config files (<code>externalhosts=</code> /
-                                <code>announce-addr=</code>) still point to that now-dead IP.
-                            </li>
-                            <li>Your node will broadcast an <strong>unreachable address</strong> to the network, causing
-                                peers to fail to connect and potentially affecting channel health.</li>
-                        </ol>
-                        <p><strong>What to do before expiry:</strong></p>
-                        <ul>
-                            <li>Watch the countdown timer on this dashboard — it turns amber when under 30 days remain.
-                            </li>
-                            <li>Renew at <a href="https://tunnelsats.com" target="_blank"
-                                    rel="noopener">tunnelsats.com</a> and paste your new config before the old one
-                                expires.</li>
-                            <li>Or, if you won't renew: disable TunnelSats via ⚙ → Configure (set Enable to Off), remove
-                                the <code>externalhosts=</code> / <code>announce-addr=</code> lines from your node
-                                config, and restart your Lightning node.</li>
-                        </ul>
-                    </div>
-                </details>
+          <!-- Q6 -->
+          <details class="faq-item">
+            <summary class="faq-question">
+              Are my WireGuard config and settings preserved if I uninstall the
+              app?
+            </summary>
+            <div class="faq-answer">
+              <p>
+                <strong
+                  >No — uninstalling TunnelSats from StartOS will delete your
+                  configuration data</strong
+                >, including your pasted WireGuard config and the
+                enabled/disabled state.
+              </p>
+              <p>
+                This is a StartOS platform behaviour: when a package is
+                uninstalled, its data volume (<code>/data</code>) is removed
+                along with the container.
+              </p>
+              <p><strong>Before uninstalling, you should:</strong></p>
+              <ol>
+                <li>
+                  Copy your WireGuard <code>.conf</code> content from ⚙ →
+                  Configure → WireGuard Configuration and save it somewhere
+                  safe.
+                </li>
+                <li>
+                  Disable the TunnelSats tunnel (set Enable to Off and save) so
+                  your Lightning node falls back to Tor/clearnet.
+                </li>
+                <li>
+                  Remove the <code>externalhosts=</code> /
+                  <code>announce-addr=</code> lines from your Lightning node
+                  config and restart it.
+                </li>
+                <li>Only then uninstall TunnelSats.</li>
+              </ol>
+              <p class="faq-note">
+                ⚠ Your subscription itself (purchased at tunnelsats.com) is not
+                affected by uninstalling the StartOS app. If you reinstall,
+                simply paste your <code>.conf</code> file again.
+              </p>
+            </div>
+          </details>
 
-                <!-- Q6 -->
-                <details class="faq-item">
-                    <summary class="faq-question">Are my WireGuard config and settings preserved if I uninstall the app?
-                    </summary>
-                    <div class="faq-answer">
-                        <p><strong>No — uninstalling TunnelSats from StartOS will delete your configuration
-                                data</strong>, including your pasted WireGuard config and the enabled/disabled state.
-                        </p>
-                        <p>This is a StartOS platform behaviour: when a package is uninstalled, its data volume
-                            (<code>/data</code>) is removed along with the container.</p>
-                        <p><strong>Before uninstalling, you should:</strong></p>
-                        <ol>
-                            <li>Copy your WireGuard <code>.conf</code> content from ⚙ → Configure → WireGuard
-                                Configuration and save it somewhere safe.</li>
-                            <li>Disable the TunnelSats tunnel (set Enable to Off and save) so your Lightning node falls
-                                back to Tor/clearnet.</li>
-                            <li>Remove the <code>externalhosts=</code> / <code>announce-addr=</code> lines from your
-                                Lightning node config and restart it.</li>
-                            <li>Only then uninstall TunnelSats.</li>
-                        </ol>
-                        <p class="faq-note">⚠ Your subscription itself (purchased at tunnelsats.com) is not affected by
-                            uninstalling the StartOS app. If you reinstall, simply paste your <code>.conf</code> file
-                            again.</p>
-                    </div>
-                </details>
-
-                <!-- Q7 -->
-                <details class="faq-item">
-                    <summary class="faq-question">Where can I report a bug or ask a question?</summary>
-                    <div class="faq-answer">
-                        <p>The best place is the <strong>GitHub Issues</strong> tracker for this package:</p>
-                        <p>
-                            <a href="https://github.com/Tunnelsats/tunnelsats-startos/issues/new" target="_blank"
-                                rel="noopener" class="faq-cta-link" id="link-github-issue">
-                                → Open a new issue on GitHub
-                            </a>
-                        </p>
-                        <p>When reporting, please include:</p>
-                        <ul>
-                            <li>Your StartOS version</li>
-                            <li>The TunnelSats package version (shown in the StartOS app list)</li>
-                            <li>A screenshot of this dashboard's status section</li>
-                            <li>Any error messages shown in the StartOS logs for TunnelSats</li>
-                        </ul>
-                        <p>For subscription and account questions, contact <a href="https://tunnelsats.com"
-                                target="_blank" rel="noopener">tunnelsats.com</a> support directly.</p>
-                    </div>
-                </details>
-            </div><!-- /faq-body -->
-        </div><!-- /faq-dialog-inner -->
+          <!-- Q7 -->
+          <details class="faq-item">
+            <summary class="faq-question">
+              Where can I report a bug or ask a question?
+            </summary>
+            <div class="faq-answer">
+              <p>
+                The best place is the <strong>GitHub Issues</strong> tracker for
+                this package:
+              </p>
+              <p>
+                <a
+                  href="https://github.com/Tunnelsats/tunnelsats-startos/issues/new"
+                  target="_blank"
+                  rel="noopener"
+                  class="faq-cta-link"
+                  id="link-github-issue"
+                >
+                  → Open a new issue on GitHub
+                </a>
+              </p>
+              <p>When reporting, please include:</p>
+              <ul>
+                <li>Your StartOS version</li>
+                <li>
+                  The TunnelSats package version (shown in the StartOS app list)
+                </li>
+                <li>A screenshot of this dashboard's status section</li>
+                <li>
+                  Any error messages shown in the StartOS logs for TunnelSats
+                </li>
+              </ul>
+              <p>
+                For subscription and account questions, contact
+                <a href="https://tunnelsats.com" target="_blank" rel="noopener"
+                  >tunnelsats.com</a
+                >
+                support directly.
+              </p>
+            </div>
+          </details>
+        </div>
+        <!-- /faq-body -->
+      </div>
+      <!-- /faq-dialog-inner -->
     </dialog>
 
     <script src="script.js"></script>
-</body>
-
+  </body>
 </html>
