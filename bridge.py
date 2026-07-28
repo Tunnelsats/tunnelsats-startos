@@ -248,6 +248,17 @@ def subscription_sync_loop():
 
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
+def get_package_version():
+    pkg_path = os.path.join(os.path.dirname(__file__), "package.json")
+    if os.path.exists(pkg_path):
+        try:
+            with open(pkg_path, "r") as f:
+                data = json.load(f)
+                return data.get("version", "0.4.0")
+        except Exception:
+            pass
+    return "0.4.0"
+
 class DashboardHTTPRequestHandler(BaseHTTPRequestHandler):
     def log_message(self, format, *args):
         pass
@@ -342,7 +353,7 @@ class DashboardHTTPRequestHandler(BaseHTTPRequestHandler):
             internal_octet = wg_ip.split('.')[-1] if wg_ip else "Unknown"
 
             response = {
-                "version": "0.4.0",
+                "version": get_package_version(),
                 "enabled": is_enabled(),
                 "status": status_data["status"],
                 "vpn_connected": status_data["vpn_connected"],
