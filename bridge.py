@@ -472,6 +472,12 @@ BindAddress = 0.0.0.0:1080
 ListenPort = {target_port}
 Target = {target_host}:{target_port}
 """
+        if vpn_port and vpn_port != target_port:
+            extra_config += f"""
+[TCPServerTunnel]
+ListenPort = {vpn_port}
+Target = {target_host}:{target_port}
+"""
         with open(WIREPROXY_CONFIG_PATH, 'w') as f:
             f.write(wg_config + "\n" + extra_config)
         print("Generated wireproxy config successfully.")

@@ -20,7 +20,7 @@ all: pack
 # Build Docker image
 build:
 	docker buildx build \
-		--tag start9/$(PKG_ID)/main:$(PKG_VERSION) \
+		--tag docker.io/start9/$(PKG_ID)/main:$(PKG_VERSION) \
 		--platform $(DOCKER_PLATFORM) \
 		-o type=docker,dest=image.tar \
 		.

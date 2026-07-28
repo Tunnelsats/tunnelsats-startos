@@ -185,5 +185,28 @@ class TestBridgeConfigCLI(unittest.TestCase):
         self.assertEqual(output["config"]["enabled"], False)
         self.assertEqual(output["depends-on"], {"lnd": []})
 
+    @patch('bridge.get_target_details')
+    @patch('builtins.open')
+    def test_generate_wireproxy_config_listen_port(self, mock_file_open, mock_target_details):
+        mock_target_details.return_value = ("lnd.embassy", 9735)
+        wg_sample = "[Interface]\nAddress = 10.9.0.102/32\n# Port Forwarding: 24556\n"
+        
+        # Setup mock open for reading CONFIG_PATH and writing WIREPROXY_CONFIG_PATH
+        mock_read = mock_open(read_data=wg_sample)
+        mock_file_open.side_effect = [
+            mock_read.return_value,  # open CONFIG_PATH
+            mock_read.return_value   # open WIREPROXY_CONFIG_PATH
+        ]
+        
+        res = bridge.generate_wireproxy_config()
+        self.assertTrue(res)
+        
+        # Verify written content includes ListenPort = 9735 and ListenPort = 24556
+        write_calls = mock_read.return_value.write.call_args_list
+        written_text = "".join(call[0][0] for call in write_calls)
+        self.assertIn("ListenPort = 9735", written_text)
+        self.assertIn("ListenPort = 24556", written_text)
+        self.assertIn("Target = lnd.embassy:9735", written_text)
+
 if __name__ == '__main__':
     unittest.main()
