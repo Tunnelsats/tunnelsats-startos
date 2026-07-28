@@ -15,50 +15,8 @@ on:
       - '.gitignore'
 
 jobs:
-  build:
-    runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        platform: [amd64, arm64]
-    
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-      
-      - name: Set up QEMU
-        uses: docker/setup-qemu-action@v3
-      
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
-      
-      - name: Install start-sdk
-        run: |
-          # Install start-sdk (placeholder - adjust for actual install)
-          echo "Installing start-sdk..."
-          # curl -fsSL https://install.start9.com/sdk | bash
-      
-      - name: Build Docker Image
-        run: |
-          # Determine cache-to parameters based on pull request origin to prevent write token failures on forks
-          CACHE_TO=""
-          if [ "${{ github.event_name }}" != "pull_request" ] || [ "${{ github.event.pull_request.head.repo.full_name }}" = "${{ github.repository }}" ]; then
-            CACHE_TO="--cache-to=type=gha,mode=max"
-          fi
-          
-          docker buildx build \
-            --platform linux/${{ matrix.platform }} \
-            --cache-from=type=gha \
-            $CACHE_TO \
-            -o type=docker,dest=image-${{ matrix.platform }}.tar \
-            .
-      
-      - name: Upload artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: docker-image-${{ matrix.platform }}
-          path: image-${{ matrix.platform }}.tar
-
   test:
+    name: Run Unit Tests
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -71,11 +29,88 @@ jobs:
 
       - name: Run Python unit tests
         run: python3 -m unittest discover -s tests -p "test_*.py"
-      
+
       - name: Install bats
         run: |
           sudo apt-get update
           sudo apt-get install -y bats
-      
+
       - name: Run bats tests
         run: bats tests/
+
+  build:
+    name: Build s9pk (${{ matrix.platform }})
+    needs: test
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        platform: [amd64, arm64]
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache start-sdk build
+        uses: actions/cache@v4
+        id: cache-sdk
+        with:
+          path: |
+            ~/.cargo/bin/startbox
+            ~/.cargo/bin/start-sdk
+            ~/.cargo/bin/start-cli
+          key: start-sdk-0.3.5.1-${{ runner.os }}-${{ runner.arch }}
+
+      - name: Build and install start-sdk
+        if: steps.cache-sdk.outputs.cache-hit != 'true'
+        env:
+          CARGO_NET_GIT_FETCH_WITH_CLI: 'true'
+        run: |
+          git clone -b v0.3.5.1 --recursive https://github.com/Start9Labs/start-os.git /tmp/start-os
+          cd /tmp/start-os/core
+          ./install-sdk.sh
+          start-sdk --version
+
+      - name: Initialize start-sdk developer key
+        run: |
+          sudo mkdir -p /etc/embassy
+          sudo chown $USER /etc/embassy
+          start-sdk init
+
+      - name: Build Docker Image
+        run: |
+          # Determine cache-to parameters based on pull request origin to prevent write token failures on forks
+          CACHE_TO=""
+          if [ "${{ github.event_name }}" != "pull_request" ] || [ "${{ github.event.pull_request.head.repo.full_name }}" = "${{ github.repository }}" ]; then
+            CACHE_TO="--cache-to=type=gha,mode=max"
+          fi
+
+          docker buildx build \
+            --platform linux/${{ matrix.platform }} \
+            --cache-from=type=gha \
+            $CACHE_TO \
+            -o type=docker,dest=image.tar \
+            .
+
+      - name: Pack s9pk
+        run: |
+          start-sdk pack
+          # Rename to include architecture for multi-arch releases
+          mv tunnelsats.s9pk tunnelsats_${{ matrix.platform }}.s9pk
+
+      - name: Verify s9pk
+        run: start-sdk verify s9pk tunnelsats_${{ matrix.platform }}.s9pk
+
+      - name: Upload s9pk artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: tunnelsats-${{ matrix.platform }}
+          path: tunnelsats_${{ matrix.platform }}.s9pk

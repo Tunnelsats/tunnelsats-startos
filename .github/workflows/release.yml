@@ -5,45 +5,12 @@ on:
     tags:
       - 'v*'
 
-jobs:
-  build:
-    runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        platform: [amd64, arm64]
-    
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-      
-      - name: Set up QEMU
-        uses: docker/setup-qemu-action@v3
-      
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
-      
-      - name: Install start-sdk
-        run: |
-          # Install start-sdk (placeholder - adjust for actual install)
-          echo "Installing start-sdk..."
-          # curl -fsSL https://install.start9.com/sdk | bash
-      
-      - name: Build Docker Image
-        run: |
-          docker buildx build \
-            --platform linux/${{ matrix.platform }} \
-            --cache-from=type=gha \
-            --cache-to=type=gha,mode=max \
-            -o type=docker,dest=image-${{ matrix.platform }}.tar \
-            .
-      
-      - name: Upload artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: docker-image-${{ matrix.platform }}
-          path: image-${{ matrix.platform }}.tar
+permissions:
+  contents: write
 
+jobs:
   test:
+    name: Run Unit Tests
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -56,31 +23,130 @@ jobs:
 
       - name: Run Python unit tests
         run: python3 -m unittest discover -s tests -p "test_*.py"
-      
+
       - name: Install bats
         run: |
           sudo apt-get update
           sudo apt-get install -y bats
-      
+
       - name: Run bats tests
         run: bats tests/
 
-  release:
-    needs: [build, test]
+  build:
+    name: Build s9pk (${{ matrix.platform }})
+    needs: test
     runs-on: ubuntu-latest
-    
+    strategy:
+      matrix:
+        platform: [amd64, arm64]
+
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-      
-      - name: Download artifacts
-        uses: actions/download-artifact@v4
-      
-      - name: Create Release
-        uses: softprops/action-gh-release@v1
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache start-sdk build
+        uses: actions/cache@v4
+        id: cache-sdk
         with:
-          files: |
-            *.s9pk
-          draft: true
+          path: |
+            ~/.cargo/bin/startbox
+            ~/.cargo/bin/start-sdk
+            ~/.cargo/bin/start-cli
+          key: start-sdk-0.3.5.1-${{ runner.os }}-${{ runner.arch }}
+
+      - name: Build and install start-sdk
+        if: steps.cache-sdk.outputs.cache-hit != 'true'
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          CARGO_NET_GIT_FETCH_WITH_CLI: 'true'
+        run: |
+          git clone -b v0.3.5.1 --recursive https://github.com/Start9Labs/start-os.git /tmp/start-os
+          cd /tmp/start-os/core
+          ./install-sdk.sh
+          start-sdk --version
+
+      - name: Initialize start-sdk developer key
+        run: |
+          sudo mkdir -p /etc/embassy
+          sudo chown $USER /etc/embassy
+          start-sdk init
+
+      - name: Build Docker Image
+        run: |
+          docker buildx build \
+            --platform linux/${{ matrix.platform }} \
+            --cache-from=type=gha \
+            --cache-to=type=gha,mode=max \
+            -o type=docker,dest=image.tar \
+            .
+
+      - name: Pack s9pk
+        run: |
+          start-sdk pack
+          mv tunnelsats.s9pk tunnelsats_${{ matrix.platform }}.s9pk
+
+      - name: Verify s9pk
+        run: start-sdk verify s9pk tunnelsats_${{ matrix.platform }}.s9pk
+
+      - name: Upload s9pk artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: tunnelsats-${{ matrix.platform }}
+          path: tunnelsats_${{ matrix.platform }}.s9pk
+
+  release:
+    name: Publish GitHub Release
+    needs: [build, test]
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Download all s9pk artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts/
+
+      - name: Collect s9pk files
+        run: |
+          mkdir -p release-assets
+          find artifacts/ -name "*.s9pk" -exec cp {} release-assets/ \;
+          echo "Release assets:"
+          ls -lh release-assets/
+
+      - name: Extract release notes from manifest
+        id: release-notes
+        run: |
+          NOTES=$(grep '^release-notes:' manifest.yaml | sed 's/^release-notes: "//' | sed 's/"$//')
+          echo "notes=${NOTES}" >> "$GITHUB_OUTPUT"
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: release-assets/*.s9pk
+          body: |
+            ## TunnelSats ${{ github.ref_name }} for StartOS 0.3.5.x
+
+            ${{ steps.release-notes.outputs.notes }}
+
+            ### Installation
+            1. Download `tunnelsats_amd64.s9pk` (Intel/AMD) or `tunnelsats_arm64.s9pk` (Raspberry Pi / ARM)
+            2. In your StartOS dashboard, go to **System → Sideload**
+            3. Upload the `.s9pk` file
+
+            ### Requirements
+            - StartOS v0.3.5.x or later
+            - Active [TunnelSats subscription](https://tunnelsats.com)
+            - LND or Core Lightning installed on your StartOS node
+          draft: true
+          prerelease: false
+          generate_release_notes: false
