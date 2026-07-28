@@ -23,6 +23,7 @@ export default {
     18: 'VPN desconectada',
     19: 'No se pudo analizar el resultado de la verificación de estado',
     20: 'Proxy no listo',
+    21: 'VPN conectado',
   },
   de_DE: {
     0: 'Starte TunnelSats!',
@@ -46,6 +47,7 @@ export default {
     18: 'VPN getrennt',
     19: 'Fehler beim Analysieren des Statustestergebnisses',
     20: 'Proxy nicht bereit',
+    21: 'VPN verbunden',
   },
   pl_PL: {
     0: 'Uruchamianie TunnelSats!',
@@ -69,6 +71,7 @@ export default {
     18: 'VPN rozłączony',
     19: 'Nie udało się przeanalizować wyniku testu stanu',
     20: 'Proxy nie gotowe',
+    21: 'VPN połączony',
   },
   fr_FR: {
     0: 'Démarrage de TunnelSats !',
@@ -92,5 +95,6 @@ export default {
     18: 'VPN déconnecté',
     19: 'Impossible d’analyser le résultat de la vérification de l’état',
     20: 'Proxy non prêt',
+    21: 'VPN connecté',
   },
 } satisfies Record<string, LangDict>

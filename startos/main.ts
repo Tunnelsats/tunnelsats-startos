@@ -10,20 +10,9 @@ export const main = sdk.setupMain(async ({ effects }) => {
   const targetNode = config?.['target-node'] ?? 'lnd'
   const osIp = await sdk.getOsIp(effects)
 
-  // 2. Resolve target Lightning node bridge address reactively
-  const targetAddr = await sdk.host
-    .get(
-      effects,
-      {
-        packageId: targetNode === 'lnd' ? 'lnd' : 'c-lightning',
-        hostId: 'peer',
-      },
-      (host) => {
-        const port = host?.bindings[9735]?.net.assignedPort
-        return port != null ? `${osIp}:${port}` : null
-      },
-    )
-    .const()
+  // 2. Resolve target Lightning node internal DNS address
+  const targetAddr =
+    targetNode === 'lnd' ? 'lnd.embassy:9735' : 'c-lightning.embassy:9735'
 
   // 3. Setup environment variables
   const env: Record<string, string> = {}
@@ -83,7 +72,7 @@ export const main = sdk.setupMain(async ({ effects }) => {
           }
           const res = await subcontainer.exec([
             'python3',
-            'bridge.py',
+            '/app/bridge.py',
             'health',
             'vpn',
           ])
@@ -95,14 +84,15 @@ export const main = sdk.setupMain(async ({ effects }) => {
           }
           try {
             const data = JSON.parse(res.stdout.toString())
+            const isOk = data.result === 'ok' || data.result === 'success'
             return {
               result:
-                data.result === 'success'
+                isOk
                   ? 'success'
                   : data.result === 'loading'
                     ? 'loading'
                     : 'failure',
-              message: data.message || '',
+              message: data.message || (isOk ? i18n('VPN connected') : String(data.result)),
             }
           } catch (e) {
             return {
@@ -126,7 +116,7 @@ export const main = sdk.setupMain(async ({ effects }) => {
           }
           const res = await subcontainer.exec([
             'python3',
-            'bridge.py',
+            '/app/bridge.py',
             'health',
             'proxy',
           ])
@@ -138,14 +128,15 @@ export const main = sdk.setupMain(async ({ effects }) => {
           }
           try {
             const data = JSON.parse(res.stdout.toString())
+            const isOk = data.result === 'ok' || data.result === 'success'
             return {
               result:
-                data.result === 'success'
+                isOk
                   ? 'success'
                   : data.result === 'loading'
                     ? 'loading'
                     : 'failure',
-              message: data.message || '',
+              message: data.message || (isOk ? i18n('SOCKS5 proxy is listening for connections') : String(data.result)),
             }
           } catch (e) {
             return {

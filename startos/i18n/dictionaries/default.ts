@@ -22,6 +22,7 @@ const dict = {
   'VPN disconnected': 18,
   'Failed to parse health check result': 19,
   'Proxy not ready': 20,
+  'VPN connected': 21,
 } as const
 
 /**
