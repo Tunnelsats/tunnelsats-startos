@@ -138,28 +138,21 @@
 
           <div class="tab-content active" id="lnd-tab">
             <p class="guide-intro">
-              Configure LND to announce the TunnelSats public IP and port, while
-              ensuring normal routing for Tor/clearnet peers.
+              <strong>StartOS 0.4.0 Zero-Hassle LND Setup:</strong><br />
+              Open your <strong>LND service page</strong> in StartOS &rarr; <strong>Actions</strong> &rarr; <strong>Custom External Host</strong>, and enter your TunnelSats endpoint:
             </p>
             <div class="code-block-header">
-              <span>Append to your <code>lnd.conf</code>:</span>
+              <span>Enter into <strong>Custom External Host</strong>:</span>
               <button
                 class="btn-copy-code"
                 onclick="copyCode('lnd-code', this)"
               >
-                Copy Block
+                Copy Value
               </button>
             </div>
-            <pre><code id="lnd-code"># [Application Options]
-externalhosts=<span class="highlight-ip">tunnelsats_ip</span>:<span class="highlight-port">tunnelsats_port</span>
-
-# [tor]
-tor.skip-proxy-for-clearnet-targets=true
-tor.streamisolation=false</code></pre>
-            <div class="warning-box">
-              <strong>Important Note:</strong> Restart the LND service on
-              StartOS after modifying its config file to apply the new announced
-              address.
+            <pre><code id="lnd-code"><span class="highlight-ip">tunnelsats_ip</span>:<span class="highlight-port">tunnelsats_port</span></code></pre>
+            <div class="info-box" style="margin-top: 1rem; background: rgba(51, 153, 255, 0.1); border: 1px solid rgba(51, 153, 255, 0.3); border-radius: 8px; padding: 0.75rem 1rem; font-size: 0.875rem;">
+              <strong>Automatic Advertising:</strong> StartOS 0.4.0's LND package automatically advertises this address to the Lightning Network alongside your Tor address without needing manual <code>lnd.conf</code> edits!
             </div>
           </div>
 
@@ -258,6 +251,13 @@ tor.streamisolation=false</code></pre>
             </svg>
             FAQ &amp; Help
           </button>
+        </div>
+        <div class="footer-meta" style="margin-top: 1rem; display: flex; align-items: center; justify-content: center; gap: 0.75rem; font-size: 0.8125rem; color: #94a3b8;">
+          <span>TunnelSats for StartOS <strong style="color: #f8fafc;">v0.4.0</strong></span>
+          <span>&bull;</span>
+          <a href="https://github.com/Tunnelsats/tunnelsats-startos" target="_blank" rel="noopener" style="color: #3399ff; text-decoration: none; font-weight: 500;">GitHub Repository</a>
+          <span>&bull;</span>
+          <a href="https://tunnelsats.com" target="_blank" rel="noopener" style="color: #94a3b8; text-decoration: none;">tunnelsats.com</a>
         </div>
       </footer>
     </div>
