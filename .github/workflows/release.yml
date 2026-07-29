@@ -85,11 +85,20 @@ jobs:
       - name: Build and Pack s9pk
         run: make arch/${{ matrix.arch }}
 
+      - name: Prepare Versioned Package File
+        id: version_file
+        run: |
+          RAW_TAG=${GITHUB_REF#refs/tags/}
+          VER_NUM=${RAW_TAG#v}
+          FILENAME="tunnelsats_${VER_NUM}_${{ matrix.arch }}.s9pk"
+          mv "tunnelsats_${{ matrix.arch }}.s9pk" "$FILENAME"
+          echo "filename=$FILENAME" >> $GITHUB_OUTPUT
+
       - name: Upload Package Artifact
         uses: actions/upload-artifact@v7
         with:
           name: tunnelsats-${{ matrix.arch }}
-          path: tunnelsats_${{ matrix.arch }}.s9pk
+          path: ${{ steps.version_file.outputs.filename }}
 
   release:
     name: Publish Release
@@ -112,70 +121,109 @@ jobs:
           mv start-cli ~/.local/bin/
           echo "$HOME/.local/bin" >> $GITHUB_PATH
 
+      - name: Extract Tag & Filenames
+        id: vars
+        run: |
+          TAG_RAW=${GITHUB_REF#refs/tags/}
+          VER_NUM=${TAG_RAW#v}
+          X86_FILE="tunnelsats_${VER_NUM}_x86_64.s9pk"
+          ARM_FILE="tunnelsats_${VER_NUM}_aarch64.s9pk"
+          echo "tag_raw=$TAG_RAW" >> $GITHUB_OUTPUT
+          echo "ver_num=$VER_NUM" >> $GITHUB_OUTPUT
+          echo "x86_file=$X86_FILE" >> $GITHUB_OUTPUT
+          echo "arm_file=$ARM_FILE" >> $GITHUB_OUTPUT
+          
+          if [[ "$TAG_RAW" =~ -(beta|rc) ]]; then
+            echo "is_prerelease=true" >> $GITHUB_OUTPUT
+          else
+            echo "is_prerelease=false" >> $GITHUB_OUTPUT
+          fi
+
       - name: Generate Checksums
         run: |
-          sha256sum tunnelsats_x86_64.s9pk tunnelsats_aarch64.s9pk > SHA256SUMS
+          sha256sum ${{ steps.vars.outputs.x86_file }} ${{ steps.vars.outputs.arm_file }} > SHA256SUMS
           cat SHA256SUMS
+
+      - name: Import GPG Key & Sign SHA256SUMS
+        id: gpg
+        if: secrets.GPG_PRIVATE_KEY != ''
+        uses: crazy-max/ghaction-import-gpg@v6
+        with:
+          gpg_private_key: ${{ secrets.GPG_PRIVATE_KEY }}
+          passphrase: ${{ secrets.GPG_PASSPHRASE }}
+
+      - name: Generate PGP Detached Signature
+        if: steps.gpg.outcome == 'success'
+        run: |
+          gpg --batch --yes --detach-sign --armor SHA256SUMS
+          cat SHA256SUMS.asc
 
       - name: Inspect Package commitments
         id: inspect
         run: |
-          SIGHASH_X86=$(start-cli s9pk inspect tunnelsats_x86_64.s9pk commitment | jq -r .rootSighash)
-          SIGHASH_ARM=$(start-cli s9pk inspect tunnelsats_aarch64.s9pk commitment | jq -r .rootSighash)
+          SIGHASH_X86=$(start-cli s9pk inspect ${{ steps.vars.outputs.x86_file }} commitment | jq -r .rootSighash)
+          SIGHASH_ARM=$(start-cli s9pk inspect ${{ steps.vars.outputs.arm_file }} commitment | jq -r .rootSighash)
           echo "sighash_x86=$SIGHASH_X86" >> $GITHUB_OUTPUT
           echo "sighash_arm=$SIGHASH_ARM" >> $GITHUB_OUTPUT
 
       - name: Generate Release Notes
         id: notes
         run: |
-          VERSION=${GITHUB_REF#refs/tags/}
+          VERSION="${{ steps.vars.outputs.tag_raw }}"
+          X86_FILE="${{ steps.vars.outputs.x86_file }}"
+          ARM_FILE="${{ steps.vars.outputs.arm_file }}"
           
-          # Compute hashes for release notes body
-          HASH_X86=$(sha256sum tunnelsats_x86_64.s9pk | awk '{print $1}')
-          HASH_ARM=$(sha256sum tunnelsats_aarch64.s9pk | awk '{print $1}')
+          HASH_X86=$(sha256sum "$X86_FILE" | awk '{print $1}')
+          HASH_ARM=$(sha256sum "$ARM_FILE" | awk '{print $1}')
           
           cat <<EOF > release_notes.md
           # TunnelSats StartOS Release $VERSION
 
-          This release packages TunnelSats for StartOS 0.4.0.
+          This release packages TunnelSats for StartOS 0.4.0+.
 
           ## Pre-built Binaries & Checksums
 
-          You can download the pre-built `.s9pk` binaries or build them yourself from source.
+          You can download the pre-built \`.s9pk\` binaries or build them yourself from source.
 
           | Platform | Filename | SHA256 Checksum | StartOS Build Signature (rootSighash) |
           |---|---|---|---|
-          | **x86_64** | \`tunnelsats_x86_64.s9pk\` | \`$HASH_X86\` | \`${{ steps.inspect.outputs.sighash_x86 }}\` |
-          | **aarch64 (ARM64)** | \`tunnelsats_aarch64.s9pk\` | \`$HASH_ARM\` | \`${{ steps.inspect.outputs.sighash_arm }}\` |
+          | **x86_64** | \`$X86_FILE\` | \`$HASH_X86\` | \`${{ steps.inspect.outputs.sighash_x86 }}\` |
+          | **aarch64 (ARM64)** | \`$ARM_FILE\` | \`$HASH_ARM\` | \`${{ steps.inspect.outputs.sighash_arm }}\` |
 
-          ## How to Verify Checksums
+          ## How to Verify Checksums & PGP Signatures
 
-          1. Download the \`.s9pk\` file and the \`SHA256SUMS\` file.
-          2. Run the following command to verify the download's integrity:
+          1. Download the package file (\`.s9pk\`), \`SHA256SUMS\`, and optionally \`SHA256SUMS.asc\`.
+          2. Verify checksum integrity:
              \`\`\`bash
              sha256sum -c SHA256SUMS
              \`\`\`
+          3. Verify PGP signature using the official TunnelSats builder key:
+             \`\`\`bash
+             gpg --import keys/tunnelsats-release-builder.asc
+             gpg --verify SHA256SUMS.asc SHA256SUMS
+             \`\`\`
 
-          ## How to Verify Build Signature
+          ## How to Verify StartOS Build Signature
 
-          To confirm that the package was signed by the official TunnelSats builder key:
+          To confirm that the package was signed by the official TunnelSats developer key:
           1. Install \`start-cli\` (from [Start9 Labs](https://github.com/Start9Labs/start-technologies/releases)).
-          2. Run the commitment inspection:
+          2. Run commitment inspection:
              \`\`\`bash
              start-cli s9pk inspect <filename.s9pk> commitment
              \`\`\`
-          3. Confirm the output \`rootSighash\` matches the signature hash documented above.
-          4. Maintainers' signing keys are published here: [TunnelSats Keys](https://github.com/Tunnelsats/tunnelsats/tree/main/keys).
+          3. Confirm \`rootSighash\` matches the table above.
           EOF
 
-      - name: Publish Draft Release
+      - name: Publish Release
         uses: softprops/action-gh-release@v1
         with:
           files: |
-            tunnelsats_x86_64.s9pk
-            tunnelsats_aarch64.s9pk
+            ${{ steps.vars.outputs.x86_file }}
+            ${{ steps.vars.outputs.arm_file }}
             SHA256SUMS
+            SHA256SUMS.asc
           body_path: release_notes.md
-          draft: true
+          prerelease: ${{ steps.vars.outputs.is_prerelease == 'true' }}
+          draft: false
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
