@@ -141,7 +141,7 @@ jobs:
 
       - name: Generate Checksums
         run: |
-          sha256sum ${{ steps.vars.outputs.x86_file }} ${{ steps.vars.outputs.arm_file }} > SHA256SUMS
+          sha256sum "${{ steps.vars.outputs.x86_file }}" "${{ steps.vars.outputs.arm_file }}" > SHA256SUMS
           cat SHA256SUMS
 
       - name: Import GPG Key & Sign SHA256SUMS
@@ -157,12 +157,13 @@ jobs:
         run: |
           gpg --batch --yes --detach-sign --armor SHA256SUMS
           cat SHA256SUMS.asc
+          echo "has_pgp=true" >> $GITHUB_ENV
 
       - name: Inspect Package commitments
         id: inspect
         run: |
-          SIGHASH_X86=$(start-cli s9pk inspect ${{ steps.vars.outputs.x86_file }} commitment | jq -r .rootSighash)
-          SIGHASH_ARM=$(start-cli s9pk inspect ${{ steps.vars.outputs.arm_file }} commitment | jq -r .rootSighash)
+          SIGHASH_X86=$(start-cli s9pk inspect "${{ steps.vars.outputs.x86_file }}" commitment | jq -r .rootSighash)
+          SIGHASH_ARM=$(start-cli s9pk inspect "${{ steps.vars.outputs.arm_file }}" commitment | jq -r .rootSighash)
           echo "sighash_x86=$SIGHASH_X86" >> $GITHUB_OUTPUT
           echo "sighash_arm=$SIGHASH_ARM" >> $GITHUB_OUTPUT
 
@@ -190,18 +191,30 @@ jobs:
           | **x86_64** | \`$X86_FILE\` | \`$HASH_X86\` | \`${{ steps.inspect.outputs.sighash_x86 }}\` |
           | **aarch64 (ARM64)** | \`$ARM_FILE\` | \`$HASH_ARM\` | \`${{ steps.inspect.outputs.sighash_arm }}\` |
 
-          ## How to Verify Checksums & PGP Signatures
+          ## How to Verify Checksums
 
-          1. Download the package file (\`.s9pk\`), \`SHA256SUMS\`, and optionally \`SHA256SUMS.asc\`.
+          1. Download the package file (\`.s9pk\`) and \`SHA256SUMS\`.
           2. Verify checksum integrity:
              \`\`\`bash
              sha256sum -c SHA256SUMS
              \`\`\`
-          3. Verify PGP signature using the official TunnelSats builder key:
+          EOF
+
+          if [ "$has_pgp" = "true" ]; then
+            cat <<EOF >> release_notes.md
+
+          ## How to Verify PGP Signature
+
+          1. Download \`SHA256SUMS.asc\`.
+          2. Import key and verify signature:
              \`\`\`bash
              gpg --import keys/tunnelsats-release-builder.asc
              gpg --verify SHA256SUMS.asc SHA256SUMS
              \`\`\`
+          EOF
+          fi
+
+          cat <<EOF >> release_notes.md
 
           ## How to Verify StartOS Build Signature
 
@@ -214,16 +227,26 @@ jobs:
           3. Confirm \`rootSighash\` matches the table above.
           EOF
 
-      - name: Publish Release
+      - name: Prepare Assets List
+        id: assets
+        run: |
+          ASSETS="${{ steps.vars.outputs.x86_file }}
+          ${{ steps.vars.outputs.arm_file }}
+          SHA256SUMS"
+          if [ "$has_pgp" = "true" ]; then
+            ASSETS="$ASSETS
+          SHA256SUMS.asc"
+          fi
+          echo "files<<EOF" >> $GITHUB_OUTPUT
+          echo "$ASSETS" >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
+
+      - name: Publish Release Draft
         uses: softprops/action-gh-release@v1
         with:
-          files: |
-            ${{ steps.vars.outputs.x86_file }}
-            ${{ steps.vars.outputs.arm_file }}
-            SHA256SUMS
-            SHA256SUMS.asc
+          files: ${{ steps.assets.outputs.files }}
           body_path: release_notes.md
           prerelease: ${{ steps.vars.outputs.is_prerelease == 'true' }}
-          draft: false
+          draft: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
