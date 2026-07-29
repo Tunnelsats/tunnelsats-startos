@@ -89,7 +89,7 @@ jobs:
         id: version_file
         run: |
           RAW_TAG=${GITHUB_REF#refs/tags/}
-          VER_NUM=${RAW_TAG#v}
+          VER_NUM=$(echo "${RAW_TAG#v}" | tr '/' '-')
           FILENAME="tunnelsats_${VER_NUM}_${{ matrix.arch }}.s9pk"
           mv "tunnelsats_${{ matrix.arch }}.s9pk" "$FILENAME"
           echo "filename=$FILENAME" >> $GITHUB_OUTPUT
@@ -125,7 +125,7 @@ jobs:
         id: vars
         run: |
           TAG_RAW=${GITHUB_REF#refs/tags/}
-          VER_NUM=${TAG_RAW#v}
+          VER_NUM=$(echo "${TAG_RAW#v}" | tr '/' '-')
           X86_FILE="tunnelsats_${VER_NUM}_x86_64.s9pk"
           ARM_FILE="tunnelsats_${VER_NUM}_aarch64.s9pk"
           echo "tag_raw=$TAG_RAW" >> $GITHUB_OUTPUT
@@ -147,7 +147,7 @@ jobs:
       - name: Import GPG Key & Sign SHA256SUMS
         id: gpg
         if: secrets.GPG_PRIVATE_KEY != ''
-        uses: crazy-max/ghaction-import-gpg@v6
+        uses: crazy-max/ghaction-import-gpg@cb9b0112727a2965476a6b29f2dc25e987c2b3d8 # v6.2.0
         with:
           gpg_private_key: ${{ secrets.GPG_PRIVATE_KEY }}
           passphrase: ${{ secrets.GPG_PASSPHRASE }}
