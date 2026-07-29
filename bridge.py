@@ -274,8 +274,6 @@ def get_package_version():
                 data = json.load(f)
                 ver = data.get("version")
                 if ver:
-                    if ":" not in ver:
-                        ver = f"{ver}:0"
                     _package_version_cache = ver
                     return _package_version_cache
         except Exception:
