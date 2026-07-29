@@ -262,7 +262,7 @@ def get_package_version():
                 data = json.load(f)
                 ver = data.get("version")
                 if ver:
-                    _package_version_cache = ver
+                    _package_version_cache = ver.partition(':')[0]
                     return _package_version_cache
         except Exception:
             pass
