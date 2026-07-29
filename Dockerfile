@@ -24,7 +24,7 @@ COPY --from=builder /wireproxy-bin /usr/local/bin/wireproxy
 WORKDIR /app
 
 # Copy application files
-COPY package.json .
+COPY version.json .
 COPY bridge.py .
 COPY docker_entrypoint.sh .
 COPY verify.sh .
