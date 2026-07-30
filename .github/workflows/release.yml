@@ -89,6 +89,10 @@ jobs:
         id: version_file
         run: |
           RAW_TAG=${GITHUB_REF#refs/tags/}
+          if [[ ! "$RAW_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?(\+[0-9A-Za-z.-]+)?$ ]]; then
+            echo "Unsupported release tag: $RAW_TAG" >&2
+            exit 1
+          fi
           VER_NUM=$(echo "${RAW_TAG#v}" | tr '/' '-')
           FILENAME="tunnelsats_${VER_NUM}_${{ matrix.arch }}.s9pk"
           mv "tunnelsats_${{ matrix.arch }}.s9pk" "$FILENAME"
@@ -125,6 +129,10 @@ jobs:
         id: vars
         run: |
           TAG_RAW=${GITHUB_REF#refs/tags/}
+          if [[ ! "$TAG_RAW" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?(\+[0-9A-Za-z.-]+)?$ ]]; then
+            echo "Unsupported release tag: $TAG_RAW" >&2
+            exit 1
+          fi
           VER_NUM=$(echo "${TAG_RAW#v}" | tr '/' '-')
           X86_FILE="tunnelsats_${VER_NUM}_x86_64.s9pk"
           ARM_FILE="tunnelsats_${VER_NUM}_aarch64.s9pk"
@@ -132,7 +140,7 @@ jobs:
           echo "ver_num=$VER_NUM" >> $GITHUB_OUTPUT
           echo "x86_file=$X86_FILE" >> $GITHUB_OUTPUT
           echo "arm_file=$ARM_FILE" >> $GITHUB_OUTPUT
-          
+
           if [[ "$TAG_RAW" =~ -(beta|rc) ]]; then
             echo "is_prerelease=true" >> $GITHUB_OUTPUT
           else
@@ -140,13 +148,27 @@ jobs:
           fi
 
       - name: Generate Checksums
+        env:
+          X86_FILE: ${{ steps.vars.outputs.x86_file }}
+          ARM_FILE: ${{ steps.vars.outputs.arm_file }}
         run: |
-          sha256sum "${{ steps.vars.outputs.x86_file }}" "${{ steps.vars.outputs.arm_file }}" > SHA256SUMS
+          sha256sum "$X86_FILE" "$ARM_FILE" > SHA256SUMS
           cat SHA256SUMS
+
+      - name: Check GPG Signing Configuration
+        id: gpg_config
+        env:
+          GPG_PRIVATE_KEY: ${{ secrets.GPG_PRIVATE_KEY }}
+        run: |
+          if [ -n "$GPG_PRIVATE_KEY" ]; then
+            echo "available=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "available=false" >> "$GITHUB_OUTPUT"
+          fi
 
       - name: Import GPG Key & Sign SHA256SUMS
         id: gpg
-        if: secrets.GPG_PRIVATE_KEY != ''
+        if: steps.gpg_config.outputs.available == 'true'
         uses: crazy-max/ghaction-import-gpg@cb9b0112727a2965476a6b29f2dc25e987c2b3d8 # v6.2.0
         with:
           gpg_private_key: ${{ secrets.GPG_PRIVATE_KEY }}
@@ -161,22 +183,27 @@ jobs:
 
       - name: Inspect Package commitments
         id: inspect
+        env:
+          X86_FILE: ${{ steps.vars.outputs.x86_file }}
+          ARM_FILE: ${{ steps.vars.outputs.arm_file }}
         run: |
-          SIGHASH_X86=$(start-cli s9pk inspect "${{ steps.vars.outputs.x86_file }}" commitment | jq -r .rootSighash)
-          SIGHASH_ARM=$(start-cli s9pk inspect "${{ steps.vars.outputs.arm_file }}" commitment | jq -r .rootSighash)
+          SIGHASH_X86=$(start-cli s9pk inspect "$X86_FILE" commitment | jq -r .rootSighash)
+          SIGHASH_ARM=$(start-cli s9pk inspect "$ARM_FILE" commitment | jq -r .rootSighash)
           echo "sighash_x86=$SIGHASH_X86" >> $GITHUB_OUTPUT
           echo "sighash_arm=$SIGHASH_ARM" >> $GITHUB_OUTPUT
 
       - name: Generate Release Notes
         id: notes
+        env:
+          VERSION: ${{ steps.vars.outputs.tag_raw }}
+          X86_FILE: ${{ steps.vars.outputs.x86_file }}
+          ARM_FILE: ${{ steps.vars.outputs.arm_file }}
+          SIGHASH_X86: ${{ steps.inspect.outputs.sighash_x86 }}
+          SIGHASH_ARM: ${{ steps.inspect.outputs.sighash_arm }}
         run: |
-          VERSION="${{ steps.vars.outputs.tag_raw }}"
-          X86_FILE="${{ steps.vars.outputs.x86_file }}"
-          ARM_FILE="${{ steps.vars.outputs.arm_file }}"
-          
           HASH_X86=$(sha256sum "$X86_FILE" | awk '{print $1}')
           HASH_ARM=$(sha256sum "$ARM_FILE" | awk '{print $1}')
-          
+
           cat <<EOF > release_notes.md
           # TunnelSats StartOS Release $VERSION
 
@@ -188,8 +215,8 @@ jobs:
 
           | Platform | Filename | SHA256 Checksum | StartOS Build Signature (rootSighash) |
           |---|---|---|---|
-          | **x86_64** | \`$X86_FILE\` | \`$HASH_X86\` | \`${{ steps.inspect.outputs.sighash_x86 }}\` |
-          | **aarch64 (ARM64)** | \`$ARM_FILE\` | \`$HASH_ARM\` | \`${{ steps.inspect.outputs.sighash_arm }}\` |
+          | **x86_64** | \`$X86_FILE\` | \`$HASH_X86\` | \`$SIGHASH_X86\` |
+          | **aarch64 (ARM64)** | \`$ARM_FILE\` | \`$HASH_ARM\` | \`$SIGHASH_ARM\` |
 
           ## How to Verify Checksums
 
@@ -205,10 +232,10 @@ jobs:
 
           ## How to Verify PGP Signature
 
-          1. Download \`SHA256SUMS.asc\`.
+          1. Download \`SHA256SUMS.asc\` and \`tunnelsats-release-builder.asc\`.
           2. Import key and verify signature:
              \`\`\`bash
-             gpg --import keys/tunnelsats-release-builder.asc
+             gpg --import tunnelsats-release-builder.asc
              gpg --verify SHA256SUMS.asc SHA256SUMS
              \`\`\`
           EOF
@@ -229,13 +256,17 @@ jobs:
 
       - name: Prepare Assets List
         id: assets
+        env:
+          X86_FILE: ${{ steps.vars.outputs.x86_file }}
+          ARM_FILE: ${{ steps.vars.outputs.arm_file }}
         run: |
-          ASSETS="${{ steps.vars.outputs.x86_file }}
-          ${{ steps.vars.outputs.arm_file }}
+          ASSETS="$X86_FILE
+          $ARM_FILE
           SHA256SUMS"
           if [ "$has_pgp" = "true" ]; then
             ASSETS="$ASSETS
-          SHA256SUMS.asc"
+          SHA256SUMS.asc
+          keys/tunnelsats-release-builder.asc"
           fi
           echo "files<<EOF" >> $GITHUB_OUTPUT
           echo "$ASSETS" >> $GITHUB_OUTPUT
