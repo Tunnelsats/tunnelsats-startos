@@ -1,7 +1,5 @@
 # TunnelSats
 
-TunnelSats is a privacy-focused VPN gateway designed for Lightning Nodes (LND & Core Lightning). It routes node traffic through an encrypted WireGuard tunnel, preserving your home IP address while providing clearnet speed and reliability.
-
 ## Getting Started
 
 1. **Obtain a Subscription**:
@@ -16,14 +14,21 @@ TunnelSats is a privacy-focused VPN gateway designed for Lightning Nodes (LND & 
    - Set **Enable TunnelSats** to **ON** and click **Save**.
 
 3. **Advertise Endpoint to Lightning Network**:
-   - **For LND (StartOS 0.4.0)**:
+   - **For LND**:
      - Open **LND** in your StartOS Dashboard.
      - Click **Actions** &rarr; **Custom External Host**.
      - Enter your TunnelSats domain and port (e.g. `ch1.tunnelsats.com:24556`) and click **Submit**.
      - LND will automatically advertise this endpoint alongside your Tor address.
    - **For Core Lightning (CLN)**:
-     - Open **Core Lightning** config and set `announce-addr=<tunnelsats_domain:port>`.
+     - Native UI Action support for CLN is currently pending in StartOS. Configuring `announce-addr` persistently requires injecting a startup hook via SSH. Refer to the FAQ in the TunnelSats Web Dashboard for step-by-step instructions.
 
 4. **Verify Health**:
    - Check the **Health Checks** tab in TunnelSats to confirm **VPN Connectivity** and **SOCKS5 Proxy** are active.
    - Open the **Web Dashboard** to monitor live tunnel statistics and subscription expiration.
+
+## Documentation
+
+- [TunnelSats Website](https://tunnelsats.com)
+- [GitHub Repository](https://github.com/Tunnelsats/tunnelsats-startos)
+- [Setup FAQ & Troubleshooting](https://github.com/Tunnelsats/tunnelsats-startos#faq)
+
