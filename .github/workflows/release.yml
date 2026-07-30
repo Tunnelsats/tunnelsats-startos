@@ -7,6 +7,10 @@ on:
 
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: 'true'
+  START_CLI_SHA256: '82a042a0a1c351dd054d6f95c368471098d2492793d864dc3a7aa15905389e17'
+
+permissions:
+  contents: read
 
 jobs:
   test:
@@ -60,21 +64,24 @@ jobs:
 
       - name: Install start-cli
         run: |
-          curl -L -o start-cli https://github.com/Start9Labs/start-technologies/releases/download/start-cli%2Fv1.0.1/start-cli_x86_64-linux
+          curl -fsSL -o start-cli https://github.com/Start9Labs/start-technologies/releases/download/start-cli%2Fv1.0.1/start-cli_x86_64-linux
+          echo "$START_CLI_SHA256  start-cli" | sha256sum -c -
           chmod +x start-cli
           mkdir -p ~/.local/bin
           mv start-cli ~/.local/bin/
-          echo "$HOME/.local/bin" >> $GITHUB_PATH
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
 
       - name: Initialize Developer Key & Workspace
+        env:
+          STARTOS_DEVELOPER_KEY: ${{ secrets.STARTOS_DEVELOPER_KEY }}
         run: |
-          mkdir -p ~/.startos
-          if [ -n "${{ secrets.STARTOS_DEVELOPER_KEY }}" ]; then
-            echo "${{ secrets.STARTOS_DEVELOPER_KEY }}" > ~/.startos/developer.key.pem
-          else
-            start-cli init-key
+          if [ -z "$STARTOS_DEVELOPER_KEY" ]; then
+            echo "STARTOS_DEVELOPER_KEY is required for release builds" >&2
+            exit 1
           fi
           start-cli s9pk init-workspace ..
+          printf '%s\n' "$STARTOS_DEVELOPER_KEY" > ../.startos/build-key
+          chmod 600 ../.startos/build-key
 
       - name: Set up QEMU
         uses: docker/setup-qemu-action@v4
@@ -85,16 +92,28 @@ jobs:
       - name: Build and Pack s9pk
         run: make arch/${{ matrix.arch }}
 
+      - name: Prepare Versioned Package File
+        id: version_file
+        run: |
+          RAW_TAG=${GITHUB_REF#refs/tags/}
+          bash scripts/validate-release-tag.sh "$RAW_TAG"
+          VER_NUM=$(echo "${RAW_TAG#v}" | tr '/' '-')
+          FILENAME="tunnelsats_${VER_NUM}_${{ matrix.arch }}.s9pk"
+          mv "tunnelsats_${{ matrix.arch }}.s9pk" "$FILENAME"
+          echo "filename=$FILENAME" >> "$GITHUB_OUTPUT"
+
       - name: Upload Package Artifact
         uses: actions/upload-artifact@v7
         with:
           name: tunnelsats-${{ matrix.arch }}
-          path: tunnelsats_${{ matrix.arch }}.s9pk
+          path: ${{ steps.version_file.outputs.filename }}
 
   release:
     name: Publish Release
     needs: build
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     steps:
       - name: Checkout
         uses: actions/checkout@v7
@@ -106,76 +125,172 @@ jobs:
 
       - name: Install start-cli
         run: |
-          curl -L -o start-cli https://github.com/Start9Labs/start-technologies/releases/download/start-cli%2Fv1.0.1/start-cli_x86_64-linux
+          curl -fsSL -o start-cli https://github.com/Start9Labs/start-technologies/releases/download/start-cli%2Fv1.0.1/start-cli_x86_64-linux
+          echo "$START_CLI_SHA256  start-cli" | sha256sum -c -
           chmod +x start-cli
           mkdir -p ~/.local/bin
           mv start-cli ~/.local/bin/
-          echo "$HOME/.local/bin" >> $GITHUB_PATH
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+
+      - name: Extract Tag & Filenames
+        id: vars
+        run: |
+          TAG_RAW=${GITHUB_REF#refs/tags/}
+          bash scripts/validate-release-tag.sh "$TAG_RAW"
+          VER_NUM=$(echo "${TAG_RAW#v}" | tr '/' '-')
+          X86_FILE="tunnelsats_${VER_NUM}_x86_64.s9pk"
+          ARM_FILE="tunnelsats_${VER_NUM}_aarch64.s9pk"
+
+          if [[ "$TAG_RAW" =~ ^v[0-9]+\.[0-9]+\.[0-9]+- ]]; then
+            IS_PRERELEASE=true
+          else
+            IS_PRERELEASE=false
+          fi
+
+          {
+            echo "tag_raw=$TAG_RAW"
+            echo "ver_num=$VER_NUM"
+            echo "x86_file=$X86_FILE"
+            echo "arm_file=$ARM_FILE"
+            echo "is_prerelease=$IS_PRERELEASE"
+          } >> "$GITHUB_OUTPUT"
 
       - name: Generate Checksums
+        env:
+          X86_FILE: ${{ steps.vars.outputs.x86_file }}
+          ARM_FILE: ${{ steps.vars.outputs.arm_file }}
         run: |
-          sha256sum tunnelsats_x86_64.s9pk tunnelsats_aarch64.s9pk > SHA256SUMS
+          sha256sum "$X86_FILE" "$ARM_FILE" > SHA256SUMS
           cat SHA256SUMS
+
+      - name: Import GPG Key & Sign SHA256SUMS
+        id: gpg
+        uses: crazy-max/ghaction-import-gpg@2dc316deee8e90f13e1a351ab510b4d5bc0c82cd # v7.0.0
+        with:
+          gpg_private_key: ${{ secrets.GPG_PRIVATE_KEY }}
+          passphrase: ${{ secrets.GPG_PASSPHRASE }}
+
+      - name: Verify GPG Signing Key
+        env:
+          IMPORTED_FINGERPRINT: ${{ steps.gpg.outputs.fingerprint }}
+        run: |
+          EXPECTED_FINGERPRINT=$(gpg --batch --with-colons --show-keys keys/tunnelsats-release-builder.asc |
+            awk -F: '$1 == "fpr" { print $10; exit }')
+          if [ "$IMPORTED_FINGERPRINT" != "$EXPECTED_FINGERPRINT" ]; then
+            echo "Configured GPG key fingerprint does not match the published release key" >&2
+            echo "Expected: $EXPECTED_FINGERPRINT" >&2
+            echo "Received: $IMPORTED_FINGERPRINT" >&2
+            exit 1
+          fi
+
+      - name: Generate PGP Detached Signature
+        run: |
+          gpg --batch --yes --detach-sign --armor SHA256SUMS
+          VERIFY_GNUPGHOME=$(mktemp -d)
+          chmod 700 "$VERIFY_GNUPGHOME"
+          GNUPGHOME="$VERIFY_GNUPGHOME" gpg --batch --import keys/tunnelsats-release-builder.asc
+          GNUPGHOME="$VERIFY_GNUPGHOME" gpg --batch --verify SHA256SUMS.asc SHA256SUMS
 
       - name: Inspect Package commitments
         id: inspect
+        env:
+          X86_FILE: ${{ steps.vars.outputs.x86_file }}
+          ARM_FILE: ${{ steps.vars.outputs.arm_file }}
         run: |
-          SIGHASH_X86=$(start-cli s9pk inspect tunnelsats_x86_64.s9pk commitment | jq -r .rootSighash)
-          SIGHASH_ARM=$(start-cli s9pk inspect tunnelsats_aarch64.s9pk commitment | jq -r .rootSighash)
-          echo "sighash_x86=$SIGHASH_X86" >> $GITHUB_OUTPUT
-          echo "sighash_arm=$SIGHASH_ARM" >> $GITHUB_OUTPUT
+          SIGHASH_X86=$(start-cli s9pk inspect "$X86_FILE" commitment | jq -r .rootSighash)
+          SIGHASH_ARM=$(start-cli s9pk inspect "$ARM_FILE" commitment | jq -r .rootSighash)
+          {
+            echo "sighash_x86=$SIGHASH_X86"
+            echo "sighash_arm=$SIGHASH_ARM"
+          } >> "$GITHUB_OUTPUT"
 
       - name: Generate Release Notes
         id: notes
+        env:
+          VERSION: ${{ steps.vars.outputs.tag_raw }}
+          X86_FILE: ${{ steps.vars.outputs.x86_file }}
+          ARM_FILE: ${{ steps.vars.outputs.arm_file }}
+          SIGHASH_X86: ${{ steps.inspect.outputs.sighash_x86 }}
+          SIGHASH_ARM: ${{ steps.inspect.outputs.sighash_arm }}
         run: |
-          VERSION=${GITHUB_REF#refs/tags/}
-          
-          # Compute hashes for release notes body
-          HASH_X86=$(sha256sum tunnelsats_x86_64.s9pk | awk '{print $1}')
-          HASH_ARM=$(sha256sum tunnelsats_aarch64.s9pk | awk '{print $1}')
-          
+          HASH_X86=$(sha256sum "$X86_FILE" | awk '{print $1}')
+          HASH_ARM=$(sha256sum "$ARM_FILE" | awk '{print $1}')
+
           cat <<EOF > release_notes.md
           # TunnelSats StartOS Release $VERSION
 
-          This release packages TunnelSats for StartOS 0.4.0.
+          This release packages TunnelSats for StartOS 0.4.0+.
 
           ## Pre-built Binaries & Checksums
 
-          You can download the pre-built `.s9pk` binaries or build them yourself from source.
+          You can download the pre-built \`.s9pk\` binaries or build them yourself from source.
 
           | Platform | Filename | SHA256 Checksum | StartOS Build Signature (rootSighash) |
           |---|---|---|---|
-          | **x86_64** | \`tunnelsats_x86_64.s9pk\` | \`$HASH_X86\` | \`${{ steps.inspect.outputs.sighash_x86 }}\` |
-          | **aarch64 (ARM64)** | \`tunnelsats_aarch64.s9pk\` | \`$HASH_ARM\` | \`${{ steps.inspect.outputs.sighash_arm }}\` |
+          | **x86_64** | \`$X86_FILE\` | \`$HASH_X86\` | \`$SIGHASH_X86\` |
+          | **aarch64 (ARM64)** | \`$ARM_FILE\` | \`$HASH_ARM\` | \`$SIGHASH_ARM\` |
 
           ## How to Verify Checksums
 
-          1. Download the \`.s9pk\` file and the \`SHA256SUMS\` file.
-          2. Run the following command to verify the download's integrity:
+          1. Download both package files and \`SHA256SUMS\`.
+          2. Verify checksum integrity:
              \`\`\`bash
              sha256sum -c SHA256SUMS
              \`\`\`
+          EOF
 
-          ## How to Verify Build Signature
+          cat <<EOF >> release_notes.md
 
-          To confirm that the package was signed by the official TunnelSats builder key:
+          ## How to Verify PGP Signature
+
+          1. Download \`SHA256SUMS.asc\` and \`tunnelsats-release-builder.asc\`.
+          2. Confirm that the key fingerprint is
+             \`09C75CF62BD68D6A73AFF63186BA317E14ACA358\`.
+          3. Import the key and verify the signature:
+             \`\`\`bash
+             gpg --show-keys --with-colons tunnelsats-release-builder.asc | grep '09C75CF62BD68D6A73AFF63186BA317E14ACA358'
+             gpg --import tunnelsats-release-builder.asc
+             gpg --verify SHA256SUMS.asc SHA256SUMS
+             \`\`\`
+          EOF
+
+          cat <<EOF >> release_notes.md
+
+          ## How to Verify StartOS Build Signature
+
+          To confirm that the package was signed by the official TunnelSats developer key:
           1. Install \`start-cli\` (from [Start9 Labs](https://github.com/Start9Labs/start-technologies/releases)).
-          2. Run the commitment inspection:
+          2. Run commitment inspection:
              \`\`\`bash
              start-cli s9pk inspect <filename.s9pk> commitment
              \`\`\`
-          3. Confirm the output \`rootSighash\` matches the signature hash documented above.
-          4. Maintainers' signing keys are published here: [TunnelSats Keys](https://github.com/Tunnelsats/tunnelsats/tree/main/keys).
+          3. Confirm \`rootSighash\` matches the table above.
           EOF
 
-      - name: Publish Draft Release
-        uses: softprops/action-gh-release@v1
+      - name: Prepare Assets List
+        id: assets
+        env:
+          X86_FILE: ${{ steps.vars.outputs.x86_file }}
+          ARM_FILE: ${{ steps.vars.outputs.arm_file }}
+        run: |
+          ASSETS="$X86_FILE
+          $ARM_FILE
+          SHA256SUMS
+          SHA256SUMS.asc
+          keys/tunnelsats-release-builder.asc"
+          {
+            echo "files<<EOF"
+            echo "$ASSETS"
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Publish Release Draft
+        uses: softprops/action-gh-release@b4309332981a82ec1c5618f44dd2e27cc8bfbfda # v3.0.0
         with:
-          files: |
-            tunnelsats_x86_64.s9pk
-            tunnelsats_aarch64.s9pk
-            SHA256SUMS
+          files: ${{ steps.assets.outputs.files }}
           body_path: release_notes.md
+          prerelease: ${{ steps.vars.outputs.is_prerelease == 'true' }}
           draft: true
+          fail_on_unmatched_files: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
