@@ -20,7 +20,8 @@
      - Enter your TunnelSats domain and port (e.g. `ch1.tunnelsats.com:24556`) and click **Submit**.
      - LND will automatically advertise this endpoint alongside your Tor address.
    - **For Core Lightning (CLN)**:
-     - Native UI Action support for CLN is currently pending in StartOS. Configuring `announce-addr` persistently requires injecting a startup hook via SSH. Refer to the FAQ in the TunnelSats Web Dashboard for step-by-step instructions.
+     - StartOS 0.4.x does not currently expose a supported UI action for configuring `announce-addr` persistently.
+     - Do not use the legacy StartOS 0.3.5.x `/embassy-data/` startup-hook procedure on StartOS 0.4.x. Wait for the upstream CLN package to add a persistent external-host action.
 
 4. **Verify Health**:
    - Check the **Health Checks** tab in TunnelSats to confirm **VPN Connectivity** and **SOCKS5 Proxy** are active.
@@ -30,5 +31,4 @@
 
 - [TunnelSats Website](https://tunnelsats.com)
 - [GitHub Repository](https://github.com/Tunnelsats/tunnelsats-startos)
-- [Setup FAQ & Troubleshooting](https://github.com/Tunnelsats/tunnelsats-startos#faq)
-
+- [Setup FAQ & Troubleshooting](https://tunnelsats.com/faq)
