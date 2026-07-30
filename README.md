@@ -91,8 +91,10 @@ StartOS 0.4.x natively supports external hosts:
 2. Enter your TunnelSats domain and assigned port (e.g. `your-vpn-server.com:your-vpn-port`).
 3. Submit and restart LND. This writes to `store.json` and persistently merges into `lnd.conf` on every boot.
 
-#### Option B: Core Lightning (CLN) Node Configuration
-In StartOS 0.4.x, CLN configuration is rebuilt dynamically on startup. Append your TunnelSats endpoint to `announce-addr` in `/root/.lightning/config` using a container startup hook or wait for the upstream CLN UI action.
+#### Option B: Core Lightning (CLN) Node Configuration (StartOS 0.4.0+)
+1. Open the Core Lightning service UI, click the **Actions** menu, and select **Custom External Host** (implemented in `cln-startos` [PR #180](https://github.com/Start9Labs/cln-startos/pull/180)).
+2. Enter your TunnelSats domain and assigned port (e.g. `ch1.tunnelsats.com:24556`).
+3. Save and restart CLN. This writes `customExternalHosts` to `store.json` and persistently merges into `announce-addr` in CLN's `config` on every boot.
 
 ---
 
