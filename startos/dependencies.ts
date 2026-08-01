@@ -1,24 +1,94 @@
 import { sdk } from './sdk'
 import { configJson } from './fileModels/config.json'
+import { i18n } from './i18n'
+import { customExternalHostConfig } from 'lnd-startos/startos/actions/config/customExternalHost'
+import { config as clnConfigAction } from 'cln-startos/startos/actions/config/config'
 
-export const setDependencies = sdk.setupDependencies(async ({ effects }) => {
-  const targetNode = await configJson.read((c) => c['target-node']).once()
+export function getAnnounceEndpoint(wgConf: string | null | undefined): string | null {
+  if (!wgConf) return null
 
-  const result: any = {}
+  const endpointMatch = wgConf.match(/^\s*(?!#|;)\s*Endpoint\s*=\s*([^:\s#]+)/im)
+  if (!endpointMatch) return null
+  const host = endpointMatch[1].trim()
 
-  if (targetNode === 'lnd') {
-    result.lnd = {
-      kind: 'running',
-      versionRange: '>=0.15.5:0',
-      healthChecks: ['lnd'],
-    }
-  } else if (targetNode === 'cln') {
-    result['c-lightning'] = {
-      kind: 'running',
-      versionRange: '>=23.02.2:0',
-      healthChecks: ['cln'],
+  const portMatch = wgConf.match(/#\s*(?:VPNPort|Port Forwarding):\s*(\d+)/i)
+  if (!portMatch) return null
+  const vpnPort = portMatch[1].trim()
+
+  return `${host}:${vpnPort}`
+}
+
+export function getDependenciesForConfig(
+  config: { enabled?: boolean; 'target-node'?: 'lnd' | 'cln' } | null | undefined,
+) {
+  if (!config?.enabled) {
+    return {}
+  }
+
+  if (config['target-node'] === 'cln') {
+    return {
+      'c-lightning': {
+        kind: 'running' as const,
+        versionRange: '>=23.2.2:0',
+        healthChecks: ['lightningd'],
+      },
     }
   }
 
-  return result
+  return {
+    lnd: {
+      kind: 'running' as const,
+      versionRange: '>=0.15.5:0',
+      healthChecks: ['lnd'],
+    },
+  }
+}
+
+export const setDependencies = sdk.setupDependencies(async ({ effects }) => {
+  const config = await configJson.read().const(effects)
+
+  const announceEndpoint = getAnnounceEndpoint(config?.['tunnelsats-conf'])
+
+  if (config?.enabled && announceEndpoint) {
+    if (config['target-node'] === 'lnd') {
+      await sdk.action.createTask(
+        effects,
+        'lnd',
+        customExternalHostConfig,
+        'important',
+        {
+          input: {
+            kind: 'partial',
+            accept: [{ 'custom-external-host': announceEndpoint }],
+            set: { 'custom-external-host': announceEndpoint },
+          },
+          when: { condition: 'input-not-matches', once: false },
+          reason: i18n('Advertise TunnelSats VPN endpoint to the Lightning Network'),
+        },
+      )
+      await sdk.action.clearTask(effects, 'c-lightning:config')
+    } else if (config['target-node'] === 'cln') {
+      await sdk.action.createTask(
+        effects,
+        'c-lightning',
+        clnConfigAction,
+        'important',
+        {
+          input: {
+            kind: 'partial',
+            accept: [{ 'custom-external-host': announceEndpoint }],
+            set: { 'custom-external-host': announceEndpoint },
+          },
+          when: { condition: 'input-not-matches', once: false },
+          reason: i18n('Advertise TunnelSats VPN endpoint to the Lightning Network'),
+        },
+      )
+      await sdk.action.clearTask(effects, 'lnd:custom-external-host-config')
+    }
+  } else {
+    await sdk.action.clearTask(effects, 'lnd:custom-external-host-config')
+    await sdk.action.clearTask(effects, 'c-lightning:config')
+  }
+
+  return getDependenciesForConfig(config)
 })

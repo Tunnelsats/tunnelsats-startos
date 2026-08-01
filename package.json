@@ -2,17 +2,24 @@
   "name": "tunnelsats-startos",
   "version": "0.4.0",
   "scripts": {
+    "test": "tsx --test tests/*.test.ts",
     "build": "python3 -c \"import re, json; v=re.search(r'version:\\s*[\\\"\\']([^\\\"\\']+)[\\\"\\']', open('startos/versions/current.ts').read()).group(1); json.dump({'version': v}, open('version.json', 'w'), indent=2)\" && rm -rf ./javascript && ncc build startos/index.ts -o ./javascript",
     "prettier": "prettier --write startos",
     "check": "tsc --noEmit"
   },
   "dependencies": {
-    "@start9labs/start-sdk": "2.0.9"
+    "@start9labs/start-sdk": "2.0.9",
+    "cln-startos": "github:Start9Labs/cln-startos#master",
+    "lnd-startos": "github:Start9Labs/lnd-startos#master"
+  },
+  "overrides": {
+    "@start9labs/start-sdk": "$@start9labs/start-sdk"
   },
   "devDependencies": {
-    "@types/node": "^26.1.2",
+    "@types/node": "^22.15.3",
     "@vercel/ncc": "^0.44.1",
     "prettier": "^3.9.6",
+    "tsx": "^4.19.2",
     "typescript": "^5.7.3"
   },
   "prettier": {

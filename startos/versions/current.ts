@@ -1,10 +1,10 @@
 import { IMPOSSIBLE, VersionInfo } from '@start9labs/start-sdk'
 
 export const current = VersionInfo.of({
-  version: '0.4.0:0',
+  version: '0.4.0:1',
   releaseNotes: {
     en_US:
-      'Initial release for StartOS 0.4.0+. Migrated package architecture to StartOS TypeScript SDK with reactive configuration, container isolation, and automated diagnostic tools.',
+      'Adds 1-Click UI Tasks to advertise TunnelSats endpoints on LND and Core Lightning, implements dynamic reactive dependency resolution, and updates documentation for StartOS 0.4.0+.',
   },
   migrations: {
     up: async ({ effects }) => {},

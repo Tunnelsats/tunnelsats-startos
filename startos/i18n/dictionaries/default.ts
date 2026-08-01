@@ -23,6 +23,7 @@ const dict = {
   'Failed to parse health check result': 19,
   'Proxy not ready': 20,
   'VPN connected': 21,
+  'Advertise TunnelSats VPN endpoint to the Lightning Network': 22,
 } as const
 
 /**
