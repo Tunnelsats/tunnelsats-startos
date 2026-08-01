@@ -139,7 +139,7 @@
           <div class="tab-content active" id="lnd-tab">
             <p class="guide-intro">
               <strong>StartOS 0.4.0 Zero-Hassle LND Setup:</strong><br />
-              Open your <strong>LND service page</strong> in StartOS &rarr; <strong>Actions</strong> &rarr; <strong>Custom External Host</strong>, and enter your TunnelSats endpoint:
+              When TunnelSats is enabled, StartOS automatically prompts you with a <strong>1-Click Task</strong>! Alternatively, open <strong>LND</strong> &rarr; <strong>Actions &amp; Config</strong> &rarr; <strong>Configuration</strong> &rarr; <strong>Custom External Host</strong>:
             </p>
             <div class="code-block-header">
               <span>Enter into <strong>Custom External Host</strong>:</span>
@@ -158,22 +158,21 @@
 
           <div class="tab-content" id="cln-tab">
             <p class="guide-intro">
-              Configure Core Lightning to announce your TunnelSats external IP
-              and port for inbound peer-to-peer connections.
+              <strong>StartOS 0.4.0 Zero-Hassle Core Lightning Setup:</strong><br />
+              When TunnelSats is enabled, StartOS automatically prompts you with a <strong>1-Click Task</strong>! Alternatively, open <strong>Core Lightning</strong> &rarr; <strong>Actions &amp; Config</strong> &rarr; <strong>Configuration</strong> &rarr; <strong>General Settings</strong>:
             </p>
             <div class="code-block-header">
-              <span>Append to your CLN <code>config</code> file:</span>
+              <span>Enter into <strong>Custom External Host</strong>:</span>
               <button
                 class="btn-copy-code"
                 onclick="copyCode('cln-code', this)"
               >
-                Copy Block
+                Copy Value
               </button>
             </div>
-            <pre><code id="cln-code">announce-addr=<span class="highlight-ip">tunnelsats_ip</span>:<span class="highlight-port">tunnelsats_port</span></code></pre>
-            <div class="warning-box">
-              <strong>Important Note:</strong> Restart the Core Lightning
-              service on StartOS after saving these modifications.
+            <pre><code id="cln-code"><span class="highlight-ip">tunnelsats_ip</span>:<span class="highlight-port">tunnelsats_port</span></code></pre>
+            <div class="info-box" style="margin-top: 1rem; background: rgba(51, 153, 255, 0.1); border: 1px solid rgba(51, 153, 255, 0.3); border-radius: 8px; padding: 0.75rem 1rem; font-size: 0.875rem;">
+              <strong>Automatic Advertising:</strong> StartOS 0.4.0's Core Lightning package automatically advertises this address to the Lightning Network alongside your Tor address without needing manual <code>config</code> edits!
             </div>
           </div>
         </section>
@@ -253,11 +252,9 @@
           </button>
         </div>
         <div class="footer-meta" style="margin-top: 1rem; display: flex; align-items: center; justify-content: center; gap: 0.75rem; font-size: 0.8125rem; color: #94a3b8;">
-          <span>TunnelSats for StartOS <strong id="footer-version" style="color: #f8fafc;">v0.4.0</strong></span>
+          <span>TunnelSats App <strong id="footer-version" style="color: #f8fafc;">v0.4.0:0</strong></span>
           <span>&bull;</span>
           <a href="https://github.com/Tunnelsats/tunnelsats-startos" target="_blank" rel="noopener" style="color: #3399ff; text-decoration: none; font-weight: 500;">GitHub Repository</a>
-          <span>&bull;</span>
-          <a href="https://tunnelsats.com" target="_blank" rel="noopener" style="color: #94a3b8; text-decoration: none;">tunnelsats.com</a>
         </div>
       </footer>
     </div>
@@ -346,10 +343,10 @@
                   Select your Lightning node (LND or Core Lightning) and click
                   <strong>Save</strong>.
                 </li>
+                <li>
+                  Accept the automated <strong>1-Click Task</strong> prompt in StartOS to advertise your TunnelSats endpoint.
+                </li>
               </ol>
-              <p class="faq-note">
-                ⚡ Don't forget to advertise your endpoint in your Lightning node — see the <em>Setup Guides</em> section on this dashboard for LND (StartOS UI Action) or CLN configuration.
-              </p>
             </div>
           </details>
 
@@ -371,11 +368,9 @@
                   Saving the config does not automatically enable the tunnel.
                 </li>
                 <li>
-                  <strong>Verify your Lightning node configuration.</strong> The tunnel
-                  can be connected but your Lightning node won't broadcast
-                  correctly until you've configured the
-                  <strong>Custom External Host</strong> (LND UI Action) or
-                  <code>announce-addr=</code> (CLN) and restarted the node.
+                  <strong>Verify your Lightning node configuration.</strong> Confirm
+                  you have accepted the 1-Click Task prompt or manually populated
+                  <strong>Actions &amp; Config &rarr; Configuration &rarr; Custom External Host</strong>.
                 </li>
                 <li>
                   <strong>Check the VPN endpoint.</strong> The WireGuard
@@ -387,32 +382,17 @@
                   stop and restart TunnelSats after any config change.
                 </li>
               </ol>
-              <p class="faq-note">
-                Still stuck? Open an issue on
-                <a
-                  href="https://github.com/Tunnelsats/tunnelsats-startos/issues/new"
-                  target="_blank"
-                  rel="noopener"
-                  >GitHub</a
-                >
-                with your dashboard status screenshot.
-              </p>
             </div>
           </details>
 
           <!-- Q3 -->
           <details class="faq-item">
             <summary class="faq-question">
-              How do I add the externalhosts / announce-addr lines to my
-              Lightning node persistently?
+              How do I configure the Custom External Host for LND or Core Lightning on StartOS 0.4.0?
             </summary>
             <div class="faq-answer">
               <p>
-                On StartOS, manual changes to configuration files (like
-                <code>lnd.conf</code> or CLN's <code>config</code>) are normally
-                overwritten on restarts or configuration saves. Use the
-                persistence workarounds below based on your Lightning Node
-                implementation.
+                StartOS 0.4.0 natively handles external host configuration for both LND and Core Lightning cleanly via UI actions without needing SSH or manual config file edits.
               </p>
 
               <div
@@ -429,35 +409,11 @@
                     margin-bottom: 8px;
                   "
                 >
-                  Option A: LND Node Configuration (StartOS 0.4.0)
+                  Option A: 1-Click Automated Task (Recommended)
                 </h4>
-
-                <p style="font-weight: 500; color: #f8fafc;">
-                  Zero-Hassle UI Action (No SSH required):
+                <p>
+                  When TunnelSats is enabled with a valid WireGuard config, StartOS generates an automated 1-click Task prompt. Simply click the prompt notification in your StartOS UI to populate your node's settings automatically!
                 </p>
-                <ol
-                  style="font-size: 12.5px; padding-left: 16px; margin-top: 4px"
-                >
-                  <li>
-                    In the StartOS dashboard, click on your <strong>LND</strong> service.
-                  </li>
-                  <li>
-                    Open the <strong>Actions</strong> menu in the left navigation.
-                  </li>
-                  <li>
-                    Select <strong>Custom External Host</strong> and enter your TunnelSats endpoint:
-                    <br />
-                    <code style="font-size: 12px"
-                      ><span class="highlight-ip">tunnelsats_ip</span>:<span
-                        class="highlight-port"
-                        >tunnelsats_port</span
-                      ></code
-                    >
-                  </li>
-                  <li>
-                    Click <strong>Submit</strong>. StartOS saves this to LND's persistent state and automatically advertises it to peers!
-                  </li>
-                </ol>
               </div>
 
               <div
@@ -474,100 +430,30 @@
                     margin-bottom: 8px;
                   "
                 >
-                  Option B: Core Lightning (CLN) Node Configuration
+                  Option B: Manual UI Configuration (LND or CLN)
                 </h4>
-
-                <p
-                  style="
-                    font-size: 12px;
-                    font-weight: bold;
-                    color: var(--text-secondary);
-                  "
-                >
-                  For StartOS 0.3.5.x (Active Version)
-                </p>
-                <p>
-                  Inject a config-updating hook into the persistent startup
-                  script of the CLN volume:
-                </p>
                 <ol
                   style="font-size: 12.5px; padding-left: 16px; margin-top: 4px"
                 >
                   <li>
-                    SSH into your StartOS host:
-                    <code style="font-size: 11.5px"
-                      >ssh start9@&lt;your-node-ip&gt;</code
+                    In the StartOS dashboard, open your <strong>LND</strong> or <strong>Core Lightning</strong> service page.
+                  </li>
+                  <li>
+                    Navigate to <strong>Actions &amp; Config</strong> &rarr; <strong>Configuration</strong> &rarr; <strong>Custom External Host</strong> (for LND) or <strong>General Settings</strong> (for Core Lightning).
+                  </li>
+                  <li>
+                    Enter your TunnelSats endpoint:
+                    <code style="font-size: 12px"
+                      ><span class="highlight-ip">tunnelsats_ip</span>:<span
+                        class="highlight-port"
+                        >tunnelsats_port</span
+                      ></code
                     >
                   </li>
                   <li>
-                    Open the persistent startup script:
-                    <pre
-                      style="
-                        background: rgba(255, 255, 255, 0.04);
-                        border: 1px solid rgba(255, 255, 255, 0.08);
-                        border-radius: 6px;
-                        padding: 8px 10px;
-                        font-size: 11px;
-                        overflow-x: auto;
-                        margin-top: 4px;
-                      "
-                    ><code style="font-family:'JetBrains Mono',monospace;color:#f3f4f6;">sudo nano /embassy-data/package-data/volumes/c-lightning/data/main/start9/waitForStart.sh</code></pre>
-                  </li>
-                  <li>
-                    Add the following block to the end of the file (before the
-                    script exits):
-                    <pre
-                      style="
-                        background: rgba(255, 255, 255, 0.04);
-                        border: 1px solid rgba(255, 255, 255, 0.08);
-                        border-radius: 6px;
-                        padding: 8px 10px;
-                        font-size: 11px;
-                        overflow-x: auto;
-                        margin-top: 4px;
-                      "
-                    ><code style="font-family:'JetBrains Mono',monospace;color:#f3f4f6;"># Bind CLN to accept clearnet connections
-if ! grep -q "^[[:space:]]*bind-addr=0.0.0.0:9735" /root/.lightning/config.main 2>/dev/null; then
-  echo "bind-addr=0.0.0.0:9735" >> /root/.lightning/config.main
-fi
-if ! grep -q "^[[:space:]]*bind-addr=0.0.0.0:9735" /root/.lightning/config 2>/dev/null; then
-  echo "bind-addr=0.0.0.0:9735" >> /root/.lightning/config
-fi
-
-# Append TunnelSats VPN announce address
-VPN_ADDR="<span class="highlight-ip">tunnelsats_ip</span>:<span class="highlight-port">tunnelsats_port</span>"
-if ! grep -q "^[[:space:]]*announce-addr=$VPN_ADDR" /root/.lightning/config.main 2>/dev/null; then
-  echo "announce-addr=$VPN_ADDR" >> /root/.lightning/config.main
-fi
-if ! grep -q "^[[:space:]]*announce-addr=$VPN_ADDR" /root/.lightning/config 2>/dev/null; then
-  echo "announce-addr=$VPN_ADDR" >> /root/.lightning/config
-fi</code></pre>
-                  </li>
-                  <li>
-                    Save, exit, and restart Core Lightning in the StartOS
-                    dashboard. The startup hook will dynamically apply the
-                    changes to both the active and template configurations
-                    immediately.
+                    Click <strong>Submit</strong> / <strong>Save</strong>. StartOS updates persistent settings and advertises the endpoint to Lightning peers.
                   </li>
                 </ol>
-
-                <p
-                  style="
-                    font-size: 12px;
-                    font-weight: bold;
-                    color: var(--text-secondary);
-                    margin-top: 12px;
-                  "
-                >
-                  For StartOS 0.4.x (Upcoming Version)
-                </p>
-                <p>
-                  An enhancement PR has been proposed to the official
-                  <code>cln-startos</code> repository to natively introduce a
-                  "Custom External Host" UI action identical to LND. Until
-                  natively merged, the <code>waitForStart.sh</code> hook can be
-                  used to persistently modify CLN's settings.
-                </p>
               </div>
             </div>
           </details>
@@ -620,11 +506,7 @@ fi</code></pre>
                   inbound connections via the TunnelSats IP.
                 </li>
                 <li>
-                  However, your Lightning node's config files (<code
-                    >externalhosts=</code
-                  >
-                  / <code>announce-addr=</code>) still point to that now-dead
-                  IP.
+                  However, your Lightning node's <strong>Custom External Host</strong> setting in StartOS still points to that now-dead endpoint address.
                 </li>
                 <li>
                   Your node will broadcast an
@@ -651,9 +533,7 @@ fi</code></pre>
                 </li>
                 <li>
                   Or, if you won't renew: disable TunnelSats via ⚙ → Configure
-                  (set Enable to Off), remove the <code>externalhosts=</code> /
-                  <code>announce-addr=</code> lines from your node config, and
-                  restart your Lightning node.
+                  (set Enable to Off), clear the <strong>Custom External Host</strong> field in your Lightning node (Actions &amp; Config &rarr; Configuration &rarr; Custom External Host), and save.
                 </li>
               </ul>
             </div>
@@ -690,9 +570,7 @@ fi</code></pre>
                   your Lightning node falls back to Tor/clearnet.
                 </li>
                 <li>
-                  Remove the <code>externalhosts=</code> /
-                  <code>announce-addr=</code> lines from your Lightning node
-                  config and restart it.
+                  Clear the <strong>Custom External Host</strong> field in your Lightning node settings (<strong>Actions &amp; Config &rarr; Configuration &rarr; Custom External Host</strong>).
                 </li>
                 <li>Only then uninstall TunnelSats.</li>
               </ol>
@@ -707,6 +585,24 @@ fi</code></pre>
           <!-- Q7 -->
           <details class="faq-item">
             <summary class="faq-question">
+              Can I run LND and Core Lightning (CLN) simultaneously through the same tunnel? How does switching work?
+            </summary>
+            <div class="faq-answer">
+              <p>
+                <strong>No, running LND and CLN in parallel through the same TunnelSats subscription is not supported.</strong> A single WireGuard tunnel receives traffic on one assigned public port and forwards it to a single target container.
+              </p>
+              <p>
+                <strong>Real-Time Switching:</strong> You can switch between LND and Core Lightning at any time in ⚙ → Configure by selecting a different Target Lightning Node.
+              </p>
+              <p>
+                When you switch, TunnelSats updates its internal userspace router (<code>wireproxy</code>) in real-time. Inbound connections arriving on your TunnelSats VPN address are immediately re-routed to your newly selected target node without needing to reconfigure WireGuard keys or purchase a new subscription.
+              </p>
+            </div>
+          </details>
+
+          <!-- Q8 -->
+          <details class="faq-item">
+            <summary class="faq-question">
               Where can I report a bug or ask a question?
             </summary>
             <div class="faq-answer">
@@ -716,7 +612,7 @@ fi</code></pre>
               </p>
               <p>
                 <a
-                  href="https://github.com/Tunnelsats/tunnelsats-startos/issues/new"
+                  href="https://github.com/Tunnelsats/tunnelsats-startos/issues/new/choose"
                   target="_blank"
                   rel="noopener"
                   class="faq-cta-link"

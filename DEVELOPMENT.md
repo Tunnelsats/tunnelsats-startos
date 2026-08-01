@@ -126,6 +126,13 @@ Use `make` to compile the final StartOS package bundle. This executes a multi-st
   make
   ```
 
+### 3. Sideloading onto a StartOS Server
+Sideload the built `.s9pk` package onto your StartOS target node passwordlessly via SSH:
+```bash
+scp tunnelsats_x86_64.s9pk start9@<your-node-ip>:/tmp/tunnelsats.s9pk
+ssh start9@<your-node-ip> "sudo start-cli package install -s /tmp/tunnelsats.s9pk"
+```
+
 ---
 
 ## 🔍 Inspecting & Testing a Running Install

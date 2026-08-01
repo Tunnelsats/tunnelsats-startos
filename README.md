@@ -28,8 +28,9 @@ By establishing a secure WireGuard tunnel to one of our global servers, your nod
 
 ## 🚀 Features & StartOS 0.4.0 Enhancements
 - **In-App Web Dashboard**: Manage and verify your connection, inspect subscription status, and monitor data limits via a sleek UI.
+- **Automated 1-Click Cross-Service Tasks**: Automatically generates a native StartOS 1-click UI Task prompting you to populate your TunnelSats external announce endpoint on LND or Core Lightning.
 - **StartOS 0.4.0 TypeScript SDK Architecture**: Built with strongly-typed reactive file models, lifecycle handlers, and subcontainer isolation.
-- **Dynamic Dependency Mapping**: Automatically updates dependency states (`lnd` or `c-lightning`) based on your selected target Lightning node.
+- **Dynamic Dependency Mapping**: Automatically updates dependency states (`lnd` or `c-lightning`) based on your selected target Lightning node and enabled state.
 - **Zero Sudo Host Routing**: Operates entirely in userspace using `wireproxy` inside the isolated container namespace. No modification of host-level `iptables` or system network interfaces required.
 
 ---
@@ -85,15 +86,17 @@ StartOS strictly isolates services. TunnelSats implements a **Proxy & Forwarding
 
 ### Step 3: Configure Target Lightning Node (LND / CLN)
 
-#### Option A: LND Node Configuration (StartOS 0.4.0+)
-StartOS 0.4.x natively supports external hosts:
-1. Open the LND service UI, click the **Actions** menu, and select **Custom External Host**.
-2. Enter your TunnelSats domain and assigned port (e.g. `your-vpn-server.com:your-vpn-port`).
-3. Submit and restart LND. This writes to `store.json` and persistently merges into `lnd.conf` on every boot.
+#### Automated 1-Click Setup (Recommended)
+When TunnelSats is enabled with a valid configuration, TunnelSats automatically creates a native 1-click StartOS UI Task prompting you to configure the `Custom External Host` setting on your selected target Lightning node. Simply click the prompt notification in your StartOS UI to submit.
 
-#### Option B: Core Lightning (CLN) Node Configuration (StartOS 0.4.0+)
-1. Open the Core Lightning service UI, click the **Actions** menu, and select **Custom External Host** (implemented in `cln-startos` [PR #180](https://github.com/Start9Labs/cln-startos/pull/180)).
+#### Option A: LND Node Configuration (Manual)
+1. Open the LND service UI and navigate to **Actions & Config** &rarr; **Configuration** &rarr; **Custom External Host**.
 2. Enter your TunnelSats domain and assigned port (e.g. `ch1.tunnelsats.com:24556`).
+3. Save and restart LND. This writes to `store.json` and persistently merges into `lnd.conf` on every boot.
+
+#### Option B: Core Lightning (CLN) Node Configuration (Manual)
+1. Open the Core Lightning service UI and navigate to **Actions & Config** &rarr; **Configuration** &rarr; **General Settings**.
+2. Enter your TunnelSats domain and assigned port (e.g. `ch1.tunnelsats.com:24556`) into the **Custom External Host** field.
 3. Save and restart CLN. This writes `customExternalHosts` to `store.json` and persistently merges into `announce-addr` in CLN's `config` on every boot.
 
 ---

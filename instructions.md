@@ -14,15 +14,16 @@
    - Set **Enable TunnelSats** to **ON** and click **Save**.
 
 3. **Advertise Endpoint to Lightning Network**:
+   - **Automated 1-Click Setup**: When TunnelSats is enabled with a valid configuration, StartOS will automatically prompt you with a **1-Click UI Task** to populate the **Custom External Host** on your selected Lightning node.
    - **For LND**:
      - Open **LND** in your StartOS Dashboard.
-     - Click **Actions** &rarr; **Custom External Host**.
+     - Click **Actions & Config** &rarr; **Configuration** &rarr; **Custom External Host**.
      - Enter your TunnelSats domain and port (e.g. `ch1.tunnelsats.com:24556`) and click **Submit**.
      - LND will automatically advertise this endpoint alongside your Tor address.
    - **For Core Lightning (CLN)**:
      - Open **Core Lightning** in your StartOS Dashboard.
-     - Click **Actions** &rarr; **Custom External Host** (available via upstream `cln-startos` [PR #180](https://github.com/Start9Labs/cln-startos/pull/180)).
-     - Enter your TunnelSats domain and port (e.g. `ch1.tunnelsats.com:24556`) and click **Submit**.
+     - Click **Actions & Config** &rarr; **Configuration** &rarr; **General Settings**.
+     - Enter your TunnelSats domain and port (e.g. `ch1.tunnelsats.com:24556`) into the **Custom External Host** field and click **Submit**.
      - Core Lightning will persistently advertise this endpoint alongside your Tor address.
 
 4. **Verify Health**:
