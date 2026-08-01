@@ -24,6 +24,7 @@ export default {
     19: 'No se pudo analizar el resultado de la verificación de estado',
     20: 'Proxy no listo',
     21: 'VPN conectado',
+    22: 'Anunciar el punto de enlace VPN de TunnelSats a la red Lightning',
   },
   de_DE: {
     0: 'Starte TunnelSats!',
@@ -48,6 +49,7 @@ export default {
     19: 'Fehler beim Analysieren des Statustestergebnisses',
     20: 'Proxy nicht bereit',
     21: 'VPN verbunden',
+    22: 'TunnelSats-VPN-Endpunkt im Lightning-Netzwerk ankündigen',
   },
   pl_PL: {
     0: 'Uruchamianie TunnelSats!',
@@ -72,6 +74,7 @@ export default {
     19: 'Nie udało się przeanalizować wyniku testu stanu',
     20: 'Proxy nie gotowe',
     21: 'VPN połączony',
+    22: 'Rozgłaszaj punkt końcowy VPN TunnelSats w sieci Lightning',
   },
   fr_FR: {
     0: 'Démarrage de TunnelSats !',
@@ -96,5 +99,6 @@ export default {
     19: 'Impossible d’analyser le résultat de la vérification de l’état',
     20: 'Proxy non prêt',
     21: 'VPN connecté',
+    22: 'Annoncer le point de terminaison VPN TunnelSats sur le réseau Lightning',
   },
 } satisfies Record<string, LangDict>
