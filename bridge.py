@@ -445,6 +445,8 @@ def is_enabled():
         # Default to True if a v3 config exists (upgrade path/existing configurations)
         if os.path.exists(CONFIG_PATH):
             return True
+    except Exception as e:
+        print(f"Error checking enabled status: {e}", file=sys.stderr)
     return False
 
 def is_allow_ipv6():
