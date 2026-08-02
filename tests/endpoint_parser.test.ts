@@ -36,3 +36,83 @@ test('getAnnounceEndpoint returns null for missing or invalid inputs', () => {
     null,
   )
 })
+
+test('getAnnounceEndpoint rejects IPv6 endpoints when allowIpv6 is false', () => {
+  const confBracketed = `[Interface]
+PrivateKey = secret
+Address = fd00::1/128
+# VPNPort: 24556
+
+[Peer]
+PublicKey = pubkey
+Endpoint = [2001:db8::1]:51820
+`
+  const confRawPort = `[Interface]
+PrivateKey = secret
+Address = fd00::1/128
+# VPNPort: 24556
+
+[Peer]
+PublicKey = pubkey
+Endpoint = 2001:db8::1:51820
+`
+  const confRawNoPort = `[Interface]
+PrivateKey = secret
+Address = fd00::1/128
+# VPNPort: 24556
+
+[Peer]
+PublicKey = pubkey
+Endpoint = 2001:db8::1
+`
+  assert.equal(getAnnounceEndpoint(confBracketed, false), null)
+  assert.equal(getAnnounceEndpoint(confRawPort, false), null)
+  assert.equal(getAnnounceEndpoint(confRawNoPort, false), null)
+})
+
+test('getAnnounceEndpoint parses IPv6 endpoints when allowIpv6 is true', () => {
+  const confBracketed = `[Interface]
+PrivateKey = secret
+Address = fd00::1/128
+# VPNPort: 24556
+
+[Peer]
+PublicKey = pubkey
+Endpoint = [2001:db8::1]:51820
+`
+  const confRawPort = `[Interface]
+PrivateKey = secret
+Address = fd00::1/128
+# VPNPort: 24556
+
+[Peer]
+PublicKey = pubkey
+Endpoint = 2001:db8::1:51820
+`
+  const confRawNoPort = `[Interface]
+PrivateKey = secret
+Address = fd00::1/128
+# VPNPort: 24556
+
+[Peer]
+PublicKey = pubkey
+Endpoint = 2001:db8::1
+`
+  assert.equal(getAnnounceEndpoint(confBracketed, true), '[2001:db8::1]:24556')
+  assert.equal(getAnnounceEndpoint(confRawPort, true), '[2001:db8::1]:24556')
+  assert.equal(getAnnounceEndpoint(confRawNoPort, true), '[2001:db8::1]:24556')
+})
+
+test('getAnnounceEndpoint rejects malformed IPv6 endpoints even when allowIpv6 is true', () => {
+  const confMalformed = `[Interface]
+PrivateKey = secret
+Address = fd00::1/128
+# VPNPort: 24556
+
+[Peer]
+PublicKey = pubkey
+Endpoint = 2001:db8:
+`
+  assert.equal(getAnnounceEndpoint(confMalformed, true), null)
+  assert.equal(getAnnounceEndpoint(confMalformed, false), null)
+})

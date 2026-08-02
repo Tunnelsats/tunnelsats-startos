@@ -366,6 +366,7 @@ class DashboardHTTPRequestHandler(BaseHTTPRequestHandler):
             response = {
                 "version": get_package_version(),
                 "enabled": is_enabled(),
+                "allow_ipv6": is_allow_ipv6(),
                 "status": status_data["status"],
                 "vpn_connected": status_data["vpn_connected"],
                 "handshake": status_data["handshake"],
@@ -446,6 +447,16 @@ def is_enabled():
             return True
     except Exception as e:
         print(f"Error checking enabled status: {e}", file=sys.stderr)
+    return False
+
+def is_allow_ipv6():
+    try:
+        if os.path.exists(APP_CONFIG_PATH):
+            with open(APP_CONFIG_PATH, 'r') as f:
+                config_data = json.load(f)
+                return config_data.get("allow-ipv6", False)
+    except Exception as e:
+        print(f"Error checking allow-ipv6 status: {e}", file=sys.stderr)
     return False
 
 def extract_vpn_port(config_content):
