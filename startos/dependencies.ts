@@ -4,19 +4,43 @@ import { i18n } from './i18n'
 import { customExternalHostConfig } from 'lnd-startos/startos/actions/config/customExternalHost'
 import { config as clnConfigAction } from 'cln-startos/startos/actions/config/config'
 
-export function getAnnounceEndpoint(wgConf: string | null | undefined): string | null {
+export function getAnnounceEndpoint(
+  wgConf: string | null | undefined,
+  allowIpv6 = false,
+): string | null {
   if (!wgConf) return null
 
-  const endpointMatch = wgConf.match(/^\s*(?!#|;)\s*Endpoint\s*=\s*([^:\s#]+|\[[a-f0-9:]+\])/im)
+  const endpointMatch = wgConf.match(/^\s*(?!#|;)\s*Endpoint\s*=\s*([^\s#]+)/im)
   if (!endpointMatch) return null
-  const host = endpointMatch[1].trim()
-
-  // Reject IPv6 endpoints (bracketed or containing colons)
-  if (host.startsWith('[') || host.includes(':')) return null
+  const fullEndpoint = endpointMatch[1].trim()
 
   const portMatch = wgConf.match(/#\s*(?:VPNPort|Port Forwarding):\s*(\d+)/i)
   if (!portMatch) return null
   const vpnPort = portMatch[1].trim()
+
+  let host: string
+
+  if (fullEndpoint.startsWith('[')) {
+    const closingBracket = fullEndpoint.indexOf(']')
+    if (closingBracket === -1) return null
+    host = fullEndpoint.substring(1, closingBracket)
+    if (!allowIpv6) return null
+    return `[${host}]:${vpnPort}`
+  }
+
+  const parts = fullEndpoint.split(':')
+  if (parts.length > 2) {
+    // Raw IPv6 address with multiple colons
+    if (!allowIpv6) return null
+    const rawIp = parts.slice(0, -1).join(':')
+    return `[${rawIp}]:${vpnPort}`
+  }
+
+  host = parts[0]
+  if (host.includes(':')) {
+    if (!allowIpv6) return null
+    return `[${host}]:${vpnPort}`
+  }
 
   return `${host}:${vpnPort}`
 }
@@ -50,7 +74,10 @@ export function getDependenciesForConfig(
 export const setDependencies = sdk.setupDependencies(async ({ effects }) => {
   const config = await configJson.read().const(effects)
 
-  const announceEndpoint = getAnnounceEndpoint(config?.['tunnelsats-conf'])
+  const announceEndpoint = getAnnounceEndpoint(
+    config?.['tunnelsats-conf'],
+    config?.['allow-ipv6'],
+  )
 
   if (config?.enabled && announceEndpoint) {
     if (config['target-node'] === 'lnd') {
