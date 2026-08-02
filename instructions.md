@@ -30,6 +30,12 @@
    - Check the **Health Checks** tab in TunnelSats to confirm **VPN Connectivity** and **SOCKS5 Proxy** are active.
    - Open the **Web Dashboard** to monitor live tunnel statistics and subscription expiration.
 
+## IPv6 & Privacy Policy
+
+TunnelSats is an **IPv4-only** WireGuard VPN service. It does not route or tunnel IPv6 traffic.
+
+> ⚠️ **Warning**: Do not configure or advertise an IPv6 address on your Lightning node unless you explicitly intend to expose your home ISP location to IPv6 peers. If dual-stack connectivity is desired, enable **Allow Home IPv6 Coexistence** in **Configure**.
+
 ## Documentation
 
 - [TunnelSats Website](https://tunnelsats.com)

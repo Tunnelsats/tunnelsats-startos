@@ -7,9 +7,12 @@ import { config as clnConfigAction } from 'cln-startos/startos/actions/config/co
 export function getAnnounceEndpoint(wgConf: string | null | undefined): string | null {
   if (!wgConf) return null
 
-  const endpointMatch = wgConf.match(/^\s*(?!#|;)\s*Endpoint\s*=\s*([^:\s#]+)/im)
+  const endpointMatch = wgConf.match(/^\s*(?!#|;)\s*Endpoint\s*=\s*([^:\s#]+|\[[a-f0-9:]+\])/im)
   if (!endpointMatch) return null
   const host = endpointMatch[1].trim()
+
+  // Reject IPv6 endpoints (bracketed or containing colons)
+  if (host.startsWith('[') || host.includes(':')) return null
 
   const portMatch = wgConf.match(/#\s*(?:VPNPort|Port Forwarding):\s*(\d+)/i)
   if (!portMatch) return null

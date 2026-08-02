@@ -32,6 +32,13 @@ export const inputSpec = InputSpec.of({
     default: null,
     placeholder: `[Interface]\nPrivateKey = <your_private_key>\nAddress = 10.x.x.x/32\n# VPNPort: 12345\n...`,
   }),
+  'allow-ipv6': Value.toggle({
+    name: i18n('Allow Home IPv6 Coexistence'),
+    description: i18n(
+      'Allow advertising raw IPv6 addresses on your node. WARNING: TunnelSats VPN tunnels IPv4 traffic only. IPv6 connections bypass the VPN tunnel and expose your real home ISP IP address.',
+    ),
+    default: false,
+  }),
 })
 
 function validateConfig(wgConf: string) {
@@ -69,6 +76,7 @@ export const configure = sdk.Action.withInput(
       enabled: current?.enabled ?? false,
       'target-node': current?.['target-node'] ?? 'lnd',
       'tunnelsats-conf': current?.['tunnelsats-conf'] ?? null,
+      'allow-ipv6': current?.['allow-ipv6'] ?? false,
     }
   },
   async ({ effects, input }) => {
@@ -83,6 +91,7 @@ export const configure = sdk.Action.withInput(
       enabled: input.enabled,
       'target-node': input['target-node'],
       'tunnelsats-conf': input['tunnelsats-conf'] || undefined,
+      'allow-ipv6': input['allow-ipv6'],
     })
 
     if (input.enabled && input['tunnelsats-conf']) {

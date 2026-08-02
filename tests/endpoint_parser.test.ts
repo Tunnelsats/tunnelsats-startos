@@ -36,3 +36,16 @@ test('getAnnounceEndpoint returns null for missing or invalid inputs', () => {
     null,
   )
 })
+
+test('getAnnounceEndpoint rejects IPv6 endpoints', () => {
+  const conf = `[Interface]
+PrivateKey = secret
+Address = fd00::1/128
+# VPNPort: 24556
+
+[Peer]
+PublicKey = pubkey
+Endpoint = [2001:db8::1]:51820
+`
+  assert.equal(getAnnounceEndpoint(conf), null)
+})

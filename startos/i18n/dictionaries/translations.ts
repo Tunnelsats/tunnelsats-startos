@@ -25,6 +25,8 @@ export default {
     20: 'Proxy no listo',
     21: 'VPN conectado',
     22: 'Anunciar el punto de enlace VPN de TunnelSats a la red Lightning',
+    23: 'Permitir coexistencia IPv6 de la red doméstica',
+    24: 'Permite anunciar direcciones IPv6 en su nodo. ADVERTENCIA: La VPN TunnelSats solo enruta tráfico IPv4. Las conexiones IPv6 eluden la VPN y exponen su dirección IP doméstica real.',
   },
   de_DE: {
     0: 'Starte TunnelSats!',
@@ -50,6 +52,8 @@ export default {
     20: 'Proxy nicht bereit',
     21: 'VPN verbunden',
     22: 'TunnelSats-VPN-Endpunkt im Lightning-Netzwerk ankündigen',
+    23: 'Heim-IPv6-Koexistenz zulassen',
+    24: 'Erlaubt die Ankündigung von IPv6-Adressen auf Ihrem Knoten. WARNUNG: Der TunnelSats-VPN leitet nur IPv4-Datenverkehr um. IPv6-Verbindungen umgehen den VPN und legen Ihre echte Heim-IP-Adresse offen.',
   },
   pl_PL: {
     0: 'Uruchamianie TunnelSats!',
@@ -75,6 +79,8 @@ export default {
     20: 'Proxy nie gotowe',
     21: 'VPN połączony',
     22: 'Rozgłaszaj punkt końcowy VPN TunnelSats w sieci Lightning',
+    23: 'Zezwól na koegzystencję IPv6',
+    24: 'Zezwala na rozgłaszanie adresów IPv6 na Twoim węźle. OSTRZEŻENIE: TunnelSats VPN przesyła tylko ruch IPv4. Połączenia IPv6 omijają VPN i ujawniają Twój domowy adres IP.',
   },
   fr_FR: {
     0: 'Démarrage de TunnelSats !',
@@ -100,5 +106,7 @@ export default {
     20: 'Proxy non prêt',
     21: 'VPN connecté',
     22: 'Annoncer le point de terminaison VPN TunnelSats sur le réseau Lightning',
+    23: 'Autoriser la coexistence IPv6 domestique',
+    24: 'Autorise l’annonce des adresses IPv6 sur votre nœud. AVERTISSEMENT : Le VPN TunnelSats n’achemine que le trafic IPv4. Les connexions IPv6 contournent le VPN et exposent votre véritable adresse IP domestique.',
   },
 } satisfies Record<string, LangDict>

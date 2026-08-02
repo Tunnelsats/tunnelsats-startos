@@ -5,6 +5,7 @@ export const shape = z.object({
   enabled: z.boolean().catch(false),
   'target-node': z.enum(['lnd', 'cln']).catch('lnd'),
   'tunnelsats-conf': z.string().optional().catch(undefined),
+  'allow-ipv6': z.boolean().catch(false),
 })
 
 export const configJson = FileHelper.json(

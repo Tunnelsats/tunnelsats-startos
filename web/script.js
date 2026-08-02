@@ -51,6 +51,12 @@ function updateUI() {
       versionEl.textContent = 'v' + statusData.version
     }
   }
+  // Option 3 Security Warning Banner
+  const ipv6Banner = document.getElementById('ipv6-warning-banner')
+  if (ipv6Banner) {
+    ipv6Banner.style.display = statusData.allow_ipv6 ? 'block' : 'none'
+  }
+
   // 3. Highlighted guide config parameters
   const ipElements = document.querySelectorAll('.highlight-ip')
   const portElements = document.querySelectorAll('.highlight-port')
