@@ -25,7 +25,8 @@
 
 ## 🔒 Pending Enhancements & Security Fixes
 
-- [ ] **Issue #34: Clarify IPv6 non-support and prevent home IP leaks** ([#34](https://github.com/Tunnelsats/tunnelsats-startos/issues/34))
-  - Update `getAnnounceEndpoint` parser in `startos/dependencies.ts` to reject/filter out IPv6 addresses.
-  - Add FAQ Q9 in `web/index.html` explicitly documenting IPv6 non-support and warning against advertising IPv6 addresses in node settings.
-  - Update `instructions.md` and `README.md` to document IPv4-only tunneling policy.
+- [x] **Issue #34: Clarify IPv6 non-support and prevent home IP leaks** ([#34](https://github.com/Tunnelsats/tunnelsats-startos/issues/34) / [PR #35](https://github.com/Tunnelsats/tunnelsats-startos/pull/35))
+  - Add `allow-ipv6` toggle (`Allow Home IPv6 Coexistence`) in `configure.ts` and `config.json.ts`.
+  - Filter out / reject IPv6 endpoints in `getAnnounceEndpoint` parser (`startos/dependencies.ts`).
+  - Add `allow_ipv6` to `bridge.py` `/api/status` and render Option 3 Security Warning Banner in `web/index.html` and `web/script.js`.
+  - Add FAQ Q9 in `web/index.html` and IPv6 privacy policy section in `instructions.md`.
