@@ -5,7 +5,7 @@
 - [ ] **Step 1: Initial Submission Email**
   - Send email to `submissions@start9.com` requesting inclusion in the Start9 Community Registry.
   - Repository: `https://github.com/Tunnelsats/tunnelsats-startos`
-  - Release Tag: `v0.4.0-beta2`
+  - Release Tag: `v0.4.0-beta3`
 
 - [ ] **Step 2: Start9 Fork & Feedback**
   - Await Start9 fork creation at `https://github.com/Start9-Community/tunnelsats-startos`.
