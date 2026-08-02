@@ -1,3 +1,4 @@
+import { isIPv6, isIPv4 } from 'node:net'
 import { sdk } from './sdk'
 import { configJson } from './fileModels/config.json'
 import { i18n } from './i18n'
@@ -18,29 +19,41 @@ export function getAnnounceEndpoint(
   if (!portMatch) return null
   const vpnPort = portMatch[1].trim()
 
-  let host: string
-
+  // 1. Bracketed IPv6 e.g. [2001:db8::1]:51820 or [2001:db8::1]
   if (fullEndpoint.startsWith('[')) {
     const closingBracket = fullEndpoint.indexOf(']')
     if (closingBracket === -1) return null
-    host = fullEndpoint.substring(1, closingBracket)
+    const ipCandidate = fullEndpoint.substring(1, closingBracket)
+    if (!isIPv6(ipCandidate)) return null
     if (!allowIpv6) return null
-    return `[${host}]:${vpnPort}`
+    return `[${ipCandidate}]:${vpnPort}`
   }
 
-  const parts = fullEndpoint.split(':')
-  if (parts.length > 2) {
-    // Raw IPv6 address with multiple colons
+  // 2. Unbracketed IPv6 without port e.g. 2001:db8::1
+  if (isIPv6(fullEndpoint)) {
     if (!allowIpv6) return null
-    const rawIp = parts.slice(0, -1).join(':')
-    return `[${rawIp}]:${vpnPort}`
+    return `[${fullEndpoint}]:${vpnPort}`
   }
 
-  host = parts[0]
-  if (host.includes(':')) {
-    if (!allowIpv6) return null
-    return `[${host}]:${vpnPort}`
+  // 3. Unbracketed IPv6 with explicit port e.g. 2001:db8::1:51820
+  const lastColonIndex = fullEndpoint.lastIndexOf(':')
+  if (lastColonIndex !== -1) {
+    const ipCandidate = fullEndpoint.substring(0, lastColonIndex)
+    const portCandidate = fullEndpoint.substring(lastColonIndex + 1)
+    if (isIPv6(ipCandidate) && /^\d+$/.test(portCandidate)) {
+      if (!allowIpv6) return null
+      return `[${ipCandidate}]:${vpnPort}`
+    }
   }
+
+  // 4. Reject any remaining malformed IPv6 strings containing colons
+  if (fullEndpoint.includes(':') && !isIPv4(fullEndpoint.split(':')[0])) {
+    const parts = fullEndpoint.split(':')
+    if (parts.length > 2) return null
+  }
+
+  const host = fullEndpoint.split(':')[0]
+  if (!host) return null
 
   return `${host}:${vpnPort}`
 }
