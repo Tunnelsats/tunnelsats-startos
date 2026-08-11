@@ -1,15 +1,58 @@
 version: 2
 updates:
-  # Maintain dependencies for npm (StartOS TypeScript SDK & tooling)
+  # NPM (StartOS TypeScript SDK & tooling)
   - package-ecosystem: "npm"
     directory: "/"
     schedule:
       interval: "weekly"
-    open-pull-requests-limit: 5
+      day: "monday"
+      time: "09:00"
+      timezone: "Europe/Berlin"
+    
+    groups:
+      minor-and-patch:
+        patterns:
+          - "*"
+        update-types:
+          - "minor"
+          - "patch"
+      
+      utility-types-major:
+        patterns:
+          - "@types/uuid"
+          - "@types/jest"
+          - "prettier"
+          - "eslint*"
+        update-types:
+          - "major"
 
-  # Maintain GitHub Actions workflow dependencies
+    # Prevent Dependabot from suggesting runtime-breaking major updates
+    ignore:
+      - dependency-name: "@types/node"
+        update-types: ["version-update:semver-major"]
+
+    open-pull-requests-limit: 10
+    labels:
+      - "dependencies"
+      - "npm"
+    commit-message:
+      prefix: "chore(deps)"
+
+  # GitHub Actions
   - package-ecosystem: "github-actions"
     directory: "/"
     schedule:
       interval: "weekly"
-    open-pull-requests-limit: 5
+      day: "monday"
+    
+    groups:
+      actions-all:
+        patterns:
+          - "*"
+          
+    labels:
+      - "dependencies"
+      - "github-actions"
+    commit-message:
+      prefix: "chore(ci)"
+
