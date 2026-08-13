@@ -19,7 +19,6 @@ This branch contains the official package of [TunnelSats](https://tunnelsats.com
 > This package is currently in **Pre-Release / Beta Testing** and is **not production ready**.
 > While inbound traffic is fully tunneled via TunnelSats, outbound clearnet peer connections from LND/CLN currently route via the host's direct network stack on StartOS 0.4.0 unless Tor is enforced. Do not rely on this package for full outbound residential IP masking until upstream proxy integration is finalized.
 
-> **Looking for StartOS 0.3.5.x?** Please refer to the [`main-0.3.5`](https://github.com/Tunnelsats/tunnelsats-startos/tree/main-0.3.5) branch for 0.3.5.x compatible releases.
 
 ---
 
