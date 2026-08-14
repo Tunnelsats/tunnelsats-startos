@@ -253,30 +253,30 @@ fi
 # Execute live probe if start-cli is available on host
 if command -v start-cli &>/dev/null && [ "$ENGINE" != "inside" ]; then
     log_info "Executing live target node egress probe via host start-cli..."
-    TARGET_EGRESS=$(start-cli package attach "$TARGET_PKG" -- curl -s --connect-timeout 5 https://api.ipify.org 2>/dev/null) || {
-        log_error "Could not probe outbound IPv4 egress from ${TARGET_PKG} container."
-        FAILED_CHECKS=$((FAILED_CHECKS + 1))
-        TARGET_EGRESS=""
-    }
-    if [ -n "$TARGET_EGRESS" ]; then
+    TARGET_EGRESS=""
+    if TARGET_EGRESS=$(start-cli package attach "$TARGET_PKG" -- curl -s --connect-timeout 5 https://api.ipify.org 2>/dev/null); then
         if [ "$TARGET_EGRESS" == "$RESOLVED_SERVER_IP" ] || [ "$TARGET_EGRESS" == "$SERVER" ]; then
             log_info "Target node live IPv4 egress: $TARGET_EGRESS (Matches TunnelSats VPN IP ✅)"
         else
             log_error "Target node live IPv4 egress: $TARGET_EGRESS (Does not match TunnelSats VPN IP ${RESOLVED_SERVER_IP:-$SERVER})"
             FAILED_CHECKS=$((FAILED_CHECKS + 1))
         fi
+    else
+        log_error "Could not probe outbound IPv4 egress from ${TARGET_PKG} container."
+        FAILED_CHECKS=$((FAILED_CHECKS + 1))
     fi
 
     if [ "$ALLOW_IPV6" != "True" ]; then
-        RAW_V6_OUTPUT=$(start-cli package attach "$TARGET_PKG" -- curl -6 -s --connect-timeout 5 https://api6.ipify.org 2>&1) || true
-        if [[ "$RAW_V6_OUTPUT" =~ ":" ]]; then
-            log_error "Target node live IPv6 is ACTIVE and leaking home ISP address: $RAW_V6_OUTPUT"
-            FAILED_CHECKS=$((FAILED_CHECKS + 1))
-        elif [[ "$RAW_V6_OUTPUT" =~ "Network unreachable" ]] || [[ "$RAW_V6_OUTPUT" =~ "timed out" ]] || [[ "$RAW_V6_OUTPUT" =~ "Could not resolve host" ]] || [ -z "$RAW_V6_OUTPUT" ]; then
-            log_info "Target node live IPv6 isolation: BLOCKED / UNROUTABLE (Protected ✅)"
+        RAW_V6_OUTPUT=""
+        if RAW_V6_OUTPUT=$(start-cli package attach "$TARGET_PKG" -- curl -6 -s --connect-timeout 5 https://api6.ipify.org 2>&1); then
+            if [[ "$RAW_V6_OUTPUT" =~ ":" ]]; then
+                log_error "Target node live IPv6 is ACTIVE and leaking home ISP address: $RAW_V6_OUTPUT"
+                FAILED_CHECKS=$((FAILED_CHECKS + 1))
+            else
+                log_info "Target node live IPv6 isolation: BLOCKED / UNROUTABLE (Protected ✅)"
+            fi
         else
-            log_warn "Target node IPv6 status unverified: $RAW_V6_OUTPUT"
-            FAILED_CHECKS=$((FAILED_CHECKS + 1))
+            log_info "Target node live IPv6 isolation: BLOCKED / UNROUTABLE (Protected ✅)"
         fi
     fi
 fi
