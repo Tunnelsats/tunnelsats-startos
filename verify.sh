@@ -250,8 +250,11 @@ else
     echo "     (Allow IPv6 is OFF: Expected Output: Network unreachable / Timeout)"
 fi
 
-# Execute live probe if start-cli is available on host
-if command -v start-cli &>/dev/null && [ "$ENGINE" != "inside" ]; then
+# In-container note vs host live probe execution
+if [ "$ENGINE" == "inside" ]; then
+    log_warn "Target-node live egress probes cannot run from inside an isolated container namespace."
+    log_info "To audit live target egress, run ./verify.sh from the host or use the CLI commands above."
+elif command -v start-cli &>/dev/null; then
     log_info "Executing live target node egress probe via host start-cli..."
     TARGET_EGRESS=""
     if TARGET_EGRESS=$(start-cli package attach "$TARGET_PKG" -- curl -s --connect-timeout 5 https://api.ipify.org 2>/dev/null); then
@@ -292,9 +295,9 @@ if [ $FAILED_CHECKS -gt 0 ]; then
     exit 1
 elif [ "$ENGINE" == "inside" ]; then
     log_info "TunnelSats service diagnostics completed successfully."
-    log_info "To audit target node live egress directly: start-cli package attach ${TARGET_PKG} -- curl -s https://api.ipify.org"
+    log_warn "Note: Target-node live egress was unverified in container mode. Audit on host via: start-cli package attach ${TARGET_PKG} -- curl -s https://api.ipify.org"
     exit 0
 else
-    log_info "All diagnostic probes finished successfully."
+    log_info "All service and target node live diagnostic probes finished successfully."
     exit 0
 fi
