@@ -258,7 +258,18 @@ if command -v start-cli &>/dev/null && [ "$ENGINE" != "inside" ]; then
         if [ "$TARGET_EGRESS" == "$RESOLVED_SERVER_IP" ] || [ "$TARGET_EGRESS" == "$SERVER" ]; then
             log_info "Target node live IPv4 egress: $TARGET_EGRESS (Matches TunnelSats VPN IP ✅)"
         else
-            log_info "Target node live IPv4 egress: $TARGET_EGRESS (Standard host egress; inbound port forwarding active on ${SERVER}:${VPN_PORT})"
+            log_error "Target node live IPv4 egress: $TARGET_EGRESS (Does not match TunnelSats VPN IP)"
+            FAILED_CHECKS=$((FAILED_CHECKS + 1))
+        fi
+    fi
+
+    if [ "$ALLOW_IPV6" != "True" ]; then
+        TARGET_V6=$(start-cli package attach "$TARGET_PKG" -- curl -6 -s --connect-timeout 5 https://api6.ipify.org 2>/dev/null || true)
+        if [ -n "$TARGET_V6" ]; then
+            log_error "Target node live IPv6 is ACTIVE and leaking home ISP address: $TARGET_V6"
+            FAILED_CHECKS=$((FAILED_CHECKS + 1))
+        else
+            log_info "Target node live IPv6 isolation: BLOCKED / UNROUTABLE (Protected ✅)"
         fi
     fi
 fi
