@@ -1,37 +1,16 @@
 import unittest
 import os
 import sys
-import subprocess
 from unittest.mock import patch, MagicMock
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 import bridge
 
 class TestBridgeLifecycle(unittest.TestCase):
-    @patch('bridge.generate_wireproxy_config')
-    @patch('subprocess.Popen')
-    def test_start_vpn_calls_wireproxy(self, mock_popen, mock_gen_config):
-        mock_gen_config.return_value = True
-        mock_proc = MagicMock()
-        mock_proc.poll.return_value = None
-        mock_popen.return_value = mock_proc
-        
+    def test_vpn_up_and_down(self):
+        # vpn_up and vpn_down should log and execute cleanly without raising
         bridge.vpn_up("/data/tunnelsatsv3.conf")
-        
-        mock_popen.assert_called_with(
-            ["/usr/local/bin/wireproxy", "-c", bridge.WIREPROXY_CONFIG_PATH, "-i", "127.0.0.1:8080"],
-            text=True
-        )
-
-    def test_stop_vpn_calls_wireproxy(self):
-        mock_proc = MagicMock()
-        bridge.wireproxy_process = mock_proc
-        
         bridge.vpn_down("/data/tunnelsatsv3.conf")
-        
-        mock_proc.terminate.assert_called_once()
-        mock_proc.wait.assert_called_with(timeout=5)
-        self.assertIsNone(bridge.wireproxy_process)
 
     @patch('os.path.exists')
     @patch('builtins.open', new_callable=unittest.mock.mock_open, read_data='[Interface]\nAddress = 10.9.9.9/32')
@@ -172,11 +151,9 @@ class TestBridgeLifecycle(unittest.TestCase):
     def test_format_subscription_expiry_active(self, mock_datetime, mock_exists, mock_open):
         mock_exists.return_value = True
         
-        # Mock current time: 2026-12-20 12:00:00 UTC
         from datetime import datetime, timezone
         fixed_now = datetime(2026, 12, 20, 12, 0, 0, tzinfo=timezone.utc)
         mock_datetime.now.return_value = fixed_now
-        # Also need fromisoformat to work normally
         mock_datetime.fromisoformat.side_effect = lambda s: datetime.fromisoformat(s)
         
         result = bridge.format_subscription_expiry()

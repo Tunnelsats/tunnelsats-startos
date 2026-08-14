@@ -9,12 +9,10 @@ import time
 import socket
 from datetime import datetime, timezone
 
-wireproxy_process = None
 
 DEFAULT_VPN_PORT = 9735
 DATA_DIR = os.getenv("DATA_DIR", "/data")
 CONFIG_PATH = os.path.join(DATA_DIR, "tunnelsatsv3.conf")
-WIREPROXY_CONFIG_PATH = os.path.join(DATA_DIR, "wireproxy.conf")
 APP_CONFIG_PATH = os.path.join(DATA_DIR, "config.json")
 META_FILE_PATH = os.path.join(DATA_DIR, "tunnelsats-meta.json")
 TUNNELSATS_API_URL = "https://tunnelsats.com/api/public/v1"
@@ -499,50 +497,20 @@ def get_target_details():
 
 
 
-def generate_wireproxy_config():
-    try:
-        with open(CONFIG_PATH, 'r') as f:
-            wg_config = f.read()
-            
-        vpn_port = extract_vpn_port(wg_config)
-        target_host, target_port = get_target_details()
-        
-        extra_config = f"""
-[Socks5]
-BindAddress = 0.0.0.0:1080
-
-[TCPServerTunnel]
-ListenPort = {target_port}
-Target = {target_host}:{target_port}
-"""
-        if vpn_port and vpn_port != target_port:
-            extra_config += f"""
-[TCPServerTunnel]
-ListenPort = {vpn_port}
-Target = {target_host}:{target_port}
-"""
-        with open(WIREPROXY_CONFIG_PATH, 'w') as f:
-            f.write(wg_config + "\n" + extra_config)
-        print("Generated wireproxy config successfully.")
-        return True
-    except Exception as e:
-        print(f"Failed to generate wireproxy config: {e}", file=sys.stderr)
-        return False
-
 def inbound_up():
-    print("Inbound forwarding handled natively by wireproxy userspace tunnel.")
+    print("Inbound forwarding handled natively by StartOS kernel WireGuard gateway.")
     return True
 
 def inbound_down():
-    print("Inbound forwarding stopped natively by wireproxy.")
+    print("Inbound forwarding stopped.")
     return True
 
 def get_wg_ip():
     try:
         if os.path.exists(CONFIG_PATH):
-            with open(CONFIG_PATH, 'r') as f:
+            with open(CONFIG_PATH, "r") as f:
                 config_content = f.read()
-            match = re.search(r'^\s*(?!#|;)\s*Address\s*=\s*([0-9\.]+)', config_content, re.IGNORECASE | re.MULTILINE)
+            match = re.search(r"^\s*(?!#|;)\s*Address\s*=\s*([0-9\.]+)", config_content, re.IGNORECASE | re.MULTILINE)
             if match:
                 return match.group(1)
     except Exception as e:
@@ -550,18 +518,16 @@ def get_wg_ip():
     return None
 
 def proxy_up():
-    print("Outbound proxy handled natively by wireproxy.")
+    print("Outbound policy routing handled natively by StartOS gateway.")
     return True
 
 def proxy_down():
-    print("Outbound proxy stopped natively by wireproxy.")
+    print("Outbound policy routing stopped.")
+    return True
 
 def check_proxy_health():
-    try:
-        with socket.create_connection(("127.0.0.1", 1080), timeout=2):
-            return {"status": "running", "proxy_ready": True}
-    except OSError:
-        pass
+    if is_wireguard_running():
+        return {"status": "running", "proxy_ready": True}
     return {"status": "stopped", "proxy_ready": False}
 
 def shutdown_handler(signum, frame):
@@ -576,95 +542,76 @@ def shutdown_handler(signum, frame):
     sys.exit(0)
 
 def vpn_up(config_path):
-    global wireproxy_process
-    # Generate wireproxy config first
-    if not generate_wireproxy_config():
-        raise RuntimeError("Failed to generate wireproxy config")
-        
-    cmd = ["/usr/local/bin/wireproxy", "-c", WIREPROXY_CONFIG_PATH, "-i", "127.0.0.1:8080"]
-    wireproxy_process = subprocess.Popen(
-        cmd,
-        text=True
-    )
-    # Give wireproxy a brief moment to initialize and check if it crashed immediately
-    time.sleep(1)
-    if wireproxy_process.poll() is not None:
-        raise RuntimeError("wireproxy failed to start or crashed immediately after spawning")
-    print("wireproxy started successfully.")
+    print("TunnelSats WireGuard gateway active.")
 
 def vpn_down(config_path):
-    global wireproxy_process
-    if wireproxy_process:
-        wireproxy_process.terminate()
-        try:
-            wireproxy_process.wait(timeout=5)
-        except subprocess.TimeoutExpired:
-            wireproxy_process.kill()
-        wireproxy_process = None
-        print("wireproxy stopped.")
-    
-    # Fallback to pkill to clean up any orphaned wireproxy processes
-    try:
-        subprocess.run(["pkill", "-f", "wireproxy"])
-    except Exception:
-        pass
+    print("TunnelSats WireGuard gateway inactive.")
 
-def is_wireproxy_running():
+def check_gateway_reachable():
     try:
-        proc = subprocess.run(["pgrep", "wireproxy"], capture_output=True)
-        return proc.returncode == 0
+        if not os.path.exists(CONFIG_PATH):
+            return False
+        with open(CONFIG_PATH, "r") as f:
+            content = f.read()
+        if not get_wg_ip():
+            return False
+            
+        # Probe TunnelSats API transport to confirm active outbound connectivity
+        req = urllib.request.Request(
+            f"{TUNNELSATS_API_URL}/subscription/info",
+            headers={"User-Agent": "TunnelSats-StartOS/0.4.0"}
+        )
+        try:
+            with urllib.request.urlopen(req, timeout=3) as resp:
+                return resp.status < 500
+        except urllib.error.HTTPError as e:
+            # 400/403/404 confirms live network transport to TunnelSats API
+            return e.code < 500
+        except Exception:
+            return False
     except Exception:
         return False
 
+def is_wireguard_running():
+    try:
+        return is_enabled() and os.path.exists(CONFIG_PATH) and get_wg_ip() is not None
+    except Exception:
+        return False
+
+# Backward compatibility alias
+is_wireproxy_running = is_wireguard_running
+
 def get_status():
-    if not is_wireproxy_running():
+    if not is_wireguard_running():
         return {
             "status": "stopped",
             "vpn_connected": False,
             "handshake": "none"
         }
         
+    vpn_ip = get_wg_ip()
+    port = DEFAULT_VPN_PORT
+    server_domain = "Unknown"
+    is_reachable = check_gateway_reachable()
     try:
-        # Check wireproxy metrics locally without making WAN traffic
-        import urllib.request
-        req = urllib.request.Request("http://127.0.0.1:8080/metrics")
-        with urllib.request.urlopen(req, timeout=3) as response:
-            content = response.read().decode('utf-8')
-        if content:
-            for line in content.splitlines():
-                if "last_handshake_time_sec=" in line:
-                    parts = line.strip().split("=")
-                    if len(parts) >= 2:
-                        try:
-                            val = float(parts[1])
-                            if val > 0 and (time.time() - val) < 300:
-                                return {
-                                    "status": "running",
-                                    "vpn_connected": True,
-                                    "handshake": "active"
-                                }
-                        except ValueError:
-                            pass
-    except Exception as e:
-        print(f"Health check metrics query error: {e}", file=sys.stderr)
-        
-    # Fallback to checking SOCKS5 port availability if HTTP /metrics fails
-    try:
-        with socket.create_connection(("127.0.0.1", 1080), timeout=2):
-            return {
-                "status": "running",
-                "vpn_connected": False,
-                "handshake": "none"
-            }
-    except OSError:
+        if os.path.exists(CONFIG_PATH):
+            with open(CONFIG_PATH, "r") as f:
+                content = f.read()
+            port = extract_vpn_port(content)
+            match = re.search(r"^\s*(?!#|;)\s*Endpoint\s*=\s*([^\s#:]+)", content, re.IGNORECASE | re.MULTILINE)
+            if match:
+                server_domain = match.group(1)
+    except Exception:
         pass
         
     return {
-        "status": "stopped",
-        "vpn_connected": False,
-        "handshake": "none"
+        "status": "running" if is_reachable else "connecting",
+        "vpn_connected": is_reachable,
+        "handshake": "active" if is_reachable else "waiting",
+        "vpn_ip": vpn_ip,
+        "vpn_port": port,
+        "server": server_domain
     }
-
 def validate_config(wg_conf):
     if not wg_conf:
         return
@@ -789,9 +736,6 @@ def main():
                     print("TunnelSats has been re-enabled. Reloading service...", file=sys.stderr)
                     sys.exit(0)
 
-                if wireproxy_process and wireproxy_process.poll() is not None:
-                    print("wireproxy process exited unexpectedly.", file=sys.stderr)
-                    sys.exit(1)
                 time.sleep(1)
         except Exception as e:
             stderr = getattr(e, 'stderr', str(e))
@@ -814,29 +758,14 @@ def main():
         target = sys.argv[2] if len(sys.argv) > 2 else "vpn"
         
         if not is_enabled():
-            if target == "vpn":
-                if not is_wireproxy_running():
-                    print(json.dumps({"result": "ok"}))
-                    sys.exit(0)
-                else:
-                    print(json.dumps({"result": "VPN is running but should be stopped"}))
-                    sys.exit(1)
-            elif target == "proxy":
-                status = check_proxy_health()
-                if not status["proxy_ready"]:
-                    print(json.dumps({"result": "ok"}))
-                    sys.exit(0)
-                else:
-                    print(json.dumps({"result": "Proxy is active but should be stopped"}))
-                    sys.exit(1)
-            else:
-                print(json.dumps({"result": "ok"}))
-                sys.exit(0)
+            print(json.dumps({"result": "ok"}))
+            sys.exit(0)
             
         if target == "vpn":
             status = get_status()
             if status["vpn_connected"]:
                 print(json.dumps({"result": "ok"}))
+                sys.exit(0)
             else:
                 print(json.dumps({"result": "VPN is not connected"}))
                 sys.exit(1)
@@ -844,8 +773,9 @@ def main():
             status = check_proxy_health()
             if status["proxy_ready"]:
                 print(json.dumps({"result": "ok"}))
+                sys.exit(0)
             else:
-                print(json.dumps({"result": "Proxy is not accepting connections"}))
+                print(json.dumps({"result": "Proxy is not ready"}))
                 sys.exit(1)
 
 

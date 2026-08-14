@@ -26,6 +26,10 @@ const dict = {
   'Advertise TunnelSats VPN endpoint to the Lightning Network': 22,
   'Allow Home IPv6 Coexistence': 23,
   'Allow advertising raw IPv6 addresses on your node. WARNING: TunnelSats VPN tunnels IPv4 traffic only. IPv6 connections bypass the VPN tunnel and expose your real home ISP IP address.': 24,
+  'Web Dashboard is accessible': 25,
+  'Web Dashboard is not accessible': 26,
+  'VPN Gateway Status': 27,
+  'VPN gateway active': 28,
 } as const
 
 /**

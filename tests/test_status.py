@@ -2,50 +2,43 @@ import unittest
 import os
 import sys
 from unittest.mock import patch, MagicMock
-from io import BytesIO
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 import bridge
 
 class TestBridgeStatus(unittest.TestCase):
-    @patch('socket.create_connection')
-    @patch('urllib.request.urlopen')
-    @patch('subprocess.run')
-    def test_status_connected(self, mock_run, mock_urlopen, mock_socket):
-        # pgrep returns 0 (running)
-        mock_run.return_value = MagicMock(returncode=0)
-        # urllib returns metrics with a recent handshake timestamp
-        import time as _time
-        recent_ts = str(int(_time.time()) - 10)
-        mock_response = MagicMock()
-        mock_response.read.return_value = f"last_handshake_time_sec={recent_ts}\n".encode()
-        mock_response.__enter__ = lambda s: s
-        mock_response.__exit__ = MagicMock(return_value=False)
-        mock_urlopen.return_value = mock_response
+    @patch('bridge.check_gateway_reachable', return_value=True)
+    @patch('os.path.exists')
+    @patch('bridge.is_enabled')
+    @patch('bridge.get_wg_ip')
+    @patch('builtins.open', new_callable=unittest.mock.mock_open, read_data='[Interface]\nAddress = 10.9.0.102/32\n# VPNPort: 24556\n[Peer]\nEndpoint = ch1.tunnelsats.com:51820')
+    def test_status_connected(self, mock_open, mock_get_ip, mock_is_enabled, mock_exists, mock_reachable):
+        mock_exists.return_value = True
+        mock_is_enabled.return_value = True
+        mock_get_ip.return_value = "10.9.0.102"
 
         status = bridge.get_status()
         self.assertEqual(status["status"], "running")
         self.assertTrue(status["vpn_connected"])
         self.assertEqual(status["handshake"], "active")
+        self.assertEqual(status["vpn_ip"], "10.9.0.102")
+        self.assertEqual(status["vpn_port"], 24556)
+        self.assertEqual(status["server"], "ch1.tunnelsats.com")
 
-    @patch('socket.create_connection')
-    @patch('urllib.request.urlopen')
-    @patch('subprocess.run')
-    def test_status_disconnected(self, mock_run, mock_urlopen, mock_socket):
-        # pgrep returns 0 (running), urllib raises (metrics unavailable)
-        mock_run.return_value = MagicMock(returncode=0)
-        mock_urlopen.side_effect = Exception("Connection refused")
-        mock_socket.side_effect = OSError("Connection refused")
+    @patch('bridge.is_enabled')
+    def test_status_disconnected(self, mock_is_enabled):
+        mock_is_enabled.return_value = False
 
         status = bridge.get_status()
         self.assertEqual(status["status"], "stopped")
         self.assertFalse(status["vpn_connected"])
         self.assertEqual(status["handshake"], "none")
 
-    @patch('subprocess.run')
-    def test_status_stopped(self, mock_run):
-        # pgrep returns 1 (not running)
-        mock_run.return_value = MagicMock(returncode=1)
+    @patch('os.path.exists')
+    @patch('bridge.is_enabled')
+    def test_status_stopped(self, mock_is_enabled, mock_exists):
+        mock_is_enabled.return_value = True
+        mock_exists.return_value = False
 
         status = bridge.get_status()
         self.assertEqual(status["status"], "stopped")
