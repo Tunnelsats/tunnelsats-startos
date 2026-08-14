@@ -17,12 +17,12 @@ The official package of [TunnelSats](https://tunnelsats.com/) built for **[Start
 ---
 
 ## ⚡ What it Solves
-Running a Lightning Network node (LND / Core Lightning) over Tor ensures anonymity but introduces latency and routing reliability issues. Conversely, running purely over home Clearnet exposes your residential IP address and ISP physical location.
+Running a Lightning Network node (LND / Core Lightning) over Tor ensures anonymity but introduces latency and routing reliability issues. Conversely, running purely over home Clearnet exposes your residential IP address and ISP physical location in global channel gossip.
 
 TunnelSats provides **privacy-preserving clearnet connectivity**:
 - Establishes a high-speed WireGuard tunnel to global TunnelSats servers.
 - Forwards inbound Lightning peer connections from your public TunnelSats port to port 9735 on your target Lightning node.
-- Gives your Lightning node a reachable, stable Clearnet identity without exposing your residential IP in global network gossip.
+- Gives your Lightning node a reachable, stable Clearnet identity without exposing your residential IP in global network gossip announcements.
 
 ---
 
@@ -91,7 +91,7 @@ StartOS 0.4.0 isolates services into subcontainers:
 
 ## 🔒 Independent Security & Announcement Audit (CLI)
 
-Node operators can independently audit that their node's announced endpoints and network isolation match expectations:
+Node operators can independently audit that their node's announced endpoints and network interfaces match expectations:
 
 ### 1. Inbound Lightning Announcement Audit
 ```bash

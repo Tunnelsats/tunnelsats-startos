@@ -674,51 +674,15 @@
           <!-- Q10 -->
           <details class="faq-item">
             <summary class="faq-question">
-              How do I independently audit and verify my node's outbound &amp; inbound IP via CLI?
+              How do I independently audit and verify my node's network endpoints via CLI?
             </summary>
             <div class="faq-answer">
               <p>
-                You can independently audit your Lightning node's active routing directly from the StartOS host terminal using <code>start-cli</code>.
+                You can independently audit your Lightning node's announced endpoints and active network interfaces directly from the StartOS host terminal using <code>start-cli</code>.
               </p>
               
-              <h4 style="color: var(--accent-bitcoin); font-size: 13.5px; margin-top: 14px; margin-bottom: 6px;">1. LND Outbound IPv4 Audit</h4>
-              <p style="font-size: 12.5px; margin-bottom: 4px;">Run inside your LND container to verify outbound traffic routes via TunnelSats:</p>
-              <div class="code-block-header">
-                <span>LND IPv4 Egress:</span>
-                <button class="btn-copy-code" onclick="copyCode('cli-lnd-v4', this)">Copy</button>
-              </div>
-              <pre><code id="cli-lnd-v4">start-cli package attach lnd -- curl -s https://api.ipify.org</code></pre>
-              <p style="font-size: 11.5px; color: #8b949e; margin-top: 2px;">Expected output: Your TunnelSats VPN IP (e.g. <code><span class="highlight-ip">tunnelsats_ip</span></code>).</p>
-
-              <h4 style="color: var(--accent-bitcoin); font-size: 13.5px; margin-top: 14px; margin-bottom: 6px;">2. LND Outbound IPv6 Isolation Audit</h4>
-              <p style="font-size: 12.5px; margin-bottom: 4px;">Verify that IPv6 connections are safely blocked and not leaking your home ISP:</p>
-              <div class="code-block-header">
-                <span>LND IPv6 Egress:</span>
-                <button class="btn-copy-code" onclick="copyCode('cli-lnd-v6', this)">Copy</button>
-              </div>
-              <pre><code id="cli-lnd-v6">start-cli package attach lnd -- curl -6 -s --connect-timeout 5 https://api6.ipify.org</code></pre>
-              <p style="font-size: 11.5px; color: #8b949e; margin-top: 2px;">Expected output: <code>Network unreachable</code> or connection timeout (when IPv6 Coexistence is OFF).</p>
-
-              <h4 style="color: var(--accent-bitcoin); font-size: 13.5px; margin-top: 14px; margin-bottom: 6px;">3. Core Lightning (CLN) Outbound IPv4 Audit</h4>
-              <p style="font-size: 12.5px; margin-bottom: 4px;">Run inside your Core Lightning container:</p>
-              <div class="code-block-header">
-                <span>Core Lightning IPv4 Egress:</span>
-                <button class="btn-copy-code" onclick="copyCode('cli-cln-v4', this)">Copy</button>
-              </div>
-              <pre><code id="cli-cln-v4">start-cli package attach c-lightning -- curl -s https://api.ipify.org</code></pre>
-              <p style="font-size: 11.5px; color: #8b949e; margin-top: 2px;">Expected output: Your TunnelSats VPN IP (e.g. <code><span class="highlight-ip">tunnelsats_ip</span></code>).</p>
-
-              <h4 style="color: var(--accent-bitcoin); font-size: 13.5px; margin-top: 14px; margin-bottom: 6px;">4. Core Lightning (CLN) Outbound IPv6 Isolation Audit</h4>
-              <p style="font-size: 12.5px; margin-bottom: 4px;">Verify that IPv6 connections are safely blocked for Core Lightning:</p>
-              <div class="code-block-header">
-                <span>Core Lightning IPv6 Egress:</span>
-                <button class="btn-copy-code" onclick="copyCode('cli-cln-v6', this)">Copy</button>
-              </div>
-              <pre><code id="cli-cln-v6">start-cli package attach c-lightning -- curl -6 -s --connect-timeout 5 https://api6.ipify.org</code></pre>
-              <p style="font-size: 11.5px; color: #8b949e; margin-top: 2px;">Expected output: <code>Network unreachable</code> or connection timeout.</p>
-
-              <h4 style="color: var(--accent-bitcoin); font-size: 13.5px; margin-top: 14px; margin-bottom: 6px;">5. Inbound Lightning Gossip Announcement Audit</h4>
-              <p style="font-size: 12.5px; margin-bottom: 4px;">Confirm your node announces your TunnelSats external IP and port to peers:</p>
+              <h4 style="color: var(--accent-bitcoin); font-size: 13.5px; margin-top: 14px; margin-bottom: 6px;">1. Inbound Lightning Gossip Announcement Audit</h4>
+              <p style="font-size: 12.5px; margin-bottom: 4px;">Confirm your node persistently announces your TunnelSats external domain and port to network peers:</p>
               <div class="code-block-header">
                 <span>LND Announcement Check:</span>
                 <button class="btn-copy-code" onclick="copyCode('cli-lnd-info', this)">Copy</button>
@@ -729,6 +693,34 @@
                 <button class="btn-copy-code" onclick="copyCode('cli-cln-info', this)">Copy</button>
               </div>
               <pre><code id="cli-cln-info">start-cli package attach c-lightning -- lightning-cli getinfo</code></pre>
+              <p style="font-size: 11.5px; color: #8b949e; margin-top: 2px;">Expected result: The <code>uris</code> (LND) or <code>binding</code>/<code>address</code> (CLN) list contains <code>&lt;your_pubkey&gt;@<span class="highlight-ip">tunnelsats_ip</span>:<span class="highlight-port">tunnelsats_port</span></code>.</p>
+
+              <h4 style="color: var(--accent-bitcoin); font-size: 13.5px; margin-top: 14px; margin-bottom: 6px;">2. Target Node Outbound IPv4 Route Audit</h4>
+              <p style="font-size: 12.5px; margin-bottom: 4px;">Inspect the active IPv4 egress route used by your target node container:</p>
+              <div class="code-block-header">
+                <span>LND IPv4 Egress:</span>
+                <button class="btn-copy-code" onclick="copyCode('cli-lnd-v4', this)">Copy</button>
+              </div>
+              <pre><code id="cli-lnd-v4">start-cli package attach lnd -- curl -s https://api.ipify.org</code></pre>
+              <div class="code-block-header" style="margin-top: 8px;">
+                <span>Core Lightning IPv4 Egress:</span>
+                <button class="btn-copy-code" onclick="copyCode('cli-cln-v4', this)">Copy</button>
+              </div>
+              <pre><code id="cli-cln-v4">start-cli package attach c-lightning -- curl -s https://api.ipify.org</code></pre>
+
+              <h4 style="color: var(--accent-bitcoin); font-size: 13.5px; margin-top: 14px; margin-bottom: 6px;">3. Target Node IPv6 Isolation Audit</h4>
+              <p style="font-size: 12.5px; margin-bottom: 4px;">Verify whether IPv6 connectivity is unroutable or accessible:</p>
+              <div class="code-block-header">
+                <span>LND IPv6 Egress:</span>
+                <button class="btn-copy-code" onclick="copyCode('cli-lnd-v6', this)">Copy</button>
+              </div>
+              <pre><code id="cli-lnd-v6">start-cli package attach lnd -- curl -6 -s --connect-timeout 5 https://api6.ipify.org</code></pre>
+              <div class="code-block-header" style="margin-top: 8px;">
+                <span>Core Lightning IPv6 Egress:</span>
+                <button class="btn-copy-code" onclick="copyCode('cli-cln-v6', this)">Copy</button>
+              </div>
+              <pre><code id="cli-cln-v6">start-cli package attach c-lightning -- curl -6 -s --connect-timeout 5 https://api6.ipify.org</code></pre>
+              <p style="font-size: 11.5px; color: #8b949e; margin-top: 2px;">Expected result when Allow IPv6 is OFF: <code>Network unreachable</code> or connection timeout.</p>
             </div>
           </details>
         </div>

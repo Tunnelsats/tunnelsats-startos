@@ -222,7 +222,7 @@ echo "  2. Audit IPv6 Isolation: start-cli package attach ${TARGET_PKG} -- curl 
 # Summary
 log_step "Verification Summary"
 if [ $FAILED_CHECKS -eq 0 ]; then
-    log_info "All service diagnostic checks completed successfully."
+    log_info "TunnelSats service and announcement profile verification completed."
     exit 0
 else
     log_error "Diagnostic audit completed with $FAILED_CHECKS failure(s)."
