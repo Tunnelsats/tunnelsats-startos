@@ -11,7 +11,7 @@ TunnelSats is built using the StartOS 0.4.0 TypeScript SDK (`@start9labs/start-s
 ### Core Components (`startos/`)
 
 - **`startos/manifest/index.ts`**: Defines package identity, versioning, container images, volume mounts, and dynamic dependencies.
-- **`startos/main.ts`**: Sets up the primary daemon, readiness probes for the Web Dashboard on port 80, and registers background health checks.
+- **`startos/main.ts`**: Sets up the primary daemon, readiness probes for the Web Dashboard on port 80, and registers background health checks (`vpn-connected`).
 - **`startos/actions/configure.ts`**: Strongly-typed UI configuration action where users input WireGuard configs, choose their target Lightning node (`lnd` vs `cln`), and configure IPv6 coexistence settings.
 - **`startos/dependencies.ts`**: Dynamic dependency management and automated 1-Click UI Task generation for target node external host announcements.
 - **`bridge.py`**: Python orchestrator managing the Web Dashboard, `/api/status`, `/api/properties`, and live network transport probes.
@@ -59,14 +59,14 @@ make arch/aarch64
 ### Sideloading into a Local StartOS 0.4.0 Node
 
 ```bash
-# Sideload package via start-cli
-start-cli -H https://<startos_ip> --insecure package install -s tunnelsats_x86_64.s9pk
+# Sideload package via deploy script
+./deploy-sideload.sh
 
 # Inspect live container logs
-start-cli -H https://<startos_ip> --insecure package logs tunnelsats
+ssh start9@<startos_ip> "start-cli package logs tunnelsats"
 
 # Run diagnostic verification
-start-cli -H https://<startos_ip> --insecure package attach tunnelsats /app/verify.sh
+ssh start9@<startos_ip> "start-cli package attach tunnelsats /app/verify.sh"
 ```
 
 ---
@@ -74,5 +74,5 @@ start-cli -H https://<startos_ip> --insecure package attach tunnelsats /app/veri
 ## 🔒 Security & Privacy Guidelines
 
 1. **Zero Secret Leaks**: Test fixtures and code examples must strictly use dummy test keys (`DUMMY_TEST_PRIVATE_KEY_...`). Active WireGuard private keys and residential IP addresses must never be committed or logged.
-2. **Zero Dependencies on Host Sudo / Userspace SOCKS Proxies**: All routing is handled cleanly through StartOS 0.4.0 native policy routing and kernel WireGuard interfaces.
+2. **Zero Dependencies on Host Sudo / Userspace SOCKS Proxies**: All inbound forwarding is handled cleanly through StartOS kernel WireGuard interfaces.
 3. **IPv6 Leak Protection**: Ensure IPv6 WAN routes remain blocked or unadvertised unless the user explicitly opts into dual-stack coexistence.

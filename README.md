@@ -22,14 +22,13 @@ Running a Lightning Network node (LND / Core Lightning) over Tor ensures anonymi
 TunnelSats provides **privacy-preserving clearnet connectivity**:
 - Establishes a high-speed WireGuard tunnel to global TunnelSats servers.
 - Forwards inbound Lightning peer connections from your public TunnelSats port to port 9735 on your target Lightning node.
-- Supports outbound routing via StartOS 0.4.0 gateway configuration (`start-cli package set-outbound-gateway`).
-- Hides your residential IPv4 address while delivering low-latency Clearnet channel routing.
+- Gives your Lightning node a reachable, stable Clearnet identity without exposing your residential IP in global network gossip.
 
 ---
 
 ## 🚀 Key StartOS 0.4.0 Features
 
-- **StartOS 0.4.0 Native Gateway Support**: Zero userspace proxy overhead. Direct integration with StartOS 0.4.0 outbound gateway routing for target Lightning containers (`lnd` or `c-lightning`).
+- **StartOS 0.4.0 TypeScript Architecture**: Built with strongly-typed reactive file models, lifecycle handlers, and subcontainer isolation.
 - **In-App Web Dashboard**: Manage and verify your connection, inspect live WireGuard handshake status, and monitor subscription duration via a sleek, responsive UI on port 80.
 - **Automated 1-Click Cross-Service Tasks**: Automatically generates a native StartOS 1-Click UI Task prompting you to advertise your TunnelSats external announce endpoint on LND or Core Lightning.
 - **Dynamic Dependency Management**: Dynamically mounts and requires either `lnd` or `c-lightning` based on user selection.
@@ -39,7 +38,7 @@ TunnelSats provides **privacy-preserving clearnet connectivity**:
 
 ## 🛠 Architecture & Dataplane
 
-StartOS 0.4.0 isolates services into subcontainers and manages network routing:
+StartOS 0.4.0 isolates services into subcontainers:
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
@@ -48,15 +47,14 @@ StartOS 0.4.0 isolates services into subcontainers and manages network routing:
 │  ┌───────────────────────┐                                  │
 │  │ Target Lightning Node │                                  │
 │  │   (LND / CLN)         │                                  │
-│  └───────────┬───────────┘                                  │
-│              │ (Outbound Gateway Configuration)             │
-│              ▼                                              │
-│  ┌────────────────────────────────────────┐                 │
-│  │   StartOS Kernel WireGuard Gateway     │────▶ Clearnet   │
+│  └───────────▲───────────┘                                  │
+│              │                                              │
+│              │ (Inbound Port Forwarding: Port 9735)         │
+│  ┌───────────┴────────────────────────────┐                 │
+│  │   StartOS Kernel WireGuard Gateway     │◀─── Inbound P2P │
 │  │         (wg0 / Host Interface)         │    (TunnelSats) │
 │  └───────────────────▲────────────────────┘                 │
 │                      │                                      │
-│                      │ (Inbound Port Forwarding)            │
 │  ┌───────────────────┴────────────────────┐                 │
 │  │      TunnelSats Service (Port 80)      │                 │
 │  │  - Web Dashboard & Status Reporting    │                 │
@@ -66,7 +64,7 @@ StartOS 0.4.0 isolates services into subcontainers and manages network routing:
 ```
 
 1. **Inbound Routing (Port Forwarding)**: Inbound Lightning traffic arriving on your assigned TunnelSats port is forwarded directly across the WireGuard tunnel to port `9735` on the target Lightning container.
-2. **Outbound Routing (Gateway Selection)**: When selected as the Outbound Gateway for LND/CLN (via StartOS service settings or `start-cli package set-outbound-gateway <lnd|c-lightning> tunnelsats`), outbound clearnet traffic from the target Lightning container routes through the TunnelSats WireGuard interface.
+2. **Lightning Gossip Announcement**: Your Lightning node advertises the public TunnelSats address (`<domain>:<vpn_port>`) as its external host, allowing peers to establish low-latency inbound channels.
 3. **Web Dashboard**: An internal HTTP service on port 80 provides a management interface displaying tunnel connection state, handshake telemetry, subscription expiration, and configuration guides.
 
 ---
@@ -84,45 +82,18 @@ StartOS 0.4.0 isolates services into subcontainers and manages network routing:
 4. Paste the complete contents of your `.conf` file into **WireGuard Configuration**.
 5. Set **Enable TunnelSats** to **ON** and click **Save**.
 
-### 3. Complete the 1-Click Task & Set Outbound Gateway
+### 3. Complete the 1-Click Task
 1. StartOS will display a notification with an automated **1-Click Task**.
 2. Accept the task to automatically populate the **Custom External Host** on your selected Lightning node (`<server>:<vpn_port>`).
-3. To route outbound peer traffic through the VPN, select **TunnelSats** as the **Outbound Gateway** in your Lightning node settings (or run `start-cli package set-outbound-gateway <package> tunnelsats`).
-4. Your Lightning node will now announce the TunnelSats public IP and port to the global gossip network.
+3. Your Lightning node will now announce the TunnelSats public IP and port to the global gossip network for inbound peer connectivity.
 
 ---
 
-## 🔒 Independent Egress & Ingress Security Audit (CLI)
+## 🔒 Independent Security & Announcement Audit (CLI)
 
-Node operators can independently audit that all inbound and outbound traffic routes securely via TunnelSats:
+Node operators can independently audit that their node's announced endpoints and network isolation match expectations:
 
-### 1. LND Outbound IPv4 Egress Audit
-```bash
-start-cli package attach lnd -- curl -s https://api.ipify.org
-```
-- **Expected Output**: Your TunnelSats VPN IP (e.g. `83.228.229.56`).
-- **Verification**: Confirms LND is policy-routed through the WireGuard tunnel and your home IPv4 address is protected.
-
-### 2. LND Outbound IPv6 Isolation Audit
-```bash
-start-cli package attach lnd -- curl -6 -s --connect-timeout 5 https://api6.ipify.org
-```
-- **Expected Output**: `Network unreachable` or connection timeout (when IPv6 Coexistence is OFF).
-- **Verification**: Confirms IPv6 traffic cannot leak your residential ISP location.
-
-### 3. Core Lightning (CLN) Outbound IPv4 Egress Audit
-```bash
-start-cli package attach c-lightning -- curl -s https://api.ipify.org
-```
-- **Expected Output**: Your TunnelSats VPN IP (e.g. `83.228.229.56`).
-
-### 4. Core Lightning (CLN) Outbound IPv6 Isolation Audit
-```bash
-start-cli package attach c-lightning -- curl -6 -s --connect-timeout 5 https://api6.ipify.org
-```
-- **Expected Output**: `Network unreachable` or connection timeout.
-
-### 5. Inbound Lightning Announcement Audit
+### 1. Inbound Lightning Announcement Audit
 ```bash
 # For LND:
 start-cli package attach lnd -- lncli getinfo
@@ -132,11 +103,22 @@ start-cli package attach c-lightning -- lightning-cli getinfo
 ```
 - **Verification**: Confirm the `uris` (LND) or `binding`/`address` (CLN) contains `<your_pubkey>@<tunnelsats_domain>:<vpn_port>`.
 
+### 2. Outbound IPv6 Isolation Audit
+```bash
+# For LND:
+start-cli package attach lnd -- curl -6 -s --connect-timeout 5 https://api6.ipify.org
+
+# For Core Lightning:
+start-cli package attach c-lightning -- curl -6 -s --connect-timeout 5 https://api6.ipify.org
+```
+- **Expected Output**: `Network unreachable` or connection timeout (when IPv6 Coexistence is OFF).
+- **Verification**: Confirms IPv6 traffic cannot leak your residential ISP location.
+
 ---
 
 ## 🌐 IPv6 Privacy Note
 
-TunnelSats provides an **IPv4-only** WireGuard VPN tunnel. It does not route IPv6 traffic through the VPN. By default, the package filters out IPv6 addresses from automated announcement tasks. If you enable **Allow Home IPv6 Coexistence**, IPv6 endpoints can be advertised, which will connect directly over your home ISP connection rather than the VPN tunnel.
+TunnelSats provides an **IPv4-only** WireGuard VPN tunnel. It does not route IPv6 traffic through the VPN. By default, the package filters out IPv6 addresses from automated announcement tasks to ensure your residential IP is not broadcast to Lightning gossip peers. If you enable **Allow Home IPv6 Coexistence**, IPv6 endpoints can be advertised, which will connect directly over your home ISP connection rather than the VPN tunnel.
 
 ---
 
@@ -151,10 +133,9 @@ start-cli package attach tunnelsats /app/verify.sh
 
 **Diagnostic Probes Performed**:
 - Gateway API status & WireGuard handshake verification.
-- Target Lightning node policy routing and CLI audit recipe generation.
+- Target Lightning node announcement alignment.
 - IPv6 coexistence policy audit.
 - Tor proxy coexistence audit.
-- Target Lightning node announcement verification.
 
 ---
 
