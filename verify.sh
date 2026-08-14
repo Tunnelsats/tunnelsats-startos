@@ -273,9 +273,10 @@ if command -v start-cli &>/dev/null && [ "$ENGINE" != "inside" ]; then
                 log_error "Target node live IPv6 is ACTIVE and leaking home ISP address: $RAW_V6_OUTPUT"
                 FAILED_CHECKS=$((FAILED_CHECKS + 1))
             else
-                log_info "Target node live IPv6 isolation: BLOCKED / UNROUTABLE (Protected ✅)"
+                log_error "Could not verify IPv6 isolation from ${TARGET_PKG} container."
+                FAILED_CHECKS=$((FAILED_CHECKS + 1))
             fi
-        elif [[ "$RAW_V6_OUTPUT" =~ "Network unreachable" ]] || [[ "$RAW_V6_OUTPUT" =~ "timed out" ]]; then
+        elif [[ "$RAW_V6_OUTPUT" =~ "Network unreachable" ]] || [[ "$RAW_V6_OUTPUT" =~ "timed out" ]] || [[ "$RAW_V6_OUTPUT" =~ "Could not resolve host" ]]; then
             log_info "Target node live IPv6 isolation: BLOCKED / UNROUTABLE (Protected ✅)"
         else
             log_error "Could not verify IPv6 isolation from ${TARGET_PKG} container."

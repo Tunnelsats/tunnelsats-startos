@@ -124,10 +124,13 @@ TunnelSats provides an **IPv4-only** WireGuard VPN tunnel. It does not route IPv
 
 ## 🔍 Diagnostic & Verification Tool
 
-The package includes a built-in diagnostic tool [`verify.sh`](verify.sh) to inspect status properties:
+The package includes a diagnostic tool [`verify.sh`](verify.sh) to inspect status properties:
 
 ```bash
-# Run verification inside the TunnelSats container namespace:
+# 1. Full system audit (runs service checks + live target node egress probes via host CLI):
+./verify.sh
+
+# 2. In-container service telemetry audit:
 start-cli package attach tunnelsats /app/verify.sh
 ```
 
