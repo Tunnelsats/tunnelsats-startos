@@ -276,10 +276,10 @@ if command -v start-cli &>/dev/null && [ "$ENGINE" != "inside" ]; then
                 log_error "Could not verify IPv6 isolation from ${TARGET_PKG} container."
                 FAILED_CHECKS=$((FAILED_CHECKS + 1))
             fi
-        elif [[ "$RAW_V6_OUTPUT" =~ "Network unreachable" ]] || [[ "$RAW_V6_OUTPUT" =~ "timed out" ]] || [[ "$RAW_V6_OUTPUT" =~ "Could not resolve host" ]]; then
+        elif [[ "$RAW_V6_OUTPUT" =~ "Network unreachable" ]]; then
             log_info "Target node live IPv6 isolation: BLOCKED / UNROUTABLE (Protected ✅)"
         else
-            log_error "Could not verify IPv6 isolation from ${TARGET_PKG} container."
+            log_error "Could not verify IPv6 isolation from ${TARGET_PKG} container ($RAW_V6_OUTPUT)."
             FAILED_CHECKS=$((FAILED_CHECKS + 1))
         fi
     fi
