@@ -21,14 +21,15 @@ Running a Lightning Network node (LND / Core Lightning) over Tor ensures anonymi
 
 TunnelSats provides **privacy-preserving clearnet connectivity**:
 - Establishes a high-speed WireGuard tunnel to global TunnelSats servers.
-- Routes inbound forwarded peer connections through the tunnel to your target Lightning node.
+- Forwards inbound Lightning peer connections from your public TunnelSats port to port 9735 on your target Lightning node.
+- Supports outbound gateway policy routing through the StartOS 0.4.0 network gateway manager (`start-cli package set-outbound-gateway`).
 - Hides your residential IPv4 address while delivering low-latency Clearnet channel routing.
 
 ---
 
 ## 🚀 Key StartOS 0.4.0 Features
 
-- **StartOS 0.4.0 Native Gateway Architecture**: Zero userspace SOCKS proxy overhead. Directly leverages StartOS 0.4.0 gateway integration for target Lightning containers (`lnd` or `c-lightning`).
+- **StartOS 0.4.0 Native Gateway Architecture**: Zero userspace SOCKS proxy overhead. Direct integration with StartOS 0.4.0 outbound gateway routing for target Lightning containers (`lnd` or `c-lightning`).
 - **In-App Web Dashboard**: Manage and verify your connection, inspect live WireGuard handshake status, and monitor subscription duration via a sleek, responsive UI on port 80.
 - **Automated 1-Click Cross-Service Tasks**: Automatically generates a native StartOS 1-Click UI Task prompting you to advertise your TunnelSats external announce endpoint on LND or Core Lightning.
 - **Dynamic Dependency Management**: Dynamically mounts and requires either `lnd` or `c-lightning` based on user selection.
@@ -48,7 +49,7 @@ StartOS 0.4.0 isolates services into subcontainers and manages network routing:
 │  │ Target Lightning Node │                                  │
 │  │   (LND / CLN)         │                                  │
 │  └───────────┬───────────┘                                  │
-│              │ (Outbound Routing)                           │
+│              │ (Outbound Gateway Policy Routing)            │
 │              ▼                                              │
 │  ┌────────────────────────────────────────┐                 │
 │  │   StartOS Kernel WireGuard Gateway     │────▶ Clearnet   │
@@ -65,7 +66,7 @@ StartOS 0.4.0 isolates services into subcontainers and manages network routing:
 ```
 
 1. **Inbound Routing (Port Forwarding)**: Inbound Lightning traffic arriving on your assigned TunnelSats port is forwarded directly across the WireGuard tunnel to port `9735` on the target Lightning container.
-2. **Outbound Routing (Gateway Integration)**: Outbound traffic from the target Lightning container is directed through the TunnelSats WireGuard interface.
+2. **Outbound Routing (Gateway Routing)**: When configured as the Outbound Gateway for LND/CLN (`start-cli package set-outbound-gateway <lnd|c-lightning> tunnelsats`), outbound clearnet traffic from the target Lightning container routes through the TunnelSats WireGuard interface.
 3. **Web Dashboard**: An internal HTTP service on port 80 provides a management interface displaying tunnel connection state, handshake telemetry, subscription expiration, and configuration guides.
 
 ---
@@ -83,10 +84,11 @@ StartOS 0.4.0 isolates services into subcontainers and manages network routing:
 4. Paste the complete contents of your `.conf` file into **WireGuard Configuration**.
 5. Set **Enable TunnelSats** to **ON** and click **Save**.
 
-### 3. Complete the 1-Click Task
+### 3. Complete the 1-Click Task & Set Outbound Gateway
 1. StartOS will display a notification with an automated **1-Click Task**.
 2. Accept the task to automatically populate the **Custom External Host** on your selected Lightning node (`<server>:<vpn_port>`).
-3. Your Lightning node will now announce the TunnelSats public IP and port to the global gossip network.
+3. To route outbound peer traffic through the VPN, select **TunnelSats** as the **Outbound Gateway** in your Lightning node settings.
+4. Your Lightning node will now announce the TunnelSats public IP and port to the global gossip network.
 
 ---
 
