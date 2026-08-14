@@ -161,14 +161,17 @@ if [ -n "$EGRESS_INFO" ]; then
             log_info "Datapath Verification: Outbound alignment is CORRECT (matches VPN gateway IP ✅)."
         else
             log_warn "Outbound IP ($MASKED_EGRESS_IP) differs from configured TunnelSats server ($SERVER)."
-            log_warn "Note: Diagnostic script runs in local namespace. Verify policy routing on target Lightning container."
+            log_warn "Note: If running on the host rather than inside the target Lightning container, this is normal for split-routing."
+            if [ "$ENGINE" == "inside" ]; then
+                FAILED_CHECKS=$((FAILED_CHECKS + 1))
+            fi
         fi
     fi
 else
     log_warn "Outbound IPv4 probe timed out or network offline."
 fi
 
-# 4. IPv6 Leak Detection Test
+# 4. IPv6 Leak Prevention Test
 log_step "4. IPv6 Leak Prevention Test"
 IPV6_STATUS=$(python3 -c "
 import socket, urllib.request, urllib.error
@@ -185,15 +188,17 @@ except OSError:
 if not has_ipv6_route:
     print('UNROUTABLE')
 else:
-    # 2. Test actual WAN probe
+    # 2. Test IPv6-only WAN probe
     try:
-        req = urllib.request.Request('https://api64.ipify.org', headers={'User-Agent': 'curl/8.0'})
+        req = urllib.request.Request('https://api6.ipify.org', headers={'User-Agent': 'curl/8.0'})
         with urllib.request.urlopen(req, timeout=3) as resp:
             ip = resp.read().decode('utf-8').strip()
             if ':' in ip:
                 print('LEAK')
             else:
-                print('IPV4_FALLBACK')
+                print('UNVERIFIED')
+    except urllib.error.URLError:
+        print('UNROUTABLE')
     except Exception:
         print('UNVERIFIED')
 " 2>/dev/null | tr -d '\r' || echo "UNROUTABLE")
@@ -201,10 +206,10 @@ else:
 if [ "$IPV6_STATUS" == "LEAK" ]; then
     log_warn "IPv6 WAN egress is ACTIVE."
     log_warn "Ensure 'Allow Home IPv6 Coexistence' is disabled in TunnelSats config if you want zero ISP IP exposure."
-elif [ "$IPV6_STATUS" == "UNROUTABLE" ] || [ "$IPV6_STATUS" == "IPV4_FALLBACK" ]; then
+elif [ "$IPV6_STATUS" == "UNROUTABLE" ]; then
     log_info "IPv6 WAN egress is blocked/unroutable. (Zero residential IPv6 leak verified ✅)"
 else
-    log_warn "IPv6 connectivity check was unverified (endpoint unreachable or probe timed out)."
+    log_warn "IPv6 connectivity check was unverified (IPv6 endpoint unreachable or probe timed out)."
 fi
 
 # 5. Tor Coexistence Audit
@@ -242,4 +247,9 @@ else
 fi
 
 log_step "Verification Summary"
-log_info "All diagnostic probes finished successfully."
+if [ "$FAILED_CHECKS" -gt 0 ]; then
+    log_error "Diagnostic audit completed with $FAILED_CHECKS failure(s)."
+    exit 1
+else
+    log_info "All diagnostic probes finished successfully."
+fi
