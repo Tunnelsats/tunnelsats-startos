@@ -7,11 +7,12 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')
 import bridge
 
 class TestBridgeStatus(unittest.TestCase):
+    @patch('bridge.check_gateway_reachable', return_value=True)
     @patch('os.path.exists')
     @patch('bridge.is_enabled')
     @patch('bridge.get_wg_ip')
     @patch('builtins.open', new_callable=unittest.mock.mock_open, read_data='[Interface]\nAddress = 10.9.0.102/32\n# VPNPort: 24556\n[Peer]\nEndpoint = ch1.tunnelsats.com:51820')
-    def test_status_connected(self, mock_open, mock_get_ip, mock_is_enabled, mock_exists):
+    def test_status_connected(self, mock_open, mock_get_ip, mock_is_enabled, mock_exists, mock_reachable):
         mock_exists.return_value = True
         mock_is_enabled.return_value = True
         mock_get_ip.return_value = "10.9.0.102"

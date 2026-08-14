@@ -547,6 +547,21 @@ def vpn_up(config_path):
 def vpn_down(config_path):
     print("TunnelSats WireGuard gateway inactive.")
 
+def check_gateway_reachable():
+    try:
+        if not os.path.exists(CONFIG_PATH):
+            return False
+        with open(CONFIG_PATH, "r") as f:
+            content = f.read()
+        match = re.search(r"^\s*(?!#|;)\s*Endpoint\s*=\s*([^\s#:]+):([0-9]+)", content, re.IGNORECASE | re.MULTILINE)
+        if not match:
+            return False
+        host, port = match.group(1), int(match.group(2))
+        addr_info = socket.getaddrinfo(host, port, socket.AF_UNSPEC, socket.SOCK_DGRAM)
+        return len(addr_info) > 0
+    except Exception:
+        return False
+
 def is_wireguard_running():
     try:
         return is_enabled() and os.path.exists(CONFIG_PATH) and get_wg_ip() is not None
@@ -567,6 +582,7 @@ def get_status():
     vpn_ip = get_wg_ip()
     port = DEFAULT_VPN_PORT
     server_domain = "Unknown"
+    is_reachable = check_gateway_reachable()
     try:
         if os.path.exists(CONFIG_PATH):
             with open(CONFIG_PATH, "r") as f:
@@ -579,9 +595,9 @@ def get_status():
         pass
         
     return {
-        "status": "running",
-        "vpn_connected": True,
-        "handshake": "active",
+        "status": "running" if is_reachable else "connecting",
+        "vpn_connected": is_reachable,
+        "handshake": "active" if is_reachable else "waiting",
         "vpn_ip": vpn_ip,
         "vpn_port": port,
         "server": server_domain
