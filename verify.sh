@@ -224,7 +224,7 @@ if [ -n "$SERVER" ] && [ "$SERVER" != "unknown" ] && [ -n "$VPN_PORT" ] && [ "$V
     if [ "$TARGET_PKG" == "lnd" ]; then
         echo "  start-cli package attach lnd -- lncli --rpcserver=127.0.0.1:10009 getinfo"
     else
-        echo "  start-cli package attach c-lightning -- lightning-cli getinfo"
+        echo "  start-cli package attach -i lightning c-lightning -- lightning-cli getinfo"
     fi
 else
     log_warn "Target announcement endpoint unconfigured or missing WireGuard port metadata."

@@ -99,7 +99,7 @@ Node operators can independently audit that their node's announced endpoints and
 start-cli package attach lnd -- lncli --rpcserver=127.0.0.1:10009 getinfo
 
 # For Core Lightning:
-start-cli package attach c-lightning -- lightning-cli getinfo
+start-cli package attach -i lightning c-lightning -- lightning-cli getinfo
 ```
 - **Verification**: Confirm the `uris` (LND) or `binding`/`address` (CLN) contains `<your_pubkey>@<tunnelsats_domain>:<vpn_port>`.
 
@@ -109,7 +109,7 @@ start-cli package attach c-lightning -- lightning-cli getinfo
 start-cli package attach lnd -- curl -6 -s --connect-timeout 5 https://api6.ipify.org
 
 # For Core Lightning:
-start-cli package attach c-lightning -- curl -6 -s --connect-timeout 5 https://api6.ipify.org
+start-cli package attach -i lightning c-lightning -- bash -c 'timeout 3 bash -c "exec 3<>/dev/tcp/api6.ipify.org/80" 2>/dev/null && echo "LEAK" || echo "BLOCKED"'
 ```
 - **Expected Output**: `Network unreachable` or connection timeout (when IPv6 Coexistence is OFF).
 - **Verification**: Confirms IPv6 traffic cannot leak your residential ISP location.

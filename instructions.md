@@ -36,8 +36,8 @@ To independently audit your node's outbound and inbound IP:
 
 - **LND Outbound IPv4**: `start-cli package attach lnd -- curl -s https://api.ipify.org`
 - **LND Outbound IPv6**: `start-cli package attach lnd -- curl -6 -s --connect-timeout 5 https://api6.ipify.org`
-- **Core Lightning Outbound IPv4**: `start-cli package attach c-lightning -- curl -s https://api.ipify.org`
-- **Core Lightning Outbound IPv6**: `start-cli package attach c-lightning -- curl -6 -s --connect-timeout 5 https://api6.ipify.org`
+- **Core Lightning Outbound IPv4**: `start-cli package attach -i lightning c-lightning -- bash -c 'exec 3<>/dev/tcp/api.ipify.org/80; printf "GET / HTTP/1.1\r\nHost: api.ipify.org\r\nConnection: close\r\n\r\n" >&3; cat <&3 | tail -n 1'`
+- **Core Lightning Outbound IPv6**: `start-cli package attach -i lightning c-lightning -- bash -c 'timeout 3 bash -c "exec 3<>/dev/tcp/api6.ipify.org/80" 2>/dev/null && echo "LEAK" || echo "BLOCKED"'`
 
 ## IPv6 & Privacy Policy
 
