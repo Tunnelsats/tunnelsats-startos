@@ -45,7 +45,7 @@ CONTAINER_NAME="tunnelsats.embassy"
 CONTAINER_ID=""
 SUDO_CMD=""
 
-if [ -f "/app/bridge.py" ] || [ -f "./bridge.py" ]; then
+if [ -f "/app/bridge.py" ]; then
     ENGINE="inside"
     log_info "Running diagnostic checks from inside the TunnelSats container namespace."
 else
@@ -57,7 +57,9 @@ else
     fi
 
     if [ "$EUID" -ne 0 ] && command -v sudo &> /dev/null; then
-        SUDO_CMD="sudo"
+        if sudo -n true 2>/dev/null; then
+            SUDO_CMD="sudo -n"
+        fi
     fi
 
     if [ "$ENGINE" != "none" ]; then
