@@ -7,7 +7,7 @@
 #
 # Usage:
 #   Inside container:  /app/verify.sh
-#   From StartOS host: start-cli package attach tunnelsats /app/verify.sh
+#   From StartOS host: ./verify.sh OR start-cli package attach tunnelsats /app/verify.sh
 # ==============================================================================
 
 set -euo pipefail
@@ -275,8 +275,11 @@ if command -v start-cli &>/dev/null && [ "$ENGINE" != "inside" ]; then
             else
                 log_info "Target node live IPv6 isolation: BLOCKED / UNROUTABLE (Protected ✅)"
             fi
-        else
+        elif [[ "$RAW_V6_OUTPUT" =~ "Network unreachable" ]] || [[ "$RAW_V6_OUTPUT" =~ "timed out" ]]; then
             log_info "Target node live IPv6 isolation: BLOCKED / UNROUTABLE (Protected ✅)"
+        else
+            log_error "Could not verify IPv6 isolation from ${TARGET_PKG} container."
+            FAILED_CHECKS=$((FAILED_CHECKS + 1))
         fi
     fi
 fi
