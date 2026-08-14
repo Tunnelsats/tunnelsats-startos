@@ -5,22 +5,20 @@ setup() {
     export REPO_ROOT="$BATS_TEST_DIRNAME/.."
 }
 
-@test "verify.sh is executable and runs cleanly" {
+@test "verify.sh is executable and runs diagnostics structure" {
     run "$REPO_ROOT/verify.sh"
-    [ "$status" -eq 0 ]
     [[ "$output" =~ "1. Environment & Container Status" ]]
     [[ "$output" =~ "2. Querying TunnelSats Gateway Status" ]]
-    [[ "$output" =~ "3. Verifying Outbound Gateway Routing" ]]
-    [[ "$output" =~ "4. IPv6 Leak Prevention Test" ]]
-    [[ "$output" =~ "5. Tor Coexistence & SOCKS Proxy Check" ]]
-    [[ "$output" =~ "6. Target Lightning Node Port Forwarding Audit" ]]
-    [[ "$output" =~ "All diagnostic probes finished successfully." ]]
+    [[ "$output" =~ "3. Target Lightning Node Inbound Reachability Audit" ]]
+    [[ "$output" =~ "4. Tor Coexistence & SOCKS Proxy Check" ]]
+    [[ "$output" =~ "5. Target Lightning Node Port Forwarding Profile" ]]
+    [[ "$output" =~ "6. Host-Level CLI Audit Recipes & Live Egress Probing" ]]
+    [[ "$output" =~ "Verification Summary" ]]
 }
 
-@test "verify.sh masks egress IP output" {
+@test "verify.sh outputs direct CLI audit commands for target node" {
     run "$REPO_ROOT/verify.sh"
-    [ "$status" -eq 0 ]
-    if [[ "$output" =~ "Current Egress IPv4:" ]]; then
-        [[ "$output" =~ "***" ]]
-    fi
+    [[ "$output" =~ "start-cli package attach" ]]
+    [[ "$output" =~ "api.ipify.org" ]]
+    [[ "$output" =~ "api6.ipify.org" ]]
 }

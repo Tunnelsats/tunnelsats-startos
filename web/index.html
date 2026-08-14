@@ -119,10 +119,10 @@
               </div>
             </div>
             <div class="prop-item">
-              <div class="prop-label">SOCKS5 Proxy (Outbound)</div>
+              <div class="prop-label">Outbound Policy Routing</div>
               <div class="prop-value-group">
-                <span class="prop-value" id="val-socks5">127.0.0.1:1080</span>
-                <button class="btn-copy" onclick="copyText('val-socks5', this)">
+                <span class="prop-value" id="val-routing">StartOS Native Gateway</span>
+                <button class="btn-copy" onclick="copyText('val-routing', this)">
                   Copy
                 </button>
               </div>
@@ -606,7 +606,7 @@
                 <strong>Real-Time Switching:</strong> You can switch between LND and Core Lightning at any time in ⚙ → Configure by selecting a different Target Lightning Node.
               </p>
               <p>
-                When you switch, TunnelSats updates its internal userspace router (<code>wireproxy</code>) in real-time. Inbound connections arriving on your TunnelSats VPN address are immediately re-routed to your newly selected target node without needing to reconfigure WireGuard keys or purchase a new subscription.
+                When you switch, TunnelSats updates StartOS native gateway routing in real-time. Inbound connections arriving on your TunnelSats VPN address are immediately re-routed to your newly selected target node without needing to reconfigure WireGuard keys or purchase a new subscription.
               </p>
             </div>
           </details>
@@ -663,11 +663,65 @@
                 <strong>No, TunnelSats is an IPv4-only WireGuard VPN service.</strong>
               </p>
               <p>
-                Because TunnelSats tunnels IPv4 traffic via userspace <code>wireproxy</code>, any IPv6 traffic or IPv6 address advertised on your Lightning node will route directly through your home internet service provider (ISP), bypassing TunnelSats completely.
+                Because TunnelSats provides an IPv4-only WireGuard tunnel, any IPv6 traffic or IPv6 address advertised on your Lightning node will route directly through your home internet service provider (ISP), bypassing TunnelSats completely.
               </p>
               <p>
                 <strong>Security Recommendation:</strong> Keep your Lightning node configured with IPv4 / Tor only to protect your home location. If you explicitly want dual-stack connectivity and accept revealing your home IPv6 address to peers, turn <strong>ON</strong> <em>Allow Home IPv6 Coexistence</em> under <strong>⚙ → Configure</strong>.
               </p>
+            </div>
+          </details>
+
+          <!-- Q10 -->
+          <details class="faq-item">
+            <summary class="faq-question">
+              How do I independently audit and verify my node's network endpoints via CLI?
+            </summary>
+            <div class="faq-answer">
+              <p>
+                You can independently audit your Lightning node's announced endpoints and active network interfaces directly from the StartOS host terminal using <code>start-cli</code>.
+              </p>
+              
+              <h4 style="color: var(--accent-bitcoin); font-size: 13.5px; margin-top: 14px; margin-bottom: 6px;">1. Inbound Lightning Gossip Announcement Audit</h4>
+              <p style="font-size: 12.5px; margin-bottom: 4px;">Confirm your node persistently announces your TunnelSats external domain and port to network peers:</p>
+              <div class="code-block-header">
+                <span>LND Announcement Check:</span>
+                <button class="btn-copy-code" onclick="copyCode('cli-lnd-info', this)">Copy</button>
+              </div>
+              <pre><code id="cli-lnd-info">start-cli package attach lnd -- lncli --rpcserver=127.0.0.1:10009 getinfo</code></pre>
+              <div class="code-block-header" style="margin-top: 8px;">
+                <span>Core Lightning Announcement Check:</span>
+                <button class="btn-copy-code" onclick="copyCode('cli-cln-info', this)">Copy</button>
+              </div>
+              <pre><code id="cli-cln-info">start-cli package attach -i lightning c-lightning -- lightning-cli getinfo</code></pre>
+              <p style="font-size: 11.5px; color: #8b949e; margin-top: 2px;">Expected result: The <code>uris</code> (LND) or <code>binding</code>/<code>address</code> (CLN) list contains <code>&lt;your_pubkey&gt;@<span class="highlight-ip">tunnelsats_ip</span>:<span class="highlight-port">tunnelsats_port</span></code>.</p>
+
+              <h4 style="color: var(--accent-bitcoin); font-size: 13.5px; margin-top: 14px; margin-bottom: 6px;">2. Target Node Outbound IPv4 Route Audit</h4>
+              <p style="font-size: 12.5px; margin-bottom: 4px;">Inspect the active IPv4 egress route used by your target node container:</p>
+              <div class="code-block-header">
+                <span>LND IPv4 Egress:</span>
+                <button class="btn-copy-code" onclick="copyCode('cli-lnd-v4', this)">Copy</button>
+              </div>
+              <pre><code id="cli-lnd-v4">start-cli package attach lnd -- curl -s https://api.ipify.org</code></pre>
+              <div class="code-block-header" style="margin-top: 8px;">
+                <span>Core Lightning IPv4 Egress:</span>
+                <button class="btn-copy-code" onclick="copyCode('cli-cln-v4', this)">Copy</button>
+              </div>
+              <pre><code id="cli-cln-v4">start-cli package attach -i lightning c-lightning -- bash -c 'exec 3<>/dev/tcp/api.ipify.org/80; printf "GET / HTTP/1.1\r\nHost: api.ipify.org\r\nConnection: close\r\n\r\n" >&3; cat <&3 | tail -n 1'</code></pre>
+              <p style="font-size: 11.5px; color: #8b949e; margin-top: 2px;">Expected result: Returns your numeric TunnelSats server IP (e.g. <code>83.228.229.56</code>) when WireGuard gateway routing is configured. If your residential IP is returned, outbound peer traffic is routing directly via your home connection.</p>
+
+              <h4 style="color: var(--accent-bitcoin); font-size: 13.5px; margin-top: 14px; margin-bottom: 6px;">3. Target Node IPv6 Isolation Audit</h4>
+              <p style="font-size: 12.5px; margin-bottom: 4px;">Verify whether IPv6 connectivity is unroutable or accessible:</p>
+              <div class="code-block-header">
+                <span>LND IPv6 Egress:</span>
+                <button class="btn-copy-code" onclick="copyCode('cli-lnd-v6', this)">Copy</button>
+              </div>
+              <pre><code id="cli-lnd-v6">start-cli package attach lnd -- curl -6 -s --connect-timeout 5 https://api6.ipify.org</code></pre>
+              <div class="code-block-header" style="margin-top: 8px;">
+                <span>Core Lightning IPv6 Egress:</span>
+                <button class="btn-copy-code" onclick="copyCode('cli-cln-v6', this)">Copy</button>
+              </div>
+              <pre><code id="cli-cln-v6">start-cli package attach -i lightning c-lightning -- bash -c 'timeout 3 bash -c "exec 3<>/dev/tcp/api6.ipify.org/80" 2>/dev/null && echo "LEAK" || echo "BLOCKED"'</code></pre>
+              <p style="font-size: 11.5px; color: #8b949e; margin-top: 2px;">Expected result when Allow IPv6 is OFF: <code>Network unreachable</code> or connection timeout.</p>
             </div>
           </details>
         </div>
