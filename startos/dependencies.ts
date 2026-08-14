@@ -6,6 +6,13 @@ import { parseWireguardTunnelInfo } from './utils'
 import { customExternalHostConfig } from 'lnd-startos/startos/actions/config/customExternalHost'
 import { config as clnConfigAction } from 'cln-startos/startos/actions/config/config'
 
+export interface TargetGatewayConfig {
+  targetPackage: 'lnd' | 'c-lightning'
+  clearPackage: 'lnd' | 'c-lightning'
+  gatewayName: string
+  announceEndpoint: string | null
+}
+
 export function getAnnounceEndpoint(
   wgConf: string | null | undefined,
   allowIpv6 = false,
@@ -56,6 +63,51 @@ export function getAnnounceEndpoint(
   return `${host}:${vpnPort}`
 }
 
+export function getTargetGatewayConfig(
+  config: {
+    enabled?: boolean
+    'target-node'?: 'lnd' | 'cln'
+    'tunnelsats-conf'?: string | null
+    'allow-ipv6'?: boolean
+  } | null | undefined,
+): TargetGatewayConfig | null {
+  if (!config?.enabled) return null
+
+  const targetNode = config['target-node'] === 'cln' ? 'cln' : 'lnd'
+  const targetPackage = targetNode === 'cln' ? 'c-lightning' : 'lnd'
+  const clearPackage = targetNode === 'cln' ? 'lnd' : 'c-lightning'
+  const announceEndpoint = getAnnounceEndpoint(
+    config['tunnelsats-conf'],
+    config['allow-ipv6'],
+  )
+
+  return {
+    targetPackage,
+    clearPackage,
+    gatewayName: 'tunnelsats',
+    announceEndpoint,
+  }
+}
+
+export function getGatewayTaskDetails(
+  targetPackage: 'lnd' | 'c-lightning',
+  announceEndpoint: string,
+) {
+  const isLnd = targetPackage === 'lnd'
+  return {
+    targetPackage,
+    clearTaskKey: isLnd
+      ? 'c-lightning:config'
+      : 'lnd:custom-external-host-config',
+    reason: i18n('Advertise TunnelSats VPN endpoint to the Lightning Network'),
+    input: {
+      kind: 'partial' as const,
+      accept: [{ 'custom-external-host': announceEndpoint }],
+      set: { 'custom-external-host': announceEndpoint },
+    },
+  }
+}
+
 export function getDependenciesForConfig(
   config: { enabled?: boolean; 'target-node'?: 'lnd' | 'cln' } | null | undefined,
 ) {
@@ -84,47 +136,40 @@ export function getDependenciesForConfig(
 
 export const setDependencies = sdk.setupDependencies(async ({ effects }) => {
   const config = await configJson.read().const(effects)
+  const gatewayConfig = getTargetGatewayConfig(config)
 
-  const announceEndpoint = getAnnounceEndpoint(
-    config?.['tunnelsats-conf'],
-    config?.['allow-ipv6'],
-  )
+  if (gatewayConfig && gatewayConfig.announceEndpoint) {
+    const taskDetails = getGatewayTaskDetails(
+      gatewayConfig.targetPackage,
+      gatewayConfig.announceEndpoint,
+    )
 
-  if (config?.enabled && announceEndpoint) {
-    if (config['target-node'] === 'lnd') {
+    if (gatewayConfig.targetPackage === 'lnd') {
       await sdk.action.createTask(
         effects,
         'lnd',
         customExternalHostConfig,
         'important',
         {
-          input: {
-            kind: 'partial',
-            accept: [{ 'custom-external-host': announceEndpoint }],
-            set: { 'custom-external-host': announceEndpoint },
-          },
+          input: taskDetails.input,
           when: { condition: 'input-not-matches', once: false },
-          reason: i18n('Advertise TunnelSats VPN endpoint to the Lightning Network'),
+          reason: taskDetails.reason,
         },
       )
-      await sdk.action.clearTask(effects, 'c-lightning:config')
-    } else if (config['target-node'] === 'cln') {
+      await sdk.action.clearTask(effects, taskDetails.clearTaskKey)
+    } else {
       await sdk.action.createTask(
         effects,
         'c-lightning',
         clnConfigAction,
         'important',
         {
-          input: {
-            kind: 'partial',
-            accept: [{ 'custom-external-host': announceEndpoint }],
-            set: { 'custom-external-host': announceEndpoint },
-          },
+          input: taskDetails.input,
           when: { condition: 'input-not-matches', once: false },
-          reason: i18n('Advertise TunnelSats VPN endpoint to the Lightning Network'),
+          reason: taskDetails.reason,
         },
       )
-      await sdk.action.clearTask(effects, 'lnd:custom-external-host-config')
+      await sdk.action.clearTask(effects, taskDetails.clearTaskKey)
     }
   } else {
     await sdk.action.clearTask(effects, 'lnd:custom-external-host-config')
