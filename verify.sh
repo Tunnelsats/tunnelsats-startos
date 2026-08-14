@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
 # ==============================================================================
-# TunnelSats StartOS 0.4.0 Diagnostic & Verification Tool
+# TunnelSats StartOS 0.4.0 Service Diagnostic Tool
 # ==============================================================================
-# Audits container namespace status, gateway reachability, target Lightning node
-# policy routing, IPv6 leak prevention, and port forwarding alignment.
+# Audits TunnelSats service container status, WireGuard gateway reachability,
+# target Lightning node inbound reachability (port 9735), and Tor connectivity.
 #
 # Usage:
-#   From StartOS host: ./verify.sh
 #   Inside container:  /app/verify.sh
+#   From StartOS host: start-cli package attach tunnelsats /app/verify.sh
 # ==============================================================================
 
 set -euo pipefail
@@ -110,6 +110,7 @@ VPN_IP=""
 VPN_PORT=""
 SERVER=""
 TARGET_HOST="lnd.embassy"
+TARGET_PORT="9735"
 ALLOW_IPV6="False"
 
 if [ -n "$API_DATA" ]; then
@@ -124,14 +125,15 @@ try:
     vpn_ip = raw.get('vpn_ip', raw.get('internal_octet', data.get('Internal IP (Last Octet)', {}).get('value', '')))
     vpn_port = raw.get('vpn_port', data.get('Forwarding Port', {}).get('value', ''))
     server = raw.get('server', raw.get('public_ip', data.get('TunnelSats Public IP', {}).get('value', '')))
-    target = raw.get('target_host', 'lnd.embassy')
+    target_h = raw.get('target_host', 'lnd.embassy')
+    target_p = str(raw.get('target_port', 9735))
     allow_v6 = str(raw.get('allow_ipv6', False))
-    print('|'.join([str(v) for v in [status, vpn_conn, handshake, vpn_ip, vpn_port, server, target, allow_v6]]))
+    print('|'.join([str(v) for v in [status, vpn_conn, handshake, vpn_ip, vpn_port, server, target_h, target_p, allow_v6]]))
 except Exception as e:
-    print('ERROR|||||||' + str(e))
+    print('ERROR||||||||' + str(e))
 " 2>/dev/null | tr -d '\r' || true)
     
-    IFS='|' read -r STATUS VPN_CONNECTED HANDSHAKE VPN_IP VPN_PORT SERVER TARGET_HOST ALLOW_IPV6 <<< "$PARSED_VALUES"
+    IFS='|' read -r STATUS VPN_CONNECTED HANDSHAKE VPN_IP VPN_PORT SERVER TARGET_HOST TARGET_PORT ALLOW_IPV6 <<< "$PARSED_VALUES"
     
     log_info "Gateway Status Properties:"
     echo "  - Status: ${STATUS:-unknown}"
@@ -150,65 +152,35 @@ else
     FAILED_CHECKS=$((FAILED_CHECKS + 1))
 fi
 
-# Determine target package identifier for CLI commands
 TARGET_PKG="lnd"
 if [[ "$TARGET_HOST" =~ "c-lightning" ]] || [[ "$TARGET_HOST" =~ "cln" ]]; then
     TARGET_PKG="c-lightning"
 fi
 
-RESOLVED_SERVER_IP=""
-if [ -n "$SERVER" ] && [ "$SERVER" != "unknown" ]; then
-    RESOLVED_SERVER_IP=$(python3 -c "import socket; print(socket.gethostbyname('$SERVER'))" 2>/dev/null || true)
-fi
+# 3. Target Lightning Node Inbound Reachability Audit
+log_step "3. Target Lightning Node Inbound Reachability Audit"
+log_info "Testing internal TCP reachability to target node: ${TARGET_HOST}:${TARGET_PORT}"
 
-# 3. Target Node Policy Routing & Egress Audit
-log_step "3. Target Node Policy Routing & Egress Audit"
-log_info "Target Lightning Node: ${TARGET_PKG} (${TARGET_HOST})"
-log_info "Direct CLI Audit Command (run on StartOS host):"
-echo "  start-cli package attach ${TARGET_PKG} -- curl -s https://api.ipify.org"
-if [ -n "$RESOLVED_SERVER_IP" ]; then
-    echo "  (Expected Output: ${RESOLVED_SERVER_IP} / ${SERVER})"
-fi
-
-# Execute live probe if start-cli is available on the running host
-if command -v start-cli &>/dev/null && [ "$ENGINE" != "inside" ]; then
-    log_info "Probing live outbound IPv4 egress for ${TARGET_PKG} via start-cli..."
-    TARGET_EGRESS=$(start-cli package attach "$TARGET_PKG" -- curl -s --connect-timeout 5 https://api.ipify.org 2>/dev/null || true)
-    if [ -n "$TARGET_EGRESS" ]; then
-        if [ "$TARGET_EGRESS" == "$RESOLVED_SERVER_IP" ] || [ "$TARGET_EGRESS" == "$SERVER" ]; then
-            log_info "Target Node Outbound IPv4: $TARGET_EGRESS (Matches TunnelSats VPN server ✅)"
-        else
-            log_error "Target Node Outbound IPv4 ($TARGET_EGRESS) differs from TunnelSats server (${RESOLVED_SERVER_IP:-$SERVER})."
-            FAILED_CHECKS=$((FAILED_CHECKS + 1))
-        fi
-    fi
-fi
-
-# 4. IPv6 Leak Prevention Policy & Audit
-log_step "4. IPv6 Leak Prevention Policy & Audit"
-if [ "$ALLOW_IPV6" == "True" ]; then
-    log_warn "Allow Home IPv6 Coexistence is ENABLED."
-    log_warn "Dual-stack IPv6 connections bypass the VPN and connect directly over your home ISP connection."
+LN_REACHABLE="false"
+if python3 -c "
+import socket
+s = socket.socket()
+s.settimeout(3)
+try:
+    s.connect(('$TARGET_HOST', int('$TARGET_PORT')))
+    s.close()
+    exit(0)
+except Exception:
+    exit(1)
+" 2>/dev/null; then
+    LN_REACHABLE="true"
+    log_info "Target Lightning node is listening on ${TARGET_HOST}:${TARGET_PORT} (Inbound Ready ✅)"
 else
-    log_info "Allow Home IPv6 Coexistence is DISABLED (default)."
-    log_info "Direct CLI Audit Command (run on StartOS host):"
-    echo "  start-cli package attach ${TARGET_PKG} -- curl -6 -s --connect-timeout 5 https://api6.ipify.org"
-    echo "  (Expected Output: Network unreachable / Timeout)"
-    
-    if command -v start-cli &>/dev/null && [ "$ENGINE" != "inside" ]; then
-        log_info "Testing IPv6 isolation for ${TARGET_PKG} container..."
-        TARGET_V6=$(start-cli package attach "$TARGET_PKG" -- curl -6 -s --connect-timeout 5 https://api6.ipify.org 2>/dev/null || true)
-        if [ -n "$TARGET_V6" ]; then
-            log_error "Target node IPv6 is ACTIVE and leaking home ISP address: $TARGET_V6"
-            FAILED_CHECKS=$((FAILED_CHECKS + 1))
-        else
-            log_info "Target node IPv6 isolation: BLOCKED / UNROUTABLE (Protected ✅)"
-        fi
-    fi
+    log_warn "Target Lightning node (${TARGET_HOST}:${TARGET_PORT}) is currently unreachable or starting up."
 fi
 
-# 5. Tor Coexistence & SOCKS Proxy Check
-log_step "5. Tor Coexistence & SOCKS Proxy Check"
+# 4. Tor Coexistence & SOCKS Proxy Check
+log_step "4. Tor Coexistence & SOCKS Proxy Check"
 TOR_FOUND=false
 for tor_host in "tor.embassy" "127.0.0.1" "localhost"; do
     if python3 -c "
@@ -236,12 +208,12 @@ if [ "$TOR_FOUND" = false ]; then
     fi
 fi
 
-# 6. Target Lightning Node Port Forwarding Audit
-log_step "6. Target Lightning Node Port Forwarding Audit"
+# 5. Target Lightning Node Port Forwarding Profile
+log_step "5. Target Lightning Node Port Forwarding Profile"
 if [ -n "$SERVER" ] && [ "$SERVER" != "unknown" ] && [ -n "$VPN_PORT" ] && [ "$VPN_PORT" != "unknown" ]; then
     log_info "Target Node Announcement Profile: ${SERVER}:${VPN_PORT}"
     log_info "Lightning peer connection string: <your_node_pubkey>@${SERVER}:${VPN_PORT}"
-    echo -e "\n  To verify announced URIs on your Lightning node:"
+    echo -e "\n  To verify announced URIs on your Lightning node (run on StartOS host):"
     if [ "$TARGET_PKG" == "lnd" ]; then
         echo "  start-cli package attach lnd -- lncli getinfo"
     else
@@ -252,10 +224,23 @@ else
     FAILED_CHECKS=$((FAILED_CHECKS + 1))
 fi
 
+# 6. Host-Level CLI Audit Recipes
+log_step "6. Host-Level CLI Audit Recipes"
+log_info "Target Lightning Node: ${TARGET_PKG} (${TARGET_HOST})"
+if [ "$ALLOW_IPV6" == "True" ]; then
+    log_warn "Allow Home IPv6 Coexistence is ENABLED (IPv6 connections route via home ISP)."
+else
+    log_info "Allow Home IPv6 Coexistence is DISABLED (default IPv6 gossip suppression)."
+fi
+
+echo -e "\n  Run these commands on the StartOS host to independently audit target node traffic:"
+echo "  1. Audit Target Outbound IPv4:  start-cli package attach ${TARGET_PKG} -- curl -s https://api.ipify.org"
+echo "  2. Audit Target IPv6 Isolation: start-cli package attach ${TARGET_PKG} -- curl -6 -s --connect-timeout 5 https://api6.ipify.org"
+
 # Summary
 log_step "Verification Summary"
 if [ $FAILED_CHECKS -eq 0 ]; then
-    log_info "All diagnostic probes finished successfully."
+    log_info "TunnelSats service diagnostics and endpoint verification completed successfully."
     exit 0
 else
     log_error "Diagnostic audit completed with $FAILED_CHECKS failure(s)."
