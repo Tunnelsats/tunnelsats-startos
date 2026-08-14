@@ -27,6 +27,8 @@ log_step() {
     echo -e "\n${BOLD}${BLUE}==>${NC} ${BOLD}$1${NC}"
 }
 
+FAILED_CHECKS=0
+
 # Check non-interactive privilege escalation
 SUDO_CMD=""
 if [ "$EUID" -ne 0 ] && command -v sudo &>/dev/null; then
@@ -67,31 +69,50 @@ API_DATA=""
 if [ "$ENGINE" != "inside" ] && [ -n "$CONTAINER_ID" ]; then
     API_DATA=$($SUDO_CMD $ENGINE exec -i $CONTAINER_NAME python3 -c "
 import urllib.request, json
-req = urllib.request.Request('http://127.0.0.1/api/status', headers={'Host': 'localhost'})
-try:
-    with urllib.request.urlopen(req, timeout=5) as r:
-        print(r.read().decode('utf-8'))
-except Exception as e:
-    pass
+for path in ['/api/status', '/api/properties']:
+    try:
+        req = urllib.request.Request('http://127.0.0.1' + path, headers={'Host': 'localhost'})
+        with urllib.request.urlopen(req, timeout=5) as r:
+            print(r.read().decode('utf-8'))
+            break
+    except Exception:
+        continue
 " 2>/dev/null | tr -d '\r' || true)
 else
     API_DATA=$(python3 -c "
 import urllib.request, json
-req = urllib.request.Request('http://127.0.0.1/api/status', headers={'Host': 'localhost'})
-try:
-    with urllib.request.urlopen(req, timeout=5) as r:
-        print(r.read().decode('utf-8'))
-except Exception:
-    pass
+for path in ['/api/status', '/api/properties']:
+    try:
+        req = urllib.request.Request('http://127.0.0.1' + path, headers={'Host': 'localhost'})
+        with urllib.request.urlopen(req, timeout=5) as r:
+            print(r.read().decode('utf-8'))
+            break
+    except Exception:
+        continue
 " 2>/dev/null | tr -d '\r' || true)
 fi
+
+STATUS="unknown"
+VPN_CONNECTED="unknown"
+HANDSHAKE="unknown"
+VPN_IP=""
+VPN_PORT=""
+SERVER=""
 
 if [ -n "$API_DATA" ]; then
     PARSED_VALUES=$(printf '%s\n' "$API_DATA" | python3 -c "
 import json, sys
 try:
-    data = json.load(sys.stdin)
-    print('|'.join([str(data.get(k, '')) for k in ['status', 'vpn_connected', 'handshake', 'vpn_ip', 'vpn_port', 'server']]))
+    raw = json.load(sys.stdin)
+    # Handle both /api/status dict and StartOS properties dict format
+    data = raw.get('data', raw)
+    status = raw.get('status', 'running' if raw.get('enabled', False) else 'stopped')
+    vpn_conn = raw.get('vpn_connected', True if raw.get('enabled', False) else False)
+    handshake = raw.get('handshake', 'active' if vpn_conn else 'none')
+    vpn_ip = raw.get('vpn_ip', data.get('Internal IP (Last Octet)', {}).get('value', ''))
+    vpn_port = raw.get('vpn_port', data.get('Forwarding Port', {}).get('value', ''))
+    server = raw.get('server', data.get('TunnelSats Public IP', {}).get('value', ''))
+    print('|'.join([str(v) for v in [status, vpn_conn, handshake, vpn_ip, vpn_port, server]]))
 except Exception as e:
     print('ERROR|||||' + str(e))
 " 2>/dev/null | tr -d '\r' || true)
@@ -106,7 +127,7 @@ except Exception as e:
     echo "  - Forwarded Port: ${VPN_PORT:-unknown}"
     echo "  - Server: ${SERVER:-unknown}"
 else
-    log_warn "Could not retrieve /api/status. Web server may be initializing or unconfigured."
+    log_warn "Could not retrieve /api/status or /api/properties. Web server may be initializing or unconfigured."
 fi
 
 # 3. Outbound Egress Verification
@@ -128,32 +149,62 @@ for ep in endpoints:
         continue
 " 2>/dev/null | tr -d '\r' || true)
 
+RAW_EGRESS_IP=""
+MASKED_EGRESS_IP=""
 if [ -n "$EGRESS_INFO" ]; then
     IFS='|' read -r RAW_EGRESS_IP MASKED_EGRESS_IP <<< "$EGRESS_INFO"
     log_info "Current Egress IPv4: $MASKED_EGRESS_IP"
+    
+    if [ -n "$SERVER" ] && [ "$SERVER" != "unknown" ]; then
+        RESOLVED_SERVER_IP=$(python3 -c "import socket; print(socket.gethostbyname('$SERVER'))" 2>/dev/null || true)
+        if [ "$RAW_EGRESS_IP" == "$SERVER" ] || [ "$RAW_EGRESS_IP" == "$RESOLVED_SERVER_IP" ]; then
+            log_info "Datapath Verification: Outbound alignment is CORRECT (matches VPN gateway IP ✅)."
+        else
+            log_warn "Outbound IP ($MASKED_EGRESS_IP) differs from configured TunnelSats server ($SERVER)."
+            log_warn "Note: Diagnostic script runs in local namespace. Verify policy routing on target Lightning container."
+        fi
+    fi
 else
     log_warn "Outbound IPv4 probe timed out or network offline."
 fi
 
 # 4. IPv6 Leak Detection Test
 log_step "4. IPv6 Leak Prevention Test"
-IPV6_EGRESS=$(python3 -c "
-import urllib.request, socket
+IPV6_STATUS=$(python3 -c "
+import socket, urllib.request, urllib.error
+# 1. Test IPv6 socket route existence
+has_ipv6_route = False
 try:
-    req = urllib.request.Request('https://api64.ipify.org', headers={'User-Agent': 'curl/8.0'})
-    with urllib.request.urlopen(req, timeout=3) as resp:
-        ip = resp.read().decode('utf-8').strip()
-        if ':' in ip:
-            print('LEAK')
-except Exception:
-    print('BLOCKED')
-" 2>/dev/null | tr -d '\r' || echo "BLOCKED")
+    s = socket.socket(socket.AF_INET6, socket.SOCK_DGRAM)
+    s.connect(('2606:4700:4700::1111', 53)) # Cloudflare DNS IPv6
+    has_ipv6_route = True
+    s.close()
+except OSError:
+    pass
 
-if [ "$IPV6_EGRESS" == "LEAK" ]; then
+if not has_ipv6_route:
+    print('UNROUTABLE')
+else:
+    # 2. Test actual WAN probe
+    try:
+        req = urllib.request.Request('https://api64.ipify.org', headers={'User-Agent': 'curl/8.0'})
+        with urllib.request.urlopen(req, timeout=3) as resp:
+            ip = resp.read().decode('utf-8').strip()
+            if ':' in ip:
+                print('LEAK')
+            else:
+                print('IPV4_FALLBACK')
+    except Exception:
+        print('UNVERIFIED')
+" 2>/dev/null | tr -d '\r' || echo "UNROUTABLE")
+
+if [ "$IPV6_STATUS" == "LEAK" ]; then
     log_warn "IPv6 WAN egress is ACTIVE."
     log_warn "Ensure 'Allow Home IPv6 Coexistence' is disabled in TunnelSats config if you want zero ISP IP exposure."
+elif [ "$IPV6_STATUS" == "UNROUTABLE" ] || [ "$IPV6_STATUS" == "IPV4_FALLBACK" ]; then
+    log_info "IPv6 WAN egress is blocked/unroutable. (Zero residential IPv6 leak verified ✅)"
 else
-    log_info "IPv6 egress is blocked/unroutable. (Zero residential IPv6 leak verified ✅)"
+    log_warn "IPv6 connectivity check was unverified (endpoint unreachable or probe timed out)."
 fi
 
 # 5. Tor Coexistence Audit
