@@ -132,7 +132,7 @@ fi
 
 # 3. Outbound Egress Verification
 log_step "3. Verifying Outbound Gateway Routing"
-EGRESS_INFO=$(python3 -c "
+PROBE_CODE="
 import urllib.request
 endpoints = ['https://api.ipify.org', 'https://ipinfo.io/ip', 'https://icanhazip.com']
 for ep in endpoints:
@@ -147,7 +147,14 @@ for ep in endpoints:
                 break
     except Exception:
         continue
-" 2>/dev/null | tr -d '\r' || true)
+"
+
+EGRESS_INFO=""
+if [ "$ENGINE" != "inside" ] && [ -n "$CONTAINER_ID" ]; then
+    EGRESS_INFO=$($SUDO_CMD $ENGINE exec -i $CONTAINER_NAME python3 -c "$PROBE_CODE" 2>/dev/null | tr -d '\r' || true)
+else
+    EGRESS_INFO=$(python3 -c "$PROBE_CODE" 2>/dev/null | tr -d '\r' || true)
+fi
 
 RAW_EGRESS_IP=""
 MASKED_EGRESS_IP=""
@@ -161,10 +168,7 @@ if [ -n "$EGRESS_INFO" ]; then
             log_info "Datapath Verification: Outbound alignment is CORRECT (matches VPN gateway IP ✅)."
         else
             log_warn "Outbound IP ($MASKED_EGRESS_IP) differs from configured TunnelSats server ($SERVER)."
-            log_warn "Note: If running on the host rather than inside the target Lightning container, this is normal for split-routing."
-            if [ "$ENGINE" == "inside" ]; then
-                FAILED_CHECKS=$((FAILED_CHECKS + 1))
-            fi
+            FAILED_CHECKS=$((FAILED_CHECKS + 1))
         fi
     fi
 else
@@ -173,7 +177,7 @@ fi
 
 # 4. IPv6 Leak Prevention Test
 log_step "4. IPv6 Leak Prevention Test"
-IPV6_STATUS=$(python3 -c "
+IPV6_PROBE_CODE="
 import socket, urllib.request, urllib.error
 # 1. Test IPv6 socket route existence
 has_ipv6_route = False
@@ -197,15 +201,21 @@ else:
                 print('LEAK')
             else:
                 print('UNVERIFIED')
-    except urllib.error.URLError:
-        print('UNROUTABLE')
     except Exception:
         print('UNVERIFIED')
-" 2>/dev/null | tr -d '\r' || echo "UNROUTABLE")
+"
+
+IPV6_STATUS=""
+if [ "$ENGINE" != "inside" ] && [ -n "$CONTAINER_ID" ]; then
+    IPV6_STATUS=$($SUDO_CMD $ENGINE exec -i $CONTAINER_NAME python3 -c "$IPV6_PROBE_CODE" 2>/dev/null | tr -d '\r' || echo "UNROUTABLE")
+else
+    IPV6_STATUS=$(python3 -c "$IPV6_PROBE_CODE" 2>/dev/null | tr -d '\r' || echo "UNROUTABLE")
+fi
 
 if [ "$IPV6_STATUS" == "LEAK" ]; then
     log_warn "IPv6 WAN egress is ACTIVE."
     log_warn "Ensure 'Allow Home IPv6 Coexistence' is disabled in TunnelSats config if you want zero ISP IP exposure."
+    FAILED_CHECKS=$((FAILED_CHECKS + 1))
 elif [ "$IPV6_STATUS" == "UNROUTABLE" ]; then
     log_info "IPv6 WAN egress is blocked/unroutable. (Zero residential IPv6 leak verified ✅)"
 else
