@@ -10,7 +10,7 @@
    - Open **TunnelSats** in your StartOS Dashboard.
    - Click **Configure** in the left navigation.
    - Select your **Target Lightning Node** (`LND` or `Core Lightning`).
-   - Paste the complete contents of your `.conf` file into **WireGuard Configuration** (ensure `# VPNPort: XXXXX` is present).
+   - Paste the complete contents of your `.conf` file into **WireGuard Configuration** (ensure `# Port Forwarding: XXXXX` or `# VPNPort: XXXXX` is present).
    - Set **Enable TunnelSats** to **ON** and click **Save**.
 
 3. **Advertise Endpoint to Lightning Network**:
@@ -27,7 +27,7 @@
      - Core Lightning will persistently advertise this endpoint alongside your Tor address.
 
 4. **Verify Health**:
-   - Check the **Health Checks** tab in TunnelSats to confirm **VPN Connectivity** and **SOCKS5 Proxy** are active.
+   - Check the **Health Checks** tab in TunnelSats to confirm **Web Dashboard** and **VPN Gateway Status** are active.
    - Open the **Web Dashboard** to monitor live tunnel statistics and subscription expiration.
 
 ## IPv6 & Privacy Policy

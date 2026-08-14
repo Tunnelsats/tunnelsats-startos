@@ -374,7 +374,8 @@ class DashboardHTTPRequestHandler(BaseHTTPRequestHandler):
                 "target_port": target_port,
                 "vpn_port": vpn_port,
                 "public_ip": public_ip,
-                "socks5_port": 1080,
+                "server": public_ip,
+                "vpn_ip": wg_ip,
                 "internal_octet": internal_octet
             }
             self.wfile.write(json.dumps(response).encode("utf-8"))
