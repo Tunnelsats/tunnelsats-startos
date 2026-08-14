@@ -26,9 +26,18 @@
      - Enter your TunnelSats domain and port (e.g. `ch1.tunnelsats.com:24556`) into the **Custom External Host** field and click **Submit**.
      - Core Lightning will persistently advertise this endpoint alongside your Tor address.
 
-4. **Verify Health**:
+4. **Verify Health & Route Status**:
    - Check the **Health Checks** tab in TunnelSats to confirm **Web Dashboard** and **VPN Gateway Status** are active.
    - Open the **Web Dashboard** to monitor live tunnel statistics and subscription expiration.
+
+## Independent Verification (CLI)
+
+To independently audit your node's outbound and inbound IP:
+
+- **LND Outbound IPv4**: `start-cli package attach lnd -- curl -s https://api.ipify.org`
+- **LND Outbound IPv6**: `start-cli package attach lnd -- curl -6 -s --connect-timeout 5 https://api6.ipify.org`
+- **Core Lightning Outbound IPv4**: `start-cli package attach c-lightning -- curl -s https://api.ipify.org`
+- **Core Lightning Outbound IPv6**: `start-cli package attach c-lightning -- curl -6 -s --connect-timeout 5 https://api6.ipify.org`
 
 ## IPv6 & Privacy Policy
 

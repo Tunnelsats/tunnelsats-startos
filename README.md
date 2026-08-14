@@ -29,7 +29,7 @@ TunnelSats provides **privacy-preserving clearnet connectivity**:
 
 ## 🚀 Key StartOS 0.4.0 Features
 
-- **StartOS 0.4.0 Native Gateway Support**: Zero userspace SOCKS proxy overhead. Direct integration with StartOS 0.4.0 outbound gateway routing for target Lightning containers (`lnd` or `c-lightning`).
+- **StartOS 0.4.0 Native Gateway Support**: Zero userspace proxy overhead. Direct integration with StartOS 0.4.0 outbound gateway routing for target Lightning containers (`lnd` or `c-lightning`).
 - **In-App Web Dashboard**: Manage and verify your connection, inspect live WireGuard handshake status, and monitor subscription duration via a sleek, responsive UI on port 80.
 - **Automated 1-Click Cross-Service Tasks**: Automatically generates a native StartOS 1-Click UI Task prompting you to advertise your TunnelSats external announce endpoint on LND or Core Lightning.
 - **Dynamic Dependency Management**: Dynamically mounts and requires either `lnd` or `c-lightning` based on user selection.
@@ -92,6 +92,48 @@ StartOS 0.4.0 isolates services into subcontainers and manages network routing:
 
 ---
 
+## 🔒 Independent Egress & Ingress Security Audit (CLI)
+
+Node operators can independently audit that all inbound and outbound traffic routes securely via TunnelSats:
+
+### 1. LND Outbound IPv4 Egress Audit
+```bash
+start-cli package attach lnd -- curl -s https://api.ipify.org
+```
+- **Expected Output**: Your TunnelSats VPN IP (e.g. `83.228.229.56`).
+- **Verification**: Confirms LND is policy-routed through the WireGuard tunnel and your home IPv4 address is protected.
+
+### 2. LND Outbound IPv6 Isolation Audit
+```bash
+start-cli package attach lnd -- curl -6 -s --connect-timeout 5 https://api6.ipify.org
+```
+- **Expected Output**: `Network unreachable` or connection timeout (when IPv6 Coexistence is OFF).
+- **Verification**: Confirms IPv6 traffic cannot leak your residential ISP location.
+
+### 3. Core Lightning (CLN) Outbound IPv4 Egress Audit
+```bash
+start-cli package attach c-lightning -- curl -s https://api.ipify.org
+```
+- **Expected Output**: Your TunnelSats VPN IP (e.g. `83.228.229.56`).
+
+### 4. Core Lightning (CLN) Outbound IPv6 Isolation Audit
+```bash
+start-cli package attach c-lightning -- curl -6 -s --connect-timeout 5 https://api6.ipify.org
+```
+- **Expected Output**: `Network unreachable` or connection timeout.
+
+### 5. Inbound Lightning Announcement Audit
+```bash
+# For LND:
+start-cli package attach lnd -- lncli getinfo
+
+# For Core Lightning:
+start-cli package attach c-lightning -- lightning-cli getinfo
+```
+- **Verification**: Confirm the `uris` (LND) or `binding`/`address` (CLN) contains `<your_pubkey>@<tunnelsats_domain>:<vpn_port>`.
+
+---
+
 ## 🌐 IPv6 Privacy Note
 
 TunnelSats provides an **IPv4-only** WireGuard VPN tunnel. It does not route IPv6 traffic through the VPN. By default, the package filters out IPv6 addresses from automated announcement tasks. If you enable **Allow Home IPv6 Coexistence**, IPv6 endpoints can be advertised, which will connect directly over your home ISP connection rather than the VPN tunnel.
@@ -100,7 +142,7 @@ TunnelSats provides an **IPv4-only** WireGuard VPN tunnel. It does not route IPv
 
 ## 🔍 Diagnostic & Verification Tool
 
-The package includes a built-in diagnostic tool [`verify.sh`](verify.sh) to test all routing layers:
+The package includes a built-in diagnostic tool [`verify.sh`](verify.sh) to inspect status properties:
 
 ```bash
 # Run verification inside the TunnelSats container namespace:
@@ -108,9 +150,9 @@ start-cli package attach tunnelsats /app/verify.sh
 ```
 
 **Diagnostic Probes Performed**:
-- Gateway API status & handshake verification.
-- Outbound IPv4 egress verification (with privacy-preserving IP masking).
-- Active IPv6 leak prevention audit.
+- Gateway API status & WireGuard handshake verification.
+- Target Lightning node policy routing and CLI audit recipe generation.
+- IPv6 coexistence policy audit.
 - Tor proxy coexistence audit.
 - Target Lightning node announcement verification.
 
