@@ -1,10 +1,10 @@
 import { IMPOSSIBLE, VersionInfo } from '@start9labs/start-sdk'
 
 export const current = VersionInfo.of({
-  version: '0.4.0:2',
+  version: '0.4.0:3',
   releaseNotes: {
     en_US:
-      'Adds IPv6 guardrails and opt-in coexistence setting, 1-Click UI Tasks for LND and Core Lightning, reactive dependency resolution, and dashboard privacy warnings.',
+      'Overhauls diagnostics tool (verify.sh) with live target reachability and egress checks, adds dedicated FAQ Q10 with interactive CLI verification recipes, and syncs StartOS 0.4.0 native gateway architecture documentation.',
   },
   migrations: {
     up: async ({ effects }) => {},
