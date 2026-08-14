@@ -3,11 +3,10 @@
 # TunnelSats StartOS 0.4.0 Diagnostic & Verification Tool
 # ==============================================================================
 # Audits container namespace status, gateway reachability, target Lightning node
-# configuration, IPv6 leak prevention policy, and port forwarding alignment.
+# policy routing, IPv6 leak prevention, and port forwarding alignment.
 #
 # Usage:
-#   Inside container:  /app/verify.sh
-#   From StartOS host: start-cli package attach tunnelsats /app/verify.sh
+#   From StartOS host: ./verify.sh OR start-cli package attach tunnelsats /app/verify.sh
 # ==============================================================================
 
 set -euo pipefail
@@ -156,40 +155,59 @@ if [[ "$TARGET_HOST" =~ "c-lightning" ]] || [[ "$TARGET_HOST" =~ "cln" ]]; then
     TARGET_PKG="c-lightning"
 fi
 
-# 3. Target Node Policy Routing & Egress Audit Guide
-log_step "3. Target Node Policy Routing & Egress Audit"
-log_info "StartOS 0.4.0 kernel policy routing directs all outbound traffic from your Lightning node through the WireGuard interface (wg0)."
-log_info "Target Lightning Node: ${TARGET_PKG} (${TARGET_HOST})"
-
 RESOLVED_SERVER_IP=""
 if [ -n "$SERVER" ] && [ "$SERVER" != "unknown" ]; then
     RESOLVED_SERVER_IP=$(python3 -c "import socket; print(socket.gethostbyname('$SERVER'))" 2>/dev/null || true)
 fi
 
-echo -e "\n  ${BLUE}Direct CLI Audit Commands (Run on StartOS host):${NC}"
-echo -e "  ---------------------------------------------------------"
-echo -e "  ${GREEN}1. Audit Outbound IPv4 Egress:${NC}"
-echo -e "     start-cli package attach ${TARGET_PKG} -- curl -s https://api.ipify.org"
-if [ -n "$RESOLVED_SERVER_IP" ]; then
-    echo -e "     (Expected Output: ${RESOLVED_SERVER_IP} / ${SERVER})"
-fi
+# 3. Target Node Policy Routing & Egress Audit
+log_step "3. Target Node Policy Routing & Egress Audit"
+log_info "Target Lightning Node: ${TARGET_PKG} (${TARGET_HOST})"
 
-echo -e "\n  ${GREEN}2. Audit Outbound IPv6 Isolation:${NC}"
-echo -e "     start-cli package attach ${TARGET_PKG} -- curl -6 -s --connect-timeout 5 https://api6.ipify.org"
-if [ "$ALLOW_IPV6" == "True" ]; then
-    echo -e "     (Allow IPv6 is ON: Expected Output: <Home_ISP_IPv6>)"
+# Check if host start-cli is available to perform live probe
+if command -v start-cli &>/dev/null && [ "$ENGINE" != "inside" ]; then
+    log_info "Probing live outbound IPv4 egress for ${TARGET_PKG} via start-cli..."
+    TARGET_EGRESS=$(start-cli package attach "$TARGET_PKG" -- curl -s --connect-timeout 5 https://api.ipify.org 2>/dev/null || true)
+    if [ -n "$TARGET_EGRESS" ]; then
+        if [ "$TARGET_EGRESS" == "$RESOLVED_SERVER_IP" ] || [ "$TARGET_EGRESS" == "$SERVER" ]; then
+            log_info "Target Node Outbound IPv4: $TARGET_EGRESS (Matches TunnelSats VPN server ✅)"
+        else
+            log_warn "Target Node Outbound IPv4 ($TARGET_EGRESS) differs from TunnelSats server (${RESOLVED_SERVER_IP:-$SERVER})."
+            FAILED_CHECKS=$((FAILED_CHECKS + 1))
+        fi
+    else
+        log_warn "Could not probe outbound IPv4 from ${TARGET_PKG} container."
+        FAILED_CHECKS=$((FAILED_CHECKS + 1))
+    fi
 else
-    echo -e "     (Allow IPv6 is OFF: Expected Output: Network unreachable / Timeout)"
+    log_info "Direct CLI Audit Command (run on StartOS host):"
+    echo "  start-cli package attach ${TARGET_PKG} -- curl -s https://api.ipify.org"
+    if [ -n "$RESOLVED_SERVER_IP" ]; then
+        echo "  (Expected Output: ${RESOLVED_SERVER_IP} / ${SERVER})"
+    fi
 fi
 
-# 4. IPv6 Leak Prevention Policy
-log_step "4. IPv6 Leak Prevention Policy"
+# 4. IPv6 Leak Prevention Policy & Audit
+log_step "4. IPv6 Leak Prevention Policy & Audit"
 if [ "$ALLOW_IPV6" == "True" ]; then
     log_warn "Allow Home IPv6 Coexistence is ENABLED."
     log_warn "Dual-stack IPv6 connections bypass the VPN and connect directly over your home ISP connection."
 else
     log_info "Allow Home IPv6 Coexistence is DISABLED (default)."
-    log_info "IPv6 addresses are excluded from gossip announcement tasks to protect your home privacy."
+    if command -v start-cli &>/dev/null && [ "$ENGINE" != "inside" ]; then
+        log_info "Testing IPv6 isolation for ${TARGET_PKG} container..."
+        TARGET_V6=$(start-cli package attach "$TARGET_PKG" -- curl -6 -s --connect-timeout 5 https://api6.ipify.org 2>/dev/null || true)
+        if [ -n "$TARGET_V6" ]; then
+            log_error "Target node IPv6 is ACTIVE and leaking home ISP address: $TARGET_V6"
+            FAILED_CHECKS=$((FAILED_CHECKS + 1))
+        else
+            log_info "Target node IPv6 isolation: BLOCKED / UNROUTABLE (Protected ✅)"
+        fi
+    else
+        log_info "Direct CLI Audit Command (run on StartOS host):"
+        echo "  start-cli package attach ${TARGET_PKG} -- curl -6 -s --connect-timeout 5 https://api6.ipify.org"
+        echo "  (Expected Output: Network unreachable / Timeout)"
+    fi
 fi
 
 # 5. Tor Coexistence & SOCKS Proxy Check
@@ -226,11 +244,11 @@ log_step "6. Target Lightning Node Port Forwarding Audit"
 if [ -n "$SERVER" ] && [ "$SERVER" != "unknown" ] && [ -n "$VPN_PORT" ] && [ "$VPN_PORT" != "unknown" ]; then
     log_info "Target Node Announcement Profile: ${SERVER}:${VPN_PORT}"
     log_info "Lightning peer connection string: <your_node_pubkey>@${SERVER}:${VPN_PORT}"
-    echo -e "\n  ${BLUE}To verify announced URIs on your Lightning node:${NC}"
+    echo -e "\n  To verify announced URIs on your Lightning node:"
     if [ "$TARGET_PKG" == "lnd" ]; then
-        echo -e "  start-cli package attach lnd -- lncli getinfo"
+        echo "  start-cli package attach lnd -- lncli getinfo"
     else
-        echo -e "  start-cli package attach c-lightning -- lightning-cli getinfo"
+        echo "  start-cli package attach c-lightning -- lightning-cli getinfo"
     fi
 else
     log_warn "Target announcement endpoint unconfigured or missing WireGuard port metadata."
