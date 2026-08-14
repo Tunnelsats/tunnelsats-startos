@@ -9,9 +9,10 @@ setup() {
     run "$REPO_ROOT/verify.sh"
     [[ "$output" =~ "1. Environment & Container Status" ]]
     [[ "$output" =~ "2. Querying TunnelSats Gateway Status" ]]
-    [[ "$output" =~ "3. Tor Coexistence & SOCKS Proxy Check" ]]
-    [[ "$output" =~ "4. Target Lightning Node Port Forwarding Profile" ]]
-    [[ "$output" =~ "5. Target Node Host CLI Audit Recipes" ]]
+    [[ "$output" =~ "3. Target Node Policy Routing & Egress Audit" ]]
+    [[ "$output" =~ "4. IPv6 Leak Prevention Policy & Audit" ]]
+    [[ "$output" =~ "5. Tor Coexistence & SOCKS Proxy Check" ]]
+    [[ "$output" =~ "6. Target Lightning Node Port Forwarding Audit" ]]
     [[ "$output" =~ "Verification Summary" ]]
 }
 

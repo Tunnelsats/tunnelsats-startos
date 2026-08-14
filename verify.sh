@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
 # ==============================================================================
-# TunnelSats StartOS 0.4.0 Service Diagnostic Tool
+# TunnelSats StartOS 0.4.0 Diagnostic & Verification Tool
 # ==============================================================================
-# Audits TunnelSats container status, WireGuard gateway reachability, port
-# forwarding metadata, Tor coexistence, and outputs target node audit recipes.
+# Audits container namespace status, gateway reachability, target Lightning node
+# policy routing, IPv6 leak prevention, and port forwarding alignment.
 #
 # Usage:
+#   From StartOS host: ./verify.sh
 #   Inside container:  /app/verify.sh
-#   From StartOS host: start-cli package attach tunnelsats /app/verify.sh
 # ==============================================================================
 
 set -euo pipefail
@@ -161,8 +161,54 @@ if [ -n "$SERVER" ] && [ "$SERVER" != "unknown" ]; then
     RESOLVED_SERVER_IP=$(python3 -c "import socket; print(socket.gethostbyname('$SERVER'))" 2>/dev/null || true)
 fi
 
-# 3. Tor Coexistence & SOCKS Proxy Check
-log_step "3. Tor Coexistence & SOCKS Proxy Check"
+# 3. Target Node Policy Routing & Egress Audit
+log_step "3. Target Node Policy Routing & Egress Audit"
+log_info "Target Lightning Node: ${TARGET_PKG} (${TARGET_HOST})"
+log_info "Direct CLI Audit Command (run on StartOS host):"
+echo "  start-cli package attach ${TARGET_PKG} -- curl -s https://api.ipify.org"
+if [ -n "$RESOLVED_SERVER_IP" ]; then
+    echo "  (Expected Output: ${RESOLVED_SERVER_IP} / ${SERVER})"
+fi
+
+# Execute live probe if start-cli is available on the running host
+if command -v start-cli &>/dev/null && [ "$ENGINE" != "inside" ]; then
+    log_info "Probing live outbound IPv4 egress for ${TARGET_PKG} via start-cli..."
+    TARGET_EGRESS=$(start-cli package attach "$TARGET_PKG" -- curl -s --connect-timeout 5 https://api.ipify.org 2>/dev/null || true)
+    if [ -n "$TARGET_EGRESS" ]; then
+        if [ "$TARGET_EGRESS" == "$RESOLVED_SERVER_IP" ] || [ "$TARGET_EGRESS" == "$SERVER" ]; then
+            log_info "Target Node Outbound IPv4: $TARGET_EGRESS (Matches TunnelSats VPN server ✅)"
+        else
+            log_error "Target Node Outbound IPv4 ($TARGET_EGRESS) differs from TunnelSats server (${RESOLVED_SERVER_IP:-$SERVER})."
+            FAILED_CHECKS=$((FAILED_CHECKS + 1))
+        fi
+    fi
+fi
+
+# 4. IPv6 Leak Prevention Policy & Audit
+log_step "4. IPv6 Leak Prevention Policy & Audit"
+if [ "$ALLOW_IPV6" == "True" ]; then
+    log_warn "Allow Home IPv6 Coexistence is ENABLED."
+    log_warn "Dual-stack IPv6 connections bypass the VPN and connect directly over your home ISP connection."
+else
+    log_info "Allow Home IPv6 Coexistence is DISABLED (default)."
+    log_info "Direct CLI Audit Command (run on StartOS host):"
+    echo "  start-cli package attach ${TARGET_PKG} -- curl -6 -s --connect-timeout 5 https://api6.ipify.org"
+    echo "  (Expected Output: Network unreachable / Timeout)"
+    
+    if command -v start-cli &>/dev/null && [ "$ENGINE" != "inside" ]; then
+        log_info "Testing IPv6 isolation for ${TARGET_PKG} container..."
+        TARGET_V6=$(start-cli package attach "$TARGET_PKG" -- curl -6 -s --connect-timeout 5 https://api6.ipify.org 2>/dev/null || true)
+        if [ -n "$TARGET_V6" ]; then
+            log_error "Target node IPv6 is ACTIVE and leaking home ISP address: $TARGET_V6"
+            FAILED_CHECKS=$((FAILED_CHECKS + 1))
+        else
+            log_info "Target node IPv6 isolation: BLOCKED / UNROUTABLE (Protected ✅)"
+        fi
+    fi
+fi
+
+# 5. Tor Coexistence & SOCKS Proxy Check
+log_step "5. Tor Coexistence & SOCKS Proxy Check"
 TOR_FOUND=false
 for tor_host in "tor.embassy" "127.0.0.1" "localhost"; do
     if python3 -c "
@@ -190,8 +236,8 @@ if [ "$TOR_FOUND" = false ]; then
     fi
 fi
 
-# 4. Target Lightning Node Port Forwarding Profile
-log_step "4. Target Lightning Node Port Forwarding Profile"
+# 6. Target Lightning Node Port Forwarding Audit
+log_step "6. Target Lightning Node Port Forwarding Audit"
 if [ -n "$SERVER" ] && [ "$SERVER" != "unknown" ] && [ -n "$VPN_PORT" ] && [ "$VPN_PORT" != "unknown" ]; then
     log_info "Target Node Announcement Profile: ${SERVER}:${VPN_PORT}"
     log_info "Lightning peer connection string: <your_node_pubkey>@${SERVER}:${VPN_PORT}"
@@ -206,23 +252,10 @@ else
     FAILED_CHECKS=$((FAILED_CHECKS + 1))
 fi
 
-# 5. Target Node Host CLI Audit Recipes
-log_step "5. Target Node Host CLI Audit Recipes"
-log_info "Target Lightning Node: ${TARGET_PKG} (${TARGET_HOST})"
-if [ "$ALLOW_IPV6" == "True" ]; then
-    log_warn "Allow Home IPv6 Coexistence is ENABLED (IPv6 connections route via home ISP)."
-else
-    log_info "Allow Home IPv6 Coexistence is DISABLED (default IPv6 gossip suppression)."
-fi
-
-echo -e "\n  Run these commands on the StartOS host to independently audit target node traffic:"
-echo "  1. Audit Outbound IPv4:  start-cli package attach ${TARGET_PKG} -- curl -s https://api.ipify.org"
-echo "  2. Audit IPv6 Isolation: start-cli package attach ${TARGET_PKG} -- curl -6 -s --connect-timeout 5 https://api6.ipify.org"
-
 # Summary
 log_step "Verification Summary"
 if [ $FAILED_CHECKS -eq 0 ]; then
-    log_info "TunnelSats service and announcement profile verification completed."
+    log_info "All diagnostic probes finished successfully."
     exit 0
 else
     log_error "Diagnostic audit completed with $FAILED_CHECKS failure(s)."
