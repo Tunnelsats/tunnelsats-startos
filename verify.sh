@@ -3,7 +3,7 @@
 # TunnelSats StartOS 0.4.0 Diagnostic & Verification Tool
 # ==============================================================================
 # Audits container namespace status, gateway reachability, target Lightning node
-# policy routing, IPv6 leak prevention, and port forwarding alignment.
+# configuration, IPv6 leak prevention policy, and port forwarding alignment.
 #
 # Usage:
 #   Inside container:  /app/verify.sh
@@ -140,8 +140,14 @@ except Exception as e:
     echo "  - Internal VPN IP: ${VPN_IP:-unknown}"
     echo "  - Forwarded Port: ${VPN_PORT:-unknown}"
     echo "  - Server: ${SERVER:-unknown}"
+
+    if [ "$VPN_CONNECTED" != "True" ] && [ "$VPN_CONNECTED" != "true" ]; then
+        log_warn "TunnelSats gateway is not connected (status: $STATUS)."
+        FAILED_CHECKS=$((FAILED_CHECKS + 1))
+    fi
 else
     log_warn "Could not retrieve /api/status or /api/properties. Web server may be initializing or unconfigured."
+    FAILED_CHECKS=$((FAILED_CHECKS + 1))
 fi
 
 # Determine target package identifier for CLI commands
@@ -227,7 +233,8 @@ if [ -n "$SERVER" ] && [ "$SERVER" != "unknown" ] && [ -n "$VPN_PORT" ] && [ "$V
         echo -e "  start-cli package attach c-lightning -- lightning-cli getinfo"
     fi
 else
-    log_info "Target announcement endpoint will populate once WireGuard configuration is activated."
+    log_warn "Target announcement endpoint unconfigured or missing WireGuard port metadata."
+    FAILED_CHECKS=$((FAILED_CHECKS + 1))
 fi
 
 # Summary
