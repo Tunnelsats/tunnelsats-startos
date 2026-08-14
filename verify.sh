@@ -157,6 +157,11 @@ if [[ "$TARGET_HOST" =~ "c-lightning" ]] || [[ "$TARGET_HOST" =~ "cln" ]]; then
     TARGET_PKG="c-lightning"
 fi
 
+RESOLVED_SERVER_IP=""
+if [ -n "$SERVER" ] && [ "$SERVER" != "unknown" ]; then
+    RESOLVED_SERVER_IP=$(python3 -c "import socket; print(socket.gethostbyname('$SERVER'))" 2>/dev/null || true)
+fi
+
 # 3. Target Lightning Node Inbound Reachability Audit
 log_step "3. Target Lightning Node Inbound Reachability Audit"
 log_info "Testing internal TCP reachability to target node: ${TARGET_HOST}:${TARGET_PORT}"
@@ -224,8 +229,8 @@ else
     FAILED_CHECKS=$((FAILED_CHECKS + 1))
 fi
 
-# 6. Host-Level CLI Audit Recipes
-log_step "6. Host-Level CLI Audit Recipes"
+# 6. Host-Level CLI Audit Recipes & Live Egress Probing
+log_step "6. Host-Level CLI Audit Recipes & Live Egress Probing"
 log_info "Target Lightning Node: ${TARGET_PKG} (${TARGET_HOST})"
 if [ "$ALLOW_IPV6" == "True" ]; then
     log_warn "Allow Home IPv6 Coexistence is ENABLED (IPv6 connections route via home ISP)."
@@ -235,7 +240,28 @@ fi
 
 echo -e "\n  Run these commands on the StartOS host to independently audit target node traffic:"
 echo "  1. Audit Target Outbound IPv4:  start-cli package attach ${TARGET_PKG} -- curl -s https://api.ipify.org"
+if [ -n "$RESOLVED_SERVER_IP" ]; then
+    echo "     (Expected Output when VPN-routed: ${RESOLVED_SERVER_IP} / ${SERVER})"
+fi
 echo "  2. Audit Target IPv6 Isolation: start-cli package attach ${TARGET_PKG} -- curl -6 -s --connect-timeout 5 https://api6.ipify.org"
+if [ "$ALLOW_IPV6" == "True" ]; then
+    echo "     (Allow IPv6 is ON: Expected Output: <Home_ISP_IPv6>)"
+else
+    echo "     (Allow IPv6 is OFF: Expected Output: Network unreachable / Timeout)"
+fi
+
+# Execute live probe if start-cli is available on host
+if command -v start-cli &>/dev/null && [ "$ENGINE" != "inside" ]; then
+    log_info "Executing live target node egress probe via host start-cli..."
+    TARGET_EGRESS=$(start-cli package attach "$TARGET_PKG" -- curl -s --connect-timeout 5 https://api.ipify.org 2>/dev/null || true)
+    if [ -n "$TARGET_EGRESS" ]; then
+        if [ "$TARGET_EGRESS" == "$RESOLVED_SERVER_IP" ] || [ "$TARGET_EGRESS" == "$SERVER" ]; then
+            log_info "Target node live IPv4 egress: $TARGET_EGRESS (Matches TunnelSats VPN IP ✅)"
+        else
+            log_info "Target node live IPv4 egress: $TARGET_EGRESS (Standard host egress; inbound port forwarding active on ${SERVER}:${VPN_PORT})"
+        fi
+    fi
+fi
 
 # Summary
 log_step "Verification Summary"
