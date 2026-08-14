@@ -6,27 +6,27 @@ setup() {
     export TEST_DIR="$BATS_TEST_DIRNAME/fixtures"
     mkdir -p "$TEST_DIR"
     
-    # Create valid test config
-    cat > "$TEST_DIR/valid.conf" << 'EOF'
+    # Create valid test config with dummy sanitized keys
+    cat > "$TEST_DIR/valid.conf" << 'CONF'
 [Interface]
 # TunnelSats WireGuard Configuration
 # Server: us3.tunnelsats.com
 # Port Forwarding: 23217
-# myPubKey: QVOdgdIHPxTkHuWqZBwRog1UaA5kHkMo9XhiZmB/rBI=
+# myPubKey: DUMMY_TEST_PUBKEY_AAAAAAAAAAAAAAAAAAAAAAAAAAA=
 # Valid Until: 2026-02-01T13:25:08.314Z
-PrivateKey = wJZlElRVWk+i2rxWRez1jzdRTmIHehhiKt6nweHx2Xo=
+PrivateKey = DUMMY_TEST_PRIVATE_KEY_BBBBBBBBBBBBBBBBBBBBBBB=
 Address = 10.9.0.158/32
 
 [Peer]
-PublicKey = cb1NcUdG5RKFaauOuMncwNhh0ZRr5y9wTQzUaAWtvxA=
-PresharedKey = H4PaNtd85Erv5MVv3DTMpDoR+gNnlHHZxgurQmyEgo0=
+PublicKey = DUMMY_TEST_PEERKEY_CCCCCCCCCCCCCCCCCCCCCCCCCCC=
+PresharedKey = DUMMY_TEST_PSK_DDDDDDDDDDDDDDDDDDDDDDDDDDDDDDD=
 Endpoint = us3.tunnelsats.com:51820
 AllowedIPs = 0.0.0.0/0, ::/0
 PersistentKeepalive = 25
-EOF
+CONF
 }
 
-# Helper function to parse fields (mirrors entrypoint logic)
+# Helper function to parse fields
 parse_field() {
     grep -oP "$1"' *= *\K.*' "$2" | head -1 || echo ""
 }
@@ -37,7 +37,7 @@ parse_comment() {
 
 @test "parses PrivateKey correctly" {
     result=$(parse_field "PrivateKey" "$TEST_DIR/valid.conf")
-    [ "$result" = "wJZlElRVWk+i2rxWRez1jzdRTmIHehhiKt6nweHx2Xo=" ]
+    [ "$result" = "DUMMY_TEST_PRIVATE_KEY_BBBBBBBBBBBBBBBBBBBBBBB=" ]
 }
 
 @test "parses Address correctly" {
@@ -47,7 +47,7 @@ parse_comment() {
 
 @test "parses PublicKey correctly" {
     result=$(parse_field "PublicKey" "$TEST_DIR/valid.conf")
-    [ "$result" = "cb1NcUdG5RKFaauOuMncwNhh0ZRr5y9wTQzUaAWtvxA=" ]
+    [ "$result" = "DUMMY_TEST_PEERKEY_CCCCCCCCCCCCCCCCCCCCCCCCCCC=" ]
 }
 
 @test "parses Endpoint correctly" {
@@ -72,12 +72,12 @@ parse_comment() {
 
 @test "parses myPubKey comment" {
     result=$(parse_comment "myPubKey" "$TEST_DIR/valid.conf")
-    [ "$result" = "QVOdgdIHPxTkHuWqZBwRog1UaA5kHkMo9XhiZmB/rBI=" ]
+    [ "$result" = "DUMMY_TEST_PUBKEY_AAAAAAAAAAAAAAAAAAAAAAAAAAA=" ]
 }
 
 @test "parses PresharedKey correctly" {
     result=$(parse_field "PresharedKey" "$TEST_DIR/valid.conf")
-    [ "$result" = "H4PaNtd85Erv5MVv3DTMpDoR+gNnlHHZxgurQmyEgo0=" ]
+    [ "$result" = "DUMMY_TEST_PSK_DDDDDDDDDDDDDDDDDDDDDDDDDDDDDDD=" ]
 }
 
 @test "returns empty for missing field" {
