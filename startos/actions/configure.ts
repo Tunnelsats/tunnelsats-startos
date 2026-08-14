@@ -2,6 +2,7 @@ import { sdk } from '../sdk'
 import { configJson } from '../fileModels/config.json'
 import { tunnelsatsConf } from '../fileModels/tunnelsatsConf'
 import { i18n } from '../i18n'
+import { validateWireguardConfig } from '../utils'
 import { rm } from 'node:fs/promises'
 
 const { InputSpec, Value } = sdk
@@ -41,24 +42,6 @@ export const inputSpec = InputSpec.of({
   }),
 })
 
-function validateConfig(wgConf: string) {
-  if (!wgConf) return
-  if (!/^\s*(?!#|;)\s*PrivateKey\s*=/im.test(wgConf)) {
-    throw new Error("Missing 'PrivateKey' property.")
-  }
-  if (!/^\s*(?!#|;)\s*Address\s*=/im.test(wgConf)) {
-    throw new Error("Missing 'Address' property.")
-  }
-  if (!/^\s*(?!#|;)\s*Endpoint\s*=/im.test(wgConf)) {
-    throw new Error("Missing 'Endpoint' routing property.")
-  }
-  if (!/#\s*(?:VPNPort|Port Forwarding):\s*\d+/i.test(wgConf)) {
-    throw new Error(
-      'Missing port-forwarding metadata (e.g., # Port Forwarding: XXXXX).',
-    )
-  }
-}
-
 export const configure = sdk.Action.withInput(
   'configure',
   {
@@ -84,7 +67,10 @@ export const configure = sdk.Action.withInput(
       if (!input['tunnelsats-conf']) {
         throw new Error('Enabled tunnels require a WireGuard configuration')
       }
-      validateConfig(input['tunnelsats-conf'])
+      const validation = validateWireguardConfig(input['tunnelsats-conf'])
+      if (!validation.valid) {
+        throw new Error(validation.error || 'Invalid WireGuard configuration')
+      }
     }
 
     await configJson.merge(effects, {
