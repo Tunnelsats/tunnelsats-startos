@@ -732,29 +732,14 @@ def main():
         target = sys.argv[2] if len(sys.argv) > 2 else "vpn"
         
         if not is_enabled():
-            if target == "vpn":
-                if not is_wireproxy_running():
-                    print(json.dumps({"result": "ok"}))
-                    sys.exit(0)
-                else:
-                    print(json.dumps({"result": "VPN is running but should be stopped"}))
-                    sys.exit(1)
-            elif target == "proxy":
-                status = check_proxy_health()
-                if not status["proxy_ready"]:
-                    print(json.dumps({"result": "ok"}))
-                    sys.exit(0)
-                else:
-                    print(json.dumps({"result": "Proxy is active but should be stopped"}))
-                    sys.exit(1)
-            else:
-                print(json.dumps({"result": "ok"}))
-                sys.exit(0)
+            print(json.dumps({"result": "ok"}))
+            sys.exit(0)
             
         if target == "vpn":
             status = get_status()
             if status["vpn_connected"]:
                 print(json.dumps({"result": "ok"}))
+                sys.exit(0)
             else:
                 print(json.dumps({"result": "VPN is not connected"}))
                 sys.exit(1)
@@ -762,8 +747,9 @@ def main():
             status = check_proxy_health()
             if status["proxy_ready"]:
                 print(json.dumps({"result": "ok"}))
+                sys.exit(0)
             else:
-                print(json.dumps({"result": "Proxy is not accepting connections"}))
+                print(json.dumps({"result": "Proxy is not ready"}))
                 sys.exit(1)
 
 
