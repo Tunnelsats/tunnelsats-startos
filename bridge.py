@@ -7,6 +7,8 @@ import subprocess
 import signal
 import time
 import socket
+import urllib.request
+import urllib.error
 from datetime import datetime, timezone
 
 
