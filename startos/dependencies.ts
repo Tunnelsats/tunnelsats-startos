@@ -2,6 +2,7 @@ import { isIPv6, isIPv4 } from 'node:net'
 import { sdk } from './sdk'
 import { configJson } from './fileModels/config.json'
 import { i18n } from './i18n'
+import { parseWireguardTunnelInfo } from './utils'
 import { customExternalHostConfig } from 'lnd-startos/startos/actions/config/customExternalHost'
 import { config as clnConfigAction } from 'cln-startos/startos/actions/config/config'
 
@@ -10,14 +11,11 @@ export function getAnnounceEndpoint(
   allowIpv6 = false,
 ): string | null {
   if (!wgConf) return null
+  const info = parseWireguardTunnelInfo(wgConf)
+  if (!info.endpoint || !info.vpnPort) return null
 
-  const endpointMatch = wgConf.match(/^\s*(?!#|;)\s*Endpoint\s*=\s*([^\s#]+)/im)
-  if (!endpointMatch) return null
-  const fullEndpoint = endpointMatch[1].trim()
-
-  const portMatch = wgConf.match(/#\s*(?:VPNPort|Port Forwarding):\s*(\d+)/i)
-  if (!portMatch) return null
-  const vpnPort = portMatch[1].trim()
+  const fullEndpoint = info.endpoint.trim()
+  const vpnPort = info.vpnPort
 
   // 1. Bracketed IPv6 e.g. [2001:db8::1]:51820 or [2001:db8::1]
   if (fullEndpoint.startsWith('[')) {
