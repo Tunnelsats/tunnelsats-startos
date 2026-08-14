@@ -173,6 +173,9 @@ if [ -n "$EGRESS_INFO" ]; then
     fi
 else
     log_warn "Outbound IPv4 probe timed out or network offline."
+    if [ "$ENGINE" == "inside" ] || [ -n "$CONTAINER_ID" ]; then
+        FAILED_CHECKS=$((FAILED_CHECKS + 1))
+    fi
 fi
 
 # 4. IPv6 Leak Prevention Test
@@ -207,9 +210,9 @@ else:
 
 IPV6_STATUS=""
 if [ "$ENGINE" != "inside" ] && [ -n "$CONTAINER_ID" ]; then
-    IPV6_STATUS=$($SUDO_CMD $ENGINE exec -i $CONTAINER_NAME python3 -c "$IPV6_PROBE_CODE" 2>/dev/null | tr -d '\r' || echo "UNROUTABLE")
+    IPV6_STATUS=$($SUDO_CMD $ENGINE exec -i $CONTAINER_NAME python3 -c "$IPV6_PROBE_CODE" 2>/dev/null | tr -d '\r' || echo "UNVERIFIED")
 else
-    IPV6_STATUS=$(python3 -c "$IPV6_PROBE_CODE" 2>/dev/null | tr -d '\r' || echo "UNROUTABLE")
+    IPV6_STATUS=$(python3 -c "$IPV6_PROBE_CODE" 2>/dev/null | tr -d '\r' || echo "UNVERIFIED")
 fi
 
 if [ "$IPV6_STATUS" == "LEAK" ]; then
