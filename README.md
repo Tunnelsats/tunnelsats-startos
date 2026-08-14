@@ -21,24 +21,24 @@ Running a Lightning Network node (LND / Core Lightning) over Tor ensures anonymi
 
 TunnelSats provides **privacy-preserving clearnet connectivity**:
 - Establishes a high-speed WireGuard tunnel to global TunnelSats servers.
-- Routes all inbound and outbound Lightning peer connections through the tunnel.
-- Hides your residential IP address while delivering low-latency Clearnet channel routing.
+- Routes inbound forwarded peer connections through the tunnel to your target Lightning node.
+- Hides your residential IPv4 address while delivering low-latency Clearnet channel routing.
 
 ---
 
 ## 🚀 Key StartOS 0.4.0 Features
 
-- **StartOS 0.4.0 Native Gateway Architecture**: Zero userspace SOCKS proxy overhead. Directly leverages StartOS 0.4.0 kernel-managed gateway policy routing to route target Lightning containers (`lnd` or `c-lightning`) through WireGuard.
+- **StartOS 0.4.0 Native Gateway Architecture**: Zero userspace SOCKS proxy overhead. Directly leverages StartOS 0.4.0 gateway integration for target Lightning containers (`lnd` or `c-lightning`).
 - **In-App Web Dashboard**: Manage and verify your connection, inspect live WireGuard handshake status, and monitor subscription duration via a sleek, responsive UI on port 80.
 - **Automated 1-Click Cross-Service Tasks**: Automatically generates a native StartOS 1-Click UI Task prompting you to advertise your TunnelSats external announce endpoint on LND or Core Lightning.
 - **Dynamic Dependency Management**: Dynamically mounts and requires either `lnd` or `c-lightning` based on user selection.
-- **IPv6 Leak Prevention**: Strict policy routing and leak detection ensuring residential IPv6 addresses are never accidentally advertised to Lightning gossip peers.
+- **Configurable IPv6 Coexistence**: Strict IPv4-only default prevents accidental residential IPv6 gossip exposure, with an optional toggle for operators intentionally opting into dual-stack routing.
 
 ---
 
 ## 🛠 Architecture & Dataplane
 
-StartOS 0.4.0 isolates services into subcontainers and manages network policy routing at the host OS kernel level:
+StartOS 0.4.0 isolates services into subcontainers and manages network routing:
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
@@ -48,7 +48,7 @@ StartOS 0.4.0 isolates services into subcontainers and manages network policy ro
 │  │ Target Lightning Node │                                  │
 │  │   (LND / CLN)         │                                  │
 │  └───────────┬───────────┘                                  │
-│              │ (Outbound Policy Routing)                    │
+│              │ (Outbound Routing)                           │
 │              ▼                                              │
 │  ┌────────────────────────────────────────┐                 │
 │  │   StartOS Kernel WireGuard Gateway     │────▶ Clearnet   │
@@ -64,8 +64,8 @@ StartOS 0.4.0 isolates services into subcontainers and manages network policy ro
 └─────────────────────────────────────────────────────────────┘
 ```
 
-1. **Outbound Routing (Kernel Gateway)**: When TunnelSats is enabled for `lnd` or `c-lightning`, StartOS applies kernel policy routing rules (`ip rule add from <target_container> lookup 100X`) to direct all outbound traffic from the target Lightning container through the TunnelSats WireGuard interface.
-2. **Inbound Routing (Port Forwarding)**: Inbound Lightning traffic arriving on your assigned TunnelSats port is forwarded directly across the WireGuard tunnel to port `9735` on the target Lightning container.
+1. **Inbound Routing (Port Forwarding)**: Inbound Lightning traffic arriving on your assigned TunnelSats port is forwarded directly across the WireGuard tunnel to port `9735` on the target Lightning container.
+2. **Outbound Routing (Gateway Integration)**: Outbound traffic from the target Lightning container is directed through the TunnelSats WireGuard interface.
 3. **Web Dashboard**: An internal HTTP service on port 80 provides a management interface displaying tunnel connection state, handshake telemetry, subscription expiration, and configuration guides.
 
 ---
@@ -102,7 +102,7 @@ start-cli package attach tunnelsats /app/verify.sh
 **Diagnostic Probes Performed**:
 - Gateway API status & handshake verification.
 - Outbound IPv4 egress verification (with privacy-preserving IP masking).
-- Active IPv6 leak prevention audit (confirming zero residential IP exposure).
+- Active IPv6 leak prevention audit.
 - Tor proxy coexistence audit.
 - Target Lightning node announcement verification.
 
