@@ -96,7 +96,7 @@ Node operators can independently audit that their node's announced endpoints and
 ### 1. Inbound Lightning Announcement Audit
 ```bash
 # For LND:
-start-cli package attach lnd -- lncli getinfo
+start-cli package attach lnd -- lncli --rpcserver=127.0.0.1:10009 getinfo
 
 # For Core Lightning:
 start-cli package attach c-lightning -- lightning-cli getinfo

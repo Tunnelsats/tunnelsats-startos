@@ -220,7 +220,7 @@ if [ -n "$SERVER" ] && [ "$SERVER" != "unknown" ] && [ -n "$VPN_PORT" ] && [ "$V
     log_info "Lightning peer connection string: <your_node_pubkey>@${SERVER}:${VPN_PORT}"
     echo -e "\n  To verify announced URIs on your Lightning node (run on StartOS host):"
     if [ "$TARGET_PKG" == "lnd" ]; then
-        echo "  start-cli package attach lnd -- lncli getinfo"
+        echo "  start-cli package attach lnd -- lncli --rpcserver=127.0.0.1:10009 getinfo"
     else
         echo "  start-cli package attach c-lightning -- lightning-cli getinfo"
     fi

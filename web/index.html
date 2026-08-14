@@ -687,7 +687,7 @@
                 <span>LND Announcement Check:</span>
                 <button class="btn-copy-code" onclick="copyCode('cli-lnd-info', this)">Copy</button>
               </div>
-              <pre><code id="cli-lnd-info">start-cli package attach lnd -- lncli getinfo</code></pre>
+              <pre><code id="cli-lnd-info">start-cli package attach lnd -- lncli --rpcserver=127.0.0.1:10009 getinfo</code></pre>
               <div class="code-block-header" style="margin-top: 8px;">
                 <span>Core Lightning Announcement Check:</span>
                 <button class="btn-copy-code" onclick="copyCode('cli-cln-info', this)">Copy</button>
@@ -707,7 +707,7 @@
                 <button class="btn-copy-code" onclick="copyCode('cli-cln-v4', this)">Copy</button>
               </div>
               <pre><code id="cli-cln-v4">start-cli package attach c-lightning -- curl -s https://api.ipify.org</code></pre>
-              <p style="font-size: 11.5px; color: #8b949e; margin-top: 2px;">Expected result: Returns your TunnelSats VPN IP (<code><span class="highlight-ip">tunnelsats_ip</span></code>) when WireGuard gateway routing is configured. If your residential IP is returned, outbound peer traffic is routing directly via your home connection.</p>
+              <p style="font-size: 11.5px; color: #8b949e; margin-top: 2px;">Expected result: Returns your numeric TunnelSats server IP (e.g. <code>83.228.229.56</code>) when WireGuard gateway routing is configured. If your residential IP is returned, outbound peer traffic is routing directly via your home connection.</p>
 
               <h4 style="color: var(--accent-bitcoin); font-size: 13.5px; margin-top: 14px; margin-bottom: 6px;">3. Target Node IPv6 Isolation Audit</h4>
               <p style="font-size: 12.5px; margin-bottom: 4px;">Verify whether IPv6 connectivity is unroutable or accessible:</p>
