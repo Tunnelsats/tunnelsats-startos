@@ -12,7 +12,7 @@ setup() {
     [[ "$output" =~ "3. Target Lightning Node Inbound Reachability Audit" ]]
     [[ "$output" =~ "4. Tor Coexistence & SOCKS Proxy Check" ]]
     [[ "$output" =~ "5. Target Lightning Node Port Forwarding Profile" ]]
-    [[ "$output" =~ "6. Host-Level CLI Audit Recipes" ]]
+    [[ "$output" =~ "6. Host-Level CLI Audit Recipes & Live Egress Probing" ]]
     [[ "$output" =~ "Verification Summary" ]]
 }
 

@@ -276,10 +276,14 @@ fi
 
 # Summary
 log_step "Verification Summary"
-if [ $FAILED_CHECKS -eq 0 ]; then
-    log_info "TunnelSats service diagnostics and endpoint verification completed successfully."
-    exit 0
-else
+if [ $FAILED_CHECKS -gt 0 ]; then
     log_error "Diagnostic audit completed with $FAILED_CHECKS failure(s)."
     exit 1
+elif [ "$ENGINE" == "inside" ]; then
+    log_info "TunnelSats service diagnostics completed successfully."
+    log_info "To audit target node live egress directly: start-cli package attach ${TARGET_PKG} -- curl -s https://api.ipify.org"
+    exit 0
+else
+    log_info "All diagnostic probes finished successfully."
+    exit 0
 fi
