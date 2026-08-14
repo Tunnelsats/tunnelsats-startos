@@ -35,6 +35,7 @@ log_step() {
 }
 
 FAILED_CHECKS=0
+UNVERIFIED_CHECKS=0
 
 # 1. Environment & Container Status Check
 log_step "1. Environment & Container Status"
@@ -185,6 +186,7 @@ else
     if [ -n "$RESOLVED_SERVER_IP" ]; then
         echo "  (Expected Output: ${RESOLVED_SERVER_IP} / ${SERVER})"
     fi
+    UNVERIFIED_CHECKS=$((UNVERIFIED_CHECKS + 1))
 fi
 
 # 4. IPv6 Leak Prevention Policy & Audit
@@ -207,6 +209,7 @@ else
         log_info "Direct CLI Audit Command (run on StartOS host):"
         echo "  start-cli package attach ${TARGET_PKG} -- curl -6 -s --connect-timeout 5 https://api6.ipify.org"
         echo "  (Expected Output: Network unreachable / Timeout)"
+        UNVERIFIED_CHECKS=$((UNVERIFIED_CHECKS + 1))
     fi
 fi
 
@@ -257,10 +260,14 @@ fi
 
 # Summary
 log_step "Verification Summary"
-if [ $FAILED_CHECKS -eq 0 ]; then
-    log_info "All diagnostic probes finished successfully."
-    exit 0
-else
+if [ $FAILED_CHECKS -gt 0 ]; then
     log_error "Diagnostic audit completed with $FAILED_CHECKS failure(s)."
     exit 1
+elif [ $UNVERIFIED_CHECKS -gt 0 ]; then
+    log_info "TunnelSats service diagnostics completed successfully."
+    log_info "Note: $UNVERIFIED_CHECKS target-node live egress check(s) require host CLI execution."
+    exit 0
+else
+    log_info "All diagnostic probes finished successfully."
+    exit 0
 fi
