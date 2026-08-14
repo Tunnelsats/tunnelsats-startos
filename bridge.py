@@ -553,12 +553,22 @@ def check_gateway_reachable():
             return False
         with open(CONFIG_PATH, "r") as f:
             content = f.read()
-        match = re.search(r"^\s*(?!#|;)\s*Endpoint\s*=\s*([^\s#:]+):([0-9]+)", content, re.IGNORECASE | re.MULTILINE)
-        if not match:
+        if not get_wg_ip():
             return False
-        host, port = match.group(1), int(match.group(2))
-        addr_info = socket.getaddrinfo(host, port, socket.AF_UNSPEC, socket.SOCK_DGRAM)
-        return len(addr_info) > 0
+            
+        # Probe TunnelSats API transport to confirm active outbound connectivity
+        req = urllib.request.Request(
+            f"{TUNNELSATS_API_URL}/subscription/info",
+            headers={"User-Agent": "TunnelSats-StartOS/0.4.0"}
+        )
+        try:
+            with urllib.request.urlopen(req, timeout=3) as resp:
+                return resp.status < 500
+        except urllib.error.HTTPError as e:
+            # 400/403/404 confirms live network transport to TunnelSats API
+            return e.code < 500
+        except Exception:
+            return False
     except Exception:
         return False
 
