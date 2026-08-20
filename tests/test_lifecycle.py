@@ -7,11 +7,6 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')
 import bridge
 
 class TestBridgeLifecycle(unittest.TestCase):
-    def test_vpn_up_and_down(self):
-        # vpn_up and vpn_down should log and execute cleanly without raising
-        bridge.vpn_up("/data/tunnelsatsv3.conf")
-        bridge.vpn_down("/data/tunnelsatsv3.conf")
-
     @patch('os.path.exists')
     @patch('builtins.open', new_callable=unittest.mock.mock_open, read_data='[Interface]\nAddress = 10.9.9.9/32')
     def test_get_wg_ip_success(self, mock_open, mock_exists):
@@ -24,13 +19,6 @@ class TestBridgeLifecycle(unittest.TestCase):
         mock_exists.return_value = False
         ip = bridge.get_wg_ip()
         self.assertIsNone(ip)
-
-    def test_proxy_up_success(self):
-        result = bridge.proxy_up()
-        self.assertTrue(result)
-
-    def test_proxy_down_teardown(self):
-        bridge.proxy_down()
 
     def test_extract_vpn_port_success(self):
         config = "[Interface]\n# VPNPort: 12345\nPrivateKey=..."
@@ -58,13 +46,6 @@ class TestBridgeLifecycle(unittest.TestCase):
         self.assertEqual(host, "lnd.embassy")
         self.assertEqual(port, 9735)
 
-    def test_inbound_up_success(self):
-        result = bridge.inbound_up()
-        self.assertTrue(result)
-
-    def test_inbound_down_teardown(self):
-        bridge.inbound_down()
-
     def test_validate_config_success(self):
         valid_conf = "[Interface]\nPrivateKey = hidden_key\nAddress = 10.x.x.x/32\n# VPNPort: 54321\n[Peer]\nEndpoint = 198.51.100.1:51820"
         bridge.validate_config(valid_conf) # Should not raise
@@ -86,20 +67,7 @@ class TestBridgeLifecycle(unittest.TestCase):
 
     def test_validate_config_with_port_forwarding_tag(self):
         valid_conf = "[Interface]\nPrivateKey = hidden_key\nAddress = 10.x.x.x/32\n# Port Forwarding: 54321\n[Peer]\nEndpoint = 198.51.100.1:51820"
-        bridge.validate_config(valid_conf) # Should work cleanly now
-
-    @patch('bridge.is_enabled')
-    @patch('bridge.vpn_up')
-    @patch('time.sleep')
-    @patch('sys.argv', ['bridge.py', 'start'])
-    def test_main_start_disabled(self, mock_sleep, mock_vpn_up, mock_is_enabled):
-        mock_is_enabled.return_value = False
-        mock_sleep.side_effect = KeyboardInterrupt("Stop loop")
-        
-        with self.assertRaises(KeyboardInterrupt):
-            bridge.main()
-            
-        mock_vpn_up.assert_not_called()
+        bridge.validate_config(valid_conf)
 
     @patch('os.replace')
     @patch('urllib.request.urlopen')
@@ -107,7 +75,7 @@ class TestBridgeLifecycle(unittest.TestCase):
     def test_lazy_sync_success(self, mock_open, mock_urlopen, mock_replace):
         mock_response = MagicMock()
         mock_response.status = 200
-        mock_response.read.return_value = b'{"expiry": "2026-12-31T23:59:59Z"}'
+        mock_response.read.return_value = b'{"expiry": "2026-12-31T23:59:59Z", "server_domain": "ch1.tunnelsats.com", "vpn_port": 24556}'
         mock_response.__enter__ = lambda s: s
         mock_response.__exit__ = MagicMock(return_value=False)
         mock_urlopen.return_value = mock_response
@@ -120,6 +88,9 @@ class TestBridgeLifecycle(unittest.TestCase):
         import json
         parsed_written = json.loads(written_data)
         self.assertEqual(parsed_written["expiresAt"], "2026-12-31T23:59:59Z")
+        self.assertEqual(parsed_written["serverDomain"], "ch1.tunnelsats.com")
+        self.assertEqual(parsed_written["vpnPort"], 24556)
+        self.assertTrue(parsed_written["syncSuccess"])
 
     @patch('builtins.open', new_callable=unittest.mock.mock_open, read_data='{"expiresAt": "2026-12-31T23:59:59Z"}')
     @patch('os.path.exists')

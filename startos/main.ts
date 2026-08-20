@@ -51,9 +51,9 @@ export const main = sdk.setupMain(async ({ effects }) => {
       },
       requires: [],
     })
-    .addHealthCheck('vpn-connected', {
+    .addHealthCheck('subscription', {
       ready: {
-        display: i18n('VPN Gateway Status'),
+        display: i18n('Subscription Status'),
         fn: async () => {
           if (!config?.enabled) {
             return {
@@ -65,12 +65,25 @@ export const main = sdk.setupMain(async ({ effects }) => {
             'python3',
             '/app/bridge.py',
             'health',
-            'vpn',
+            'subscription',
           ])
           if (res.exitCode !== 0) {
-            return {
-              result: 'failure',
-              message: res.stderr?.toString() || i18n('VPN disconnected'),
+            try {
+              const errData = JSON.parse(
+                res.stdout.toString() || res.stderr.toString(),
+              )
+              return {
+                result: 'failure',
+                message:
+                  errData.message || i18n('Subscription verification failed'),
+              }
+            } catch {
+              return {
+                result: 'failure',
+                message:
+                  res.stderr?.toString() ||
+                  i18n('Subscription verification failed'),
+              }
             }
           }
           try {
@@ -85,9 +98,9 @@ export const main = sdk.setupMain(async ({ effects }) => {
                     : 'failure',
               message:
                 data.message ||
-                (isOk ? i18n('VPN gateway active') : String(data.result)),
+                (isOk ? i18n('Subscription is active') : String(data.result)),
             }
-          } catch (e) {
+          } catch {
             return {
               result: 'failure',
               message: i18n('Failed to parse health check result'),

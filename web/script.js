@@ -20,12 +20,18 @@ function updateUI() {
   const badgeText = badge.querySelector('.status-text')
 
   if (statusData.enabled) {
-    if (statusData.vpn_connected && statusData.handshake === 'active') {
+    if (statusData.status === 'running' || (statusData.vpn_connected && statusData.handshake === 'active')) {
       badge.className = 'status-badge active'
-      badgeText.textContent = 'TUNNEL ACTIVE'
+      badgeText.textContent = 'SUBSCRIPTION ACTIVE'
+    } else if (statusData.status === 'expired') {
+      badge.className = 'status-badge inactive'
+      badgeText.textContent = 'SUBSCRIPTION EXPIRED'
+    } else if (statusData.status === 'unconfigured') {
+      badge.className = 'status-badge inactive'
+      badgeText.textContent = 'UNCONFIGURED (Add config in settings)'
     } else {
       badge.className = 'status-badge inactive'
-      badgeText.textContent = 'CONNECTING / STALE'
+      badgeText.textContent = 'CONNECTING / SYNCING'
     }
   } else {
     badge.className = 'status-badge inactive'

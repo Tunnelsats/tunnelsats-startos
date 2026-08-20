@@ -149,6 +149,9 @@ def lazy_sync(wg_pubkey):
             vpn_port = response_data.get("vpn_port")
             if vpn_port:
                 meta["vpnPort"] = vpn_port
+                
+            meta["lastSync"] = datetime.now(timezone.utc).isoformat()
+            meta["syncSuccess"] = True
 
         # Fallback to comments parsing if config file exists and we don't have expiresAt
         if not meta.get("expiresAt") and os.path.exists(CONFIG_PATH):
@@ -164,10 +167,15 @@ def lazy_sync(wg_pubkey):
 
         # Write metadata back atomically if we successfully loaded/updated something
         if meta or not loaded_existing:
+            meta["syncError"] = None
             atomic_write_json(META_FILE_PATH, meta)
             
     except Exception as e:
-        print(f"Error during lazy subscription sync: {e}", file=sys.stderr)
+        err_msg = str(e)
+        print(f"Error during lazy subscription sync: {err_msg}", file=sys.stderr)
+        meta["syncSuccess"] = False
+        meta["syncError"] = err_msg
+        meta["lastSyncAttempt"] = datetime.now(timezone.utc).isoformat()
         
         # Fallback to comments parsing on error if file does not have expiry
         if not meta.get("expiresAt") and os.path.exists(CONFIG_PATH):
@@ -178,9 +186,12 @@ def lazy_sync(wg_pubkey):
                 expiry = parsed.get("expiresAt")
                 if expiry and is_valid_iso_expiry(expiry):
                     meta["expiresAt"] = expiry
-                    atomic_write_json(META_FILE_PATH, meta)
             except Exception:
                 pass
+        try:
+            atomic_write_json(META_FILE_PATH, meta)
+        except Exception:
+            pass
 
 def format_subscription_expiry():
     if not os.path.exists(META_FILE_PATH):
@@ -223,17 +234,16 @@ def subscription_sync_loop():
     except KeyboardInterrupt:
         return
     while True:
+        sync_success = False
         try:
             pubkey = get_wg_pubkey()
-            
-            sync_success = False
             if pubkey and pubkey != "Unknown":
                 lazy_sync(pubkey)
                 if os.path.exists(META_FILE_PATH):
                     try:
                         with open(META_FILE_PATH, 'r') as f:
                             meta = json.load(f)
-                        if meta.get("expiresAt"):
+                        if meta.get("syncSuccess") and meta.get("expiresAt"):
                             sync_success = True
                     except Exception:
                         pass
@@ -339,51 +349,29 @@ class DashboardHTTPRequestHandler(BaseHTTPRequestHandler):
             self.end_headers()
             
             status_data = get_status()
-            
-            pubkey = get_wg_pubkey()
-            
-            expiry = "Unknown"
-            if os.path.exists(META_FILE_PATH):
-                try:
-                    with open(META_FILE_PATH, 'r') as f:
-                        meta = json.load(f)
-                        expiry = meta.get("expiresAt", "Unknown")
-                except Exception:
-                    pass
-                    
             target_host, target_port = get_target_details()
             
-            vpn_port = DEFAULT_VPN_PORT
-            public_ip = "Unknown"
-            if os.path.exists(CONFIG_PATH):
-                try:
-                    with open(CONFIG_PATH, 'r') as f:
-                        config_content = f.read()
-                    vpn_port = extract_vpn_port(config_content)
-                    endpoint_match = re.search(r'^\s*(?!#|;)\s*Endpoint\s*=\s*([^:\s]+):\d+', config_content, re.IGNORECASE | re.MULTILINE)
-                    public_ip = endpoint_match.group(1) if endpoint_match else "Unknown"
-                except Exception:
-                    pass
-
-            wg_ip = get_wg_ip()
-            internal_octet = wg_ip.split('.')[-1] if wg_ip else "Unknown"
-
             response = {
-                "version": get_package_version(),
-                "enabled": is_enabled(),
-                "allow_ipv6": is_allow_ipv6(),
-                "status": status_data["status"],
-                "vpn_connected": status_data["vpn_connected"],
-                "handshake": status_data["handshake"],
-                "pubkey": pubkey,
-                "expires_at": expiry,
+                "version": status_data.get("version", get_package_version()),
+                "enabled": status_data.get("enabled", is_enabled()),
+                "configured": status_data.get("configured", False),
+                "allow_ipv6": status_data.get("allow_ipv6", is_allow_ipv6()),
+                "status": status_data.get("status", "stopped"),
+                "vpn_connected": status_data.get("vpn_connected", False),
+                "handshake": status_data.get("handshake", "none"),
+                "subscription_linked": status_data.get("subscription_linked", False),
+                "pubkey": status_data.get("pubkey", get_wg_pubkey()),
+                "expires_at": status_data.get("expires_at", "Unknown"),
+                "days_remaining": status_data.get("days_remaining"),
+                "expiry_formatted": status_data.get("expiry_formatted", "Unknown"),
                 "target_host": target_host,
                 "target_port": target_port,
-                "vpn_port": vpn_port,
-                "public_ip": public_ip,
-                "server": public_ip,
-                "vpn_ip": wg_ip,
-                "internal_octet": internal_octet
+                "vpn_port": status_data.get("vpn_port", DEFAULT_VPN_PORT),
+                "public_ip": status_data.get("public_ip", "Unknown"),
+                "server": status_data.get("server", "Unknown"),
+                "vpn_ip": status_data.get("vpn_ip", "None"),
+                "internal_octet": status_data.get("internal_octet", "Unknown"),
+                "last_sync": status_data.get("last_sync"),
             }
             self.wfile.write(json.dumps(response).encode("utf-8"))
             return
@@ -505,14 +493,6 @@ def get_target_details():
 
 
 
-def inbound_up():
-    print("Inbound forwarding handled natively by StartOS kernel WireGuard gateway.")
-    return True
-
-def inbound_down():
-    print("Inbound forwarding stopped.")
-    return True
-
 def get_wg_ip():
     try:
         if os.path.exists(CONFIG_PATH):
@@ -525,97 +505,163 @@ def get_wg_ip():
         print(f"Error parsing WG IP: {e}", file=sys.stderr)
     return None
 
-def proxy_up():
-    print("Outbound policy routing handled natively by StartOS gateway.")
-    return True
-
-def proxy_down():
-    print("Outbound policy routing stopped.")
-    return True
-
-
-
 def shutdown_handler(signum, frame):
-    print("Received shutdown signal. Stopping services...")
-    inbound_down()
-    proxy_down()
-    try:
-        vpn_down(CONFIG_PATH)
-        print("VPN Stopped Successfully")
-    except Exception as e:
-        print(f"Error stopping VPN: {str(e)}", file=sys.stderr)
+    print("Received shutdown signal. Stopping TunnelSats companion services...")
     sys.exit(0)
 
-def vpn_up(config_path):
-    print("TunnelSats WireGuard gateway active.")
+def get_subscription_info():
+    if not os.path.exists(META_FILE_PATH):
+        if os.path.exists(CONFIG_PATH):
+            try:
+                with open(CONFIG_PATH, 'r') as f:
+                    config_content = f.read()
+                parsed = parse_config_comments(config_content)
+                expiry = parsed.get("expiresAt")
+                if expiry and is_valid_iso_expiry(expiry):
+                    expiry_dt = datetime.fromisoformat(expiry.replace("Z", "+00:00"))
+                    if expiry_dt.tzinfo is None:
+                        expiry_dt = expiry_dt.replace(tzinfo=timezone.utc)
+                    now = datetime.now(timezone.utc)
+                    delta = expiry_dt - now
+                    is_expired = delta.total_seconds() <= 0
+                    return {
+                        "linked": True,
+                        "expiresAt": expiry,
+                        "daysRemaining": max(0, delta.days) if not is_expired else 0,
+                        "formatted": f"Active (Expires in {delta.days}d)" if not is_expired else f"Expired on {expiry_dt.strftime('%Y-%m-%d')}",
+                        "isExpired": is_expired,
+                        "lastSync": None,
+                        "syncError": None,
+                        "syncSuccess": False
+                    }
+            except Exception:
+                pass
 
-def vpn_down(config_path):
-    print("TunnelSats WireGuard gateway inactive.")
+        return {
+            "linked": False,
+            "expiresAt": None,
+            "daysRemaining": None,
+            "formatted": "Unconfigured",
+            "isExpired": False,
+            "lastSync": None,
+            "syncError": None,
+            "syncSuccess": False
+        }
 
-def check_gateway_reachable():
     try:
-        if not os.path.exists(CONFIG_PATH):
-            return False
-        with open(CONFIG_PATH, "r") as f:
-            content = f.read()
-        if not get_wg_ip():
-            return False
+        with open(META_FILE_PATH, 'r') as f:
+            meta = json.load(f)
+        expires_at = meta.get("expiresAt")
+        last_sync = meta.get("lastSync")
+        sync_error = meta.get("syncError")
+        sync_success = meta.get("syncSuccess", False)
+
+        if not expires_at:
+            return {
+                "linked": False,
+                "expiresAt": None,
+                "daysRemaining": None,
+                "formatted": f"Sync failed: {sync_error}" if sync_error else "Pending subscription synchronization",
+                "isExpired": False,
+                "lastSync": last_sync,
+                "syncError": sync_error,
+                "syncSuccess": sync_success
+            }
+        
+        expiry_dt = datetime.fromisoformat(expires_at.replace("Z", "+00:00"))
+        if expiry_dt.tzinfo is None:
+            expiry_dt = expiry_dt.replace(tzinfo=timezone.utc)
+        now = datetime.now(timezone.utc)
+        delta = expiry_dt - now
+        days = delta.days
+        is_expired = delta.total_seconds() <= 0
+        
+        if is_expired:
+            formatted = f"Expired on {expiry_dt.strftime('%Y-%m-%d')}"
+        elif days > 0:
+            formatted = f"Active (Expires in {days}d {delta.seconds // 3600}h)"
+        else:
+            formatted = f"Active (Expires in {delta.seconds // 3600}h {(delta.seconds % 3600) // 60}m)"
             
-        # Probe TunnelSats API transport to confirm active outbound connectivity
-        req = urllib.request.Request(
-            f"{TUNNELSATS_API_URL}/subscription/info",
-            headers={"User-Agent": f"TunnelSats-StartOS/{get_package_version()}"}
-        )
-        try:
-            with urllib.request.urlopen(req, timeout=3) as resp:
-                return resp.status < 500
-        except urllib.error.HTTPError as e:
-            # 400/403/404 confirms live network transport to TunnelSats API
-            return e.code < 500
-        except Exception:
-            return False
-    except Exception:
-        return False
-
-def is_wireguard_running():
-    try:
-        return is_enabled() and os.path.exists(CONFIG_PATH) and get_wg_ip() is not None
-    except Exception:
-        return False
-
-# Backward compatibility alias
-is_wireproxy_running = is_wireguard_running
+        return {
+            "linked": True,
+            "expiresAt": expires_at,
+            "daysRemaining": max(0, days) if not is_expired else 0,
+            "formatted": formatted,
+            "isExpired": is_expired,
+            "lastSync": last_sync,
+            "syncError": sync_error,
+            "syncSuccess": sync_success
+        }
+    except Exception as e:
+        return {
+            "linked": False,
+            "expiresAt": None,
+            "daysRemaining": None,
+            "formatted": f"Error: {e}",
+            "isExpired": False,
+            "lastSync": None,
+            "syncError": str(e),
+            "syncSuccess": False
+        }
 
 def get_status():
-    if not is_wireguard_running():
-        return {
-            "status": "stopped",
-            "vpn_connected": False,
-            "handshake": "none"
-        }
-        
-    vpn_ip = get_wg_ip()
-    port = DEFAULT_VPN_PORT
+    enabled = is_enabled()
+    has_config = os.path.exists(CONFIG_PATH)
+    
+    vpn_ip = get_wg_ip() if (enabled and has_config) else None
+    internal_octet = vpn_ip.split('.')[-1] if vpn_ip else "Unknown"
+    
+    vpn_port = DEFAULT_VPN_PORT
     server_domain = "Unknown"
-    is_reachable = check_gateway_reachable()
-    try:
-        if os.path.exists(CONFIG_PATH):
+    if has_config:
+        try:
             with open(CONFIG_PATH, "r") as f:
                 content = f.read()
-            port = extract_vpn_port(content)
+            vpn_port = extract_vpn_port(content)
             match = re.search(r"^\s*(?!#|;)\s*Endpoint\s*=\s*([^\s#:]+)", content, re.IGNORECASE | re.MULTILINE)
             if match:
                 server_domain = match.group(1)
-    except Exception:
-        pass
+        except Exception:
+            pass
+
+    sub_info = get_subscription_info()
+    
+    if not enabled:
+        status = "disabled"
+    elif not has_config:
+        status = "unconfigured"
+    elif sub_info["isExpired"]:
+        status = "expired"
+    elif sub_info["linked"]:
+        status = "running"
+    elif sub_info.get("syncError"):
+        status = "sync_error"
+    else:
+        status = "pending_sync"
+        
+    is_active = (enabled and has_config and sub_info["linked"] and not sub_info["isExpired"])
         
     return {
-        "status": "running" if is_reachable else "connecting",
-        "vpn_connected": is_reachable,
-        "handshake": "active" if is_reachable else "waiting",
-        "vpn_ip": vpn_ip,
-        "vpn_port": port,
-        "server": server_domain
+        "status": status,
+        "enabled": enabled,
+        "configured": has_config,
+        "gateway_mode": "host_managed",
+        "subscription_active": is_active,
+        "subscription_linked": sub_info["linked"],
+        "expires_at": sub_info["expiresAt"] or "Unknown",
+        "days_remaining": sub_info["daysRemaining"],
+        "expiry_formatted": sub_info["formatted"],
+        "vpn_ip": vpn_ip or "None",
+        "vpn_port": vpn_port,
+        "public_ip": server_domain,
+        "server": server_domain,
+        "internal_octet": internal_octet,
+        "pubkey": get_wg_pubkey() if has_config else "None",
+        "last_sync": sub_info["lastSync"],
+        "sync_error": sub_info.get("syncError"),
+        "version": get_package_version(),
+        "allow_ipv6": is_allow_ipv6(),
     }
 def validate_config(wg_conf):
     if not wg_conf:
@@ -647,69 +693,61 @@ def main():
             web_thread = threading.Thread(target=web_server_thread, daemon=True)
             web_thread.start()
 
-            if not is_enabled():
-                print("TunnelSats is disabled. Staying idle...", file=sys.stderr)
-                while not is_enabled():
-                    time.sleep(1)
-                print("TunnelSats has been enabled. Reloading service...", file=sys.stderr)
-                sys.exit(0)
+            print("TunnelSats companion service started.")
 
-            if not os.path.exists(CONFIG_PATH):
-                print(f"WireGuard config not found at {CONFIG_PATH}. Waiting for user setup...", file=sys.stderr)
-                while not os.path.exists(CONFIG_PATH):
-                    time.sleep(5)
-            vpn_up(CONFIG_PATH)
-            print("VPN Started Successfully")
-            
-            if not proxy_up():
-                print("Failed to initialize outbound privacy engine. Aborting.", file=sys.stderr)
-                sys.exit(1)
-                
-            inbound_up()
-            
-            # Stay alive and monitor the wireproxy process
             while True:
-                if not is_enabled():
-                    print("TunnelSats has been disabled. Stopping VPN and entering idle state...", file=sys.stderr)
-                    vpn_down(CONFIG_PATH)
-                    while not is_enabled():
-                        time.sleep(1)
-                    print("TunnelSats has been re-enabled. Reloading service...", file=sys.stderr)
-                    sys.exit(0)
-
                 time.sleep(1)
         except Exception as e:
             stderr = getattr(e, 'stderr', str(e))
-            print(f"Failed to start services: {stderr}", file=sys.stderr)
+            print(f"Failed to start companion service: {stderr}", file=sys.stderr)
             sys.exit(1)
             
     elif command == "stop":
-        try:
-            vpn_down(CONFIG_PATH)
-            print("VPN Stopped Successfully")
-        except Exception as e:
-            stderr = getattr(e, 'stderr', str(e))
-            print(f"Failed to stop VPN: {stderr}", file=sys.stderr)
-            sys.exit(1)
+        print("TunnelSats companion service stopped.")
+        sys.exit(0)
             
     elif command == "status":
         print(json.dumps(get_status(), indent=2))
         
     elif command == "health":
-        target = sys.argv[2] if len(sys.argv) > 2 else "vpn"
+        target = sys.argv[2] if len(sys.argv) > 2 else "subscription"
         
         if not is_enabled():
-            print(json.dumps({"result": "ok"}))
+            print(json.dumps({"result": "disabled", "message": "TunnelSats is disabled."}))
             sys.exit(0)
             
-        if target == "vpn":
-            status = get_status()
-            if status["vpn_connected"]:
-                print(json.dumps({"result": "ok"}))
-                sys.exit(0)
-            else:
-                print(json.dumps({"result": "VPN is not connected"}))
-                sys.exit(1)
+        if not os.path.exists(CONFIG_PATH):
+            print(json.dumps({"result": "ok", "message": "Unconfigured: Add WireGuard configuration in settings"}))
+            sys.exit(0)
+
+        sub_info = get_subscription_info()
+        if sub_info["isExpired"]:
+            print(json.dumps({"result": "failure", "message": f"Subscription expired on {sub_info['expiresAt']}"}))
+            sys.exit(1)
+        elif sub_info.get("syncError"):
+            print(json.dumps({"result": "failure", "message": f"Subscription synchronization failed: {sub_info['syncError']}"}))
+            sys.exit(1)
+        elif sub_info["linked"]:
+            print(json.dumps({"result": "ok", "message": sub_info["formatted"]}))
+            sys.exit(0)
+        else:
+            pubkey = get_wg_pubkey()
+            if pubkey and pubkey != "Unknown":
+                try:
+                    lazy_sync(pubkey)
+                    sub_info = get_subscription_info()
+                    if sub_info["linked"]:
+                        print(json.dumps({"result": "ok", "message": sub_info["formatted"]}))
+                        sys.exit(0)
+                    elif sub_info.get("syncError"):
+                        print(json.dumps({"result": "failure", "message": f"Subscription synchronization failed: {sub_info['syncError']}"}))
+                        sys.exit(1)
+                except Exception as e:
+                    print(json.dumps({"result": "failure", "message": f"Subscription synchronization failed: {e}"}))
+                    sys.exit(1)
+
+            print(json.dumps({"result": "failure", "message": "Subscription unverified: Unable to determine validity"}))
+            sys.exit(1)
 
 
 

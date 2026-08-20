@@ -13,15 +13,15 @@ const dict = {
   'Web Dashboard': 9,
   'TunnelSats Web Dashboard, connection properties, and setup instructions.': 10,
   'TunnelSats is disabled.': 11,
-  'VPN disconnected': 12,
+  'Subscription verification failed': 12,
   'Failed to parse health check result': 13,
   'Advertise TunnelSats VPN endpoint to the Lightning Network': 14,
   'Allow Home IPv6 Coexistence': 15,
   'Allow advertising raw IPv6 addresses on your node. WARNING: TunnelSats VPN tunnels IPv4 traffic only. IPv6 connections bypass the VPN tunnel and expose your real home ISP IP address.': 16,
   'Web Dashboard is accessible': 17,
   'Web Dashboard is not accessible': 18,
-  'VPN Gateway Status': 19,
-  'VPN gateway active': 20,
+  'Subscription Status': 19,
+  'Subscription is active': 20,
 } as const
 
 /**

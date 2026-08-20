@@ -39,3 +39,4 @@ __pycache__/
 *.pyd
 test_spec.json
 
+scratch/
