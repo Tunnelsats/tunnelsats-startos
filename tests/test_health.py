@@ -104,3 +104,28 @@ class TestBridgeHealth(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
+
+    @patch('bridge.is_enabled', return_value=True)
+    @patch('os.path.exists', return_value=True)
+    @patch('bridge.get_subscription_info')
+    @patch('sys.stdout', new_callable=io.StringIO)
+    def test_health_cached_expiry_with_sync_error_fails_closed(self, mock_stdout, mock_sub_info, mock_exists, mock_enabled):
+        # Even if expiresAt is in the future, if the latest sync failed with syncError,
+        # health check must report failure instead of masking with cached expiry.
+        mock_sub_info.return_value = {
+            "linked": True,
+            "expiresAt": "2026-12-31T23:59:59Z",
+            "daysRemaining": 130,
+            "formatted": "Active (Expires in 130d)",
+            "isExpired": False,
+            "lastSync": "2026-08-19T18:00:00Z",
+            "syncError": "503 Service Unavailable",
+            "syncSuccess": False
+        }
+        with patch('sys.argv', ['bridge.py', 'health', 'subscription']):
+            with self.assertRaises(SystemExit) as cm:
+                bridge.main()
+            self.assertEqual(cm.exception.code, 1)
+            output = json.loads(mock_stdout.getvalue())
+            self.assertEqual(output["result"], "failure")
+            self.assertIn("503 Service Unavailable", output["message"])

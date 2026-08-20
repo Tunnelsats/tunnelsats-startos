@@ -234,17 +234,16 @@ def subscription_sync_loop():
     except KeyboardInterrupt:
         return
     while True:
+        sync_success = False
         try:
             pubkey = get_wg_pubkey()
-            
-            sync_success = False
             if pubkey and pubkey != "Unknown":
                 lazy_sync(pubkey)
                 if os.path.exists(META_FILE_PATH):
                     try:
                         with open(META_FILE_PATH, 'r') as f:
                             meta = json.load(f)
-                        if meta.get("expiresAt"):
+                        if meta.get("syncSuccess") and meta.get("expiresAt"):
                             sync_success = True
                     except Exception:
                         pass
@@ -725,12 +724,12 @@ def main():
         if sub_info["isExpired"]:
             print(json.dumps({"result": "failure", "message": f"Subscription expired on {sub_info['expiresAt']}"}))
             sys.exit(1)
-        elif sub_info["linked"]:
-            print(json.dumps({"result": "ok", "message": sub_info["formatted"]}))
-            sys.exit(0)
         elif sub_info.get("syncError"):
             print(json.dumps({"result": "failure", "message": f"Subscription synchronization failed: {sub_info['syncError']}"}))
             sys.exit(1)
+        elif sub_info["linked"]:
+            print(json.dumps({"result": "ok", "message": sub_info["formatted"]}))
+            sys.exit(0)
         else:
             pubkey = get_wg_pubkey()
             if pubkey and pubkey != "Unknown":
