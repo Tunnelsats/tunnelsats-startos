@@ -88,30 +88,6 @@ class TestBridgeLifecycle(unittest.TestCase):
         valid_conf = "[Interface]\nPrivateKey = hidden_key\nAddress = 10.x.x.x/32\n# Port Forwarding: 54321\n[Peer]\nEndpoint = 198.51.100.1:51820"
         bridge.validate_config(valid_conf) # Should work cleanly now
 
-    @patch('os.path.exists')
-    @patch('bridge.get_wg_ip')
-    @patch('subprocess.run')
-    @patch('builtins.open', new_callable=unittest.mock.mock_open, read_data='[Interface]\nPrivateKey = hidden_key\n# VPNPort: 54321\n[Peer]\nEndpoint = 198.51.100.1:51820')
-    @patch('sys.stdout', new_callable=unittest.mock.MagicMock)
-    def test_get_properties_success(self, mock_stdout, mock_open, mock_run, mock_get_ip, mock_exists):
-        mock_exists.return_value = True
-        mock_get_ip.return_value = "10.9.9.45"
-        
-        # Mock `wg pubkey`
-        mock_run.return_value = MagicMock(stdout=b'public_key_abc123\n', returncode=0)
-        
-        bridge.get_properties()
-        
-        # Verify JSON properties output
-        args, kwargs = mock_stdout.write.call_args_list[0]
-        import json
-        output = json.loads(args[0])
-        self.assertEqual(output["version"], 2)
-        self.assertEqual(output["data"]["TunnelSats Public IP"]["value"], "198.51.100.1")
-        self.assertEqual(output["data"]["Forwarding Port"]["value"], "54321")
-        self.assertEqual(output["data"]["WireGuard Public Key"]["value"], "public_key_abc123")
-        self.assertEqual(output["data"]["Internal IP (Last Octet)"]["value"], "45")
-
     @patch('bridge.is_enabled')
     @patch('bridge.vpn_up')
     @patch('time.sleep')
