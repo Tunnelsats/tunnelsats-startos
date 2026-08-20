@@ -1,46 +1,106 @@
+# TunnelSats for StartOS
+
 <img src="https://raw.githubusercontent.com/Tunnelsats/tunnelsats/ffb4732328045922dc90eb5580654077e8d3f246/images/brand/logos/ts_logo_rectangle.svg" alt="TunnelSats Logo" width="400"/>
 
-<br/>
+A privacy-focused companion package and routing guide for Lightning Network nodes (LND and Core Lightning) on StartOS.
 
-<div align="center">
-  <img src="https://img.shields.io/badge/Status-Under%20Architectural%20Rework-critical?style=flat-square" alt="Status"/>
-  <img src="https://img.shields.io/github/license/Tunnelsats/tunnelsats-startos?style=flat-square&color=blue" alt="License"/>
-  <a href="https://tunnelsats.com/join-telegram"><img src="https://img.shields.io/badge/Telegram-Join%20Community-blue?style=flat-square&logo=telegram" alt="Telegram"/></a>
-</div>
+## Table of Contents
 
-<br/>
+- [Overview](#overview)
+- [Quick Reference for AI Consumers](#quick-reference-for-ai-consumers)
+- [Architecture & How It Works](#architecture--how-it-works)
+- [Volumes & Mount Points](#volumes--mount-points)
+- [Subcontainers](#subcontainers)
+- [File Models](#file-models)
+- [Actions & Tasks](#actions--tasks)
+- [Network & Privacy Disclosure](#network--privacy-disclosure)
+- [Development & Testing](#development--testing)
+- [License](#license)
 
-> [!CAUTION]
-> # ⚠️ EXPERIMENTAL — NOT PRODUCTION READY / NOT FOR PRIVACY USE
-> **DO NOT USE THIS PACKAGE ON A PRODUCTION LIGHTNING NODE.**
-> 
-> Following our intake review with the Start9 core team ([Issue #54](https://github.com/Tunnelsats/tunnelsats-startos/issues/54)), this repository is currently under **active architectural overhaul**:
-> - **No Active VPN Dataplane**: The current package does **not** establish a kernel WireGuard tunnel and does **not** route Lightning traffic.
-> - **Privacy Hazard**: Outbound Lightning connections and ping-pong acknowledgments will originate from your residential ISP IP, completely exposing your home IP address and location to peers.
-> - **Releases Pulled**: All pre-release binaries (`v0.4.0-beta1` through `v0.4.0-beta4`) have been **retracted and deleted**.
-> 
-> Track progress on the remediation plan and architectural discussions in [Issue #54](https://github.com/Tunnelsats/tunnelsats-startos/issues/54) and the [Phase 1–6 Tracking Issues](https://github.com/Tunnelsats/tunnelsats-startos/issues/58).
+## Overview
 
----
+TunnelSats provides dedicated WireGuard VPN infrastructure specifically designed for Lightning Network nodes. On StartOS, WireGuard encapsulation and outbound policy routing are managed natively at the host OS level (**System > Gateways**), allowing Lightning nodes to establish secure, clearnet inbound connectivity while fully protecting node operators from residential ISP IP exposure.
 
-# TunnelSats for StartOS (Under Construction)
+This package provides:
+- A responsive Web Dashboard (port 80) displaying connection properties, expiration countdowns, and routing guides.
+- Automated StartOS tasks for 1-Click Lightning external host advertisement (`custom-external-host`).
+- Automated expiration alert tasks (7-day and 3-day warnings).
+- Periodic subscription metadata synchronization with `https://tunnelsats.com/api/public/v1/subscription/status`.
 
-This repository contains the packaging source for [TunnelSats](https://tunnelsats.com/) on **[StartOS 0.4.0+](https://start9.com)** using `@start9labs/start-sdk`.
+## Quick Reference for AI Consumers
 
-## 🚧 Status & Remediation Roadmap
+```yaml
+package_id: tunnelsats
+title: TunnelSats
+description: A privacy-focused VPN gateway for Lightning Nodes (LND/CLN).
+architecture:
+  model: host-managed gateway companion
+  ui_port: 80
+  telemetry_daemon: python3 bridge.py
+  external_services:
+    - https://tunnelsats.com/api/public/v1/subscription/status (subscription metadata sync)
+volumes:
+  - name: main
+    path: /data
+subcontainers:
+  - name: main
+    image: tunnelsats
+actions:
+  - id: configure
+    name: Configure
+tasks:
+  - tunnelsats:configure (subscription expiry alert)
+  - lnd:custom-external-host-config (1-click external host advertisement)
+  - c-lightning:config (1-click external host advertisement)
+```
 
-The package is being redesigned to operate within the StartOS 0.4.0 LXC subcontainer security model:
+## Architecture & How It Works
 
-1. **Phase 1 (Dataplane)**: Implement in-container WireGuard via `virtualNetworking: true` and `wg-quick` ([#58](https://github.com/Tunnelsats/tunnelsats-startos/issues/58)).
-2. **Phase 2 (Health Checks)**: Implement fail-closed health checks based on `wg show` interface and handshake queries ([#59](https://github.com/Tunnelsats/tunnelsats-startos/issues/59)).
-3. **Phase 3 (1-Click Gating)**: Gate `custom-external-host` advertisement tasks strictly behind verified tunnel connectivity ([#60](https://github.com/Tunnelsats/tunnelsats-startos/issues/60)).
-4. **Phase 4 (Cleanup)**: Remove legacy StartOS 0.3.x carry-over, dead proxy code, and normalize User-Agent strings ([#61](https://github.com/Tunnelsats/tunnelsats-startos/issues/61)).
-5. **Phase 5 (Docs Alignment)**: Standardize documentation to adhere to Start9 packaging guidelines ([#62](https://github.com/Tunnelsats/tunnelsats-startos/issues/62)).
-6. **Phase 6 (CI / Pipeline)**: Adopt Start9 shared reusable workflows ([#63](https://github.com/Tunnelsats/tunnelsats-startos/issues/63)).
+1. **Host-Managed Gateway**: The WireGuard tunnel is configured under StartOS **System > Gateways**. StartOS kernel networking encapsulates outbound Lightning traffic and forwards inbound connections on your TunnelSats port to port `9735` on your Lightning container.
+2. **Companion Service**: The `tunnelsats` container runs as a companion service, hosting the Web Dashboard and maintaining synchronization with the TunnelSats subscription API.
+3. **1-Click External Host Configuration**: Once configured, StartOS prompts the user with a 1-Click task to announce the TunnelSats public IP and port to the Lightning Network on LND or Core Lightning.
+4. **Subscription Lifecycle & Renewal**: The background daemon monitors subscription expiration, updating the local dashboard and raising StartOS tasks when renewal is required.
 
-For questions and technical discussions, see [Issue #54](https://github.com/Tunnelsats/tunnelsats-startos/issues/54).
+## Volumes & Mount Points
 
----
+| Volume Name | Container Path | Purpose |
+|-------------|----------------|---------|
+| `main`      | `/data`        | Stores `config.json`, `tunnelsatsv3.conf`, and synchronized metadata (`tunnelsats-meta.json`). |
 
-## 📄 License
+## Subcontainers
+
+| Subcontainer | Base Image | Entrypoint | Purpose |
+|--------------|------------|------------|---------|
+| `main`       | Debian Slim (Python 3) | `docker_entrypoint.sh` | Serves web UI on port 80 and runs the subscription synchronization daemon. |
+
+## File Models
+
+- **`config.json`**: Primary service configuration (`enabled`, `target-node`, `tunnelsats-conf`, `allow-ipv6`).
+- **`tunnelsatsv3.conf`**: WireGuard configuration file written to disk when enabled.
+- **`tunnelsats-meta.json`**: Cached subscription metadata (`expiresAt`, `lastSync`, `syncSuccess`, `serverDomain`, `vpnPort`).
+
+## Actions & Tasks
+
+- **Configure (`configure`)**: Allows users to enable/disable TunnelSats, select their target Lightning node (`lnd` or `cln`), paste their WireGuard configuration, and toggle IPv6 coexistence.
+- **Automated Tasks**:
+  - `tunnelsats:configure`: Raised when subscription has `<= 7 days` (Important) or `<= 3 days` / expired (Critical). Automatically cleared upon successful renewal.
+  - `lnd:custom-external-host-config` / `c-lightning:config`: 1-Click task to populate `custom-external-host` on the target Lightning node.
+
+## Network & Privacy Disclosure
+
+- **Subscription Synchronization**: This package periodically queries `https://tunnelsats.com/api/public/v1/subscription/status` (via the background `subscription_sync_loop` in `bridge.py`) using your WireGuard public key to verify subscription validity, expiration date, and assigned port.
+- **IPv4-Only Routing**: TunnelSats WireGuard tunnels route IPv4 traffic only. Under StartOS host gateway routing, IPv6 connections to your Lightning node are blackholed by default to prevent leaking residential ISP IP addresses. If you enable **Allow Home IPv6 Coexistence**, raw IPv6 traffic bypasses the VPN.
+
+## Development & Testing
+
+```bash
+# Run all tests (TypeScript, Python, BATS)
+npm run test:all
+
+# Typecheck and build bundle
+npm run check && npm run build
+```
+
+## License
+
 This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
