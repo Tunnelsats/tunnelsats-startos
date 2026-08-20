@@ -19,13 +19,15 @@ A privacy-focused companion package and routing guide for Lightning Network node
 
 ## Overview
 
-TunnelSats provides dedicated WireGuard VPN infrastructure specifically designed for Lightning Network nodes. On StartOS, WireGuard encapsulation and outbound policy routing are managed natively at the host OS level (**System > Gateways**), allowing Lightning nodes to establish secure, clearnet inbound connectivity while fully protecting node operators from residential ISP IP exposure.
+TunnelSats provides dedicated WireGuard VPN infrastructure specifically designed for Lightning Network nodes. On StartOS, WireGuard encapsulation and outbound policy routing are managed natively at the host OS level (**System > Gateways**). When properly connected and assigned as the outbound gateway on the target Lightning node, it enables clearnet inbound connectivity and routes outbound peer traffic through the VPN.
 
-This package provides:
-- A responsive Web Dashboard (port 80) displaying connection properties, expiration countdowns, and routing guides.
-- Automated StartOS tasks for 1-Click Lightning external host advertisement (`custom-external-host`).
-- Automated expiration alert tasks (7-day and 3-day warnings).
-- Periodic subscription metadata synchronization with `https://tunnelsats.com/api/public/v1/subscription/status`.
+> [!NOTE]
+> **Host-Managed Gateway Architecture**: WireGuard network tunnels and policy routes are configured and managed externally by the user at the StartOS host level. This companion package provides:
+> - A responsive Web Dashboard (port 80) displaying connection properties, expiration countdowns, and routing guides.
+> - Automated StartOS tasks for 1-Click Lightning external host advertisement (`custom-external-host`).
+> - Automated expiration alert tasks (7-day and 3-day warnings).
+> - Periodic subscription metadata synchronization with `https://tunnelsats.com/api/public/v1/subscription/status`.
+> - Package health checks validating Web UI availability and subscription validity (host gateway routing status is audited independently via StartOS Gateway settings).
 
 ## Quick Reference for AI Consumers
 
