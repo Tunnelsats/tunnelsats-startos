@@ -5,7 +5,7 @@ export const manifest = setupManifest({
   id: 'tunnelsats',
   title: 'TunnelSats',
   license: 'MIT',
-  packageRepo: 'https://github.com/Tunnelsats/tunnelsats-startos',
+  packageRepo: 'https://github.com/Start9-Community/tunnelsats-startos',
   upstreamRepo: 'https://github.com/Tunnelsats/tunnelsats',
   marketingUrl: 'https://tunnelsats.com',
   donationUrl: null,

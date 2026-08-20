@@ -2,12 +2,12 @@
 # ==============================================================================
 # TunnelSats StartOS 0.4.0 Service Diagnostic Tool
 # ==============================================================================
-# Audits TunnelSats service container status, WireGuard gateway reachability,
+# Audits TunnelSats service status, WireGuard gateway reachability,
 # target Lightning node inbound reachability (port 9735), and Tor connectivity.
 #
 # Usage:
-#   Inside container:  /app/verify.sh
-#   From StartOS host: ./verify.sh OR start-cli package attach tunnelsats /app/verify.sh
+#   Inside subcontainer:  /app/verify.sh
+#   From StartOS host:    ./verify.sh OR start-cli package attach tunnelsats /app/verify.sh
 # ==============================================================================
 
 set -euo pipefail
@@ -40,48 +40,25 @@ FAILED_CHECKS=0
 # 1. Environment & Container Status Check
 log_step "1. Environment & Container Status"
 
-ENGINE="none"
-CONTAINER_NAME="tunnelsats.embassy"
-CONTAINER_ID=""
-SUDO_CMD=""
+ENGINE="standalone"
 
 if [ -f "/app/bridge.py" ]; then
     ENGINE="inside"
-    log_info "Running diagnostic checks from inside the TunnelSats container namespace."
+    log_info "Running diagnostic checks from inside the TunnelSats subcontainer namespace."
+elif command -v start-cli &> /dev/null; then
+    ENGINE="host"
+    log_info "Running diagnostic checks from StartOS host with start-cli available."
 else
-    # Detect available container runtime
-    if command -v podman &> /dev/null; then
-        ENGINE="podman"
-    elif command -v docker &> /dev/null; then
-        ENGINE="docker"
-    fi
-
-    if [ "$EUID" -ne 0 ] && command -v sudo &> /dev/null; then
-        if sudo -n true 2>/dev/null; then
-            SUDO_CMD="sudo -n"
-        fi
-    fi
-
-    if [ "$ENGINE" != "none" ]; then
-        CONTAINER_ID=$($SUDO_CMD $ENGINE ps -q -f "name=$CONTAINER_NAME" 2>/dev/null || true)
-        if [ -z "$CONTAINER_ID" ]; then
-            CONTAINER_ID=$($SUDO_CMD $ENGINE ps -q -f "name=tunnelsats" 2>/dev/null || true)
-        fi
-    fi
-
-    if [ -n "$CONTAINER_ID" ]; then
-        log_info "Detected TunnelSats container running via $ENGINE ($CONTAINER_ID)."
-    else
-        log_info "Running diagnostics in standalone local mode."
-    fi
+    ENGINE="standalone"
+    log_info "Running diagnostics in standalone local mode."
 fi
 
 # 2. Querying TunnelSats Gateway Status
 log_step "2. Querying TunnelSats Gateway Status"
 API_DATA=""
-if [ "$ENGINE" != "inside" ] && [ -n "$CONTAINER_ID" ]; then
-    API_DATA=$($SUDO_CMD $ENGINE exec -i $CONTAINER_NAME python3 -c "
-import urllib.request, json
+if [ "$ENGINE" == "host" ]; then
+    API_DATA=$(start-cli package attach tunnelsats -- python3 -c "
+import urllib.request
 for path in ['/api/status', '/api/properties']:
     try:
         req = urllib.request.Request('http://127.0.0.1' + path, headers={'Host': 'localhost'})
@@ -91,9 +68,11 @@ for path in ['/api/status', '/api/properties']:
     except Exception:
         continue
 " 2>/dev/null | tr -d '\r' || true)
-else
+fi
+
+if [ -z "$API_DATA" ]; then
     API_DATA=$(python3 -c "
-import urllib.request, json
+import urllib.request
 for path in ['/api/status', '/api/properties']:
     try:
         req = urllib.request.Request('http://127.0.0.1' + path, headers={'Host': 'localhost'})
@@ -118,11 +97,12 @@ ALLOW_IPV6="False"
 if [ -n "$API_DATA" ]; then
     PARSED_VALUES=$(printf '%s\n' "$API_DATA" | python3 -c "
 import json, sys
+
 try:
-    raw = json.load(sys.stdin)
-    data = raw.get('data', raw)
-    status = raw.get('status', 'running' if raw.get('enabled', False) else 'stopped')
-    vpn_conn = raw.get('vpn_connected', True if raw.get('enabled', False) else False)
+    data = json.loads(sys.stdin.read())
+    raw = data.get('raw', data)
+    status = raw.get('status', data.get('Status', {}).get('value', 'unknown'))
+    vpn_conn = raw.get('vpn_connected', data.get('VPN Connected', {}).get('value', False))
     handshake = raw.get('handshake', 'active' if vpn_conn else 'none')
     vpn_ip = raw.get('vpn_ip', raw.get('internal_octet', data.get('Internal IP (Last Octet)', {}).get('value', '')))
     vpn_port = raw.get('vpn_port', data.get('Forwarding Port', {}).get('value', ''))
@@ -256,7 +236,7 @@ fi
 if [ "$ENGINE" == "inside" ]; then
     log_warn "Target-node live egress probes cannot run from inside an isolated container namespace."
     log_info "To audit live target egress, run ./verify.sh from the host or use the CLI commands above."
-elif command -v start-cli &>/dev/null; then
+elif [ "$ENGINE" == "host" ]; then
     log_info "Executing live target node egress probe via host start-cli..."
     TARGET_EGRESS=""
     if TARGET_EGRESS=$(start-cli package attach "$TARGET_PKG" -- curl -s --connect-timeout 5 https://api.ipify.org 2>/dev/null); then

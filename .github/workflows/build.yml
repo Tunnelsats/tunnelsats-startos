@@ -2,96 +2,48 @@ name: Build StartOS Package
 
 on:
   push:
-    branches: [main, main-0.4.0, develop, feat/startos-0.4.0]
+    branches:
+      - main
     paths-ignore:
       - '**.md'
       - 'LICENSE'
       - '.gitignore'
   pull_request:
-    branches: [main, main-0.4.0, develop]
+    branches:
+      - main
     paths-ignore:
       - '**.md'
       - 'LICENSE'
       - '.gitignore'
 
-env:
-  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: 'true'
-
 jobs:
   test:
-    name: Run Unit Tests
+    name: Run Unit & Integration Tests
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v7
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Install dependencies
+        run: npm ci
 
       - name: Set up Python
-        uses: actions/setup-python@v7
+        uses: actions/setup-python@v5
         with:
           python-version: '3.11'
 
-      - name: Run Python unit tests
-        run: python3 -m unittest discover -s tests -p "test_*.py"
+      - name: Run complete test suite
+        run: npm run test:all
 
-      - name: Install bats
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y bats
-
-      - name: Run bats tests
-        run: bats tests/
+      - name: TypeScript typecheck
+        run: npm run check
 
   build:
-    name: Build s9pk packages
+    name: Build StartOS Package
     needs: test
-    runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        arch: [x86_64, aarch64]
-
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v7
-
-      - name: Set up Node.js
-        uses: actions/setup-node@v7
-        with:
-          node-version: '22'
-          cache: 'npm'
-
-      - name: Install Node dependencies
-        run: npm ci
-
-      - name: Install System dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y squashfs-tools squashfs-tools-ng jq
-
-      - name: Install start-cli
-        run: |
-          curl -L -o start-cli https://github.com/Start9Labs/start-technologies/releases/download/start-cli%2Fv1.0.1/start-cli_x86_64-linux
-          chmod +x start-cli
-          mkdir -p ~/.local/bin
-          mv start-cli ~/.local/bin/
-          echo "$HOME/.local/bin" >> $GITHUB_PATH
-
-      - name: Initialize Developer Key & Workspace
-        run: |
-          mkdir -p ~/.startos
-          start-cli init-key
-          start-cli s9pk init-workspace ..
-
-      - name: Set up QEMU
-        uses: docker/setup-qemu-action@v4
-
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v4
-
-      - name: Build and Pack s9pk
-        run: make arch/${{ matrix.arch }}
-
-      - name: Upload Package Artifact
-        uses: actions/upload-artifact@v7
-        with:
-          name: tunnelsats-${{ matrix.arch }}.s9pk
-          path: tunnelsats_${{ matrix.arch }}.s9pk
+    uses: Start9Labs/start-technologies/.github/workflows/build.yml@be6d7dc7613bb7a7abe1d2318ba1d233cdef725e # master
