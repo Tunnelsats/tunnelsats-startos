@@ -140,26 +140,32 @@ export function getSubscriptionExpiryTask(
     return { shouldCreateTask: false, clearTaskKey }
   }
 
-  // 1. Prioritize live/synchronized metadata expiry date
-  let expiryStr = meta?.expiresAt?.trim()
+  const candidateDates: Date[] = []
 
-  // 2. Fallback to embedded comment in WireGuard configuration
-  if (!expiryStr) {
-    const wgConf = config['tunnelsats-conf']
-    const validUntilMatch = wgConf.match(/#\s*(?:Valid Until|Expires At|Expiry):\s*(.+)/i)
-    if (validUntilMatch) {
-      expiryStr = validUntilMatch[1].trim()
+  if (meta?.expiresAt) {
+    const metaDate = new Date(meta.expiresAt.trim())
+    if (!isNaN(metaDate.getTime())) {
+      candidateDates.push(metaDate)
     }
   }
 
-  if (!expiryStr) {
+  const wgConf = config['tunnelsats-conf']
+  const validUntilMatch = wgConf.match(/#\s*(?:Valid Until|Expires At|Expiry):\s*(.+)/i)
+  if (validUntilMatch) {
+    const commentDate = new Date(validUntilMatch[1].trim())
+    if (!isNaN(commentDate.getTime())) {
+      candidateDates.push(commentDate)
+    }
+  }
+
+  if (candidateDates.length === 0) {
     return { shouldCreateTask: false, clearTaskKey }
   }
 
-  const expiryDate = new Date(expiryStr)
-  if (isNaN(expiryDate.getTime())) {
-    return { shouldCreateTask: false, clearTaskKey }
-  }
+  // Use the latest known valid expiration date between live synchronization and user configuration
+  const expiryDate = new Date(
+    Math.max(...candidateDates.map((d) => d.getTime())),
+  )
 
   const timeDiffMs = expiryDate.getTime() - currentDate.getTime()
   const daysRemaining = Math.floor(timeDiffMs / (1000 * 60 * 60 * 24))
