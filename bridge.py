@@ -100,7 +100,7 @@ def lazy_sync(wg_pubkey):
         data=data,
         headers={
             "Content-Type": "application/json",
-            "User-Agent": "tunnelsats-startos/0.2.0"
+            "User-Agent": f"TunnelSats-StartOS/{get_package_version()}"
         },
         method="POST"
     )
@@ -255,19 +255,24 @@ def get_package_version():
     if _package_version_cache is not None:
         return _package_version_cache
 
+    env_ver = os.environ.get("PACKAGE_VERSION")
+    if env_ver:
+        _package_version_cache = env_ver.partition(':')[0]
+        return _package_version_cache
+
     vpath = os.path.join(os.path.dirname(__file__), "version.json")
     if os.path.exists(vpath):
         try:
             with open(vpath, "r") as f:
                 data = json.load(f)
-                ver = data.get("version")
+                ver = data.get("semver") or data.get("version")
                 if ver:
                     _package_version_cache = ver.partition(':')[0]
                     return _package_version_cache
         except Exception:
             pass
 
-    _package_version_cache = "Unknown"
+    _package_version_cache = "0.4.0"
     return _package_version_cache
 
 class DashboardHTTPRequestHandler(BaseHTTPRequestHandler):
@@ -528,10 +533,7 @@ def proxy_down():
     print("Outbound policy routing stopped.")
     return True
 
-def check_proxy_health():
-    if is_wireguard_running():
-        return {"status": "running", "proxy_ready": True}
-    return {"status": "stopped", "proxy_ready": False}
+
 
 def shutdown_handler(signum, frame):
     print("Received shutdown signal. Stopping services...")
@@ -562,7 +564,7 @@ def check_gateway_reachable():
         # Probe TunnelSats API transport to confirm active outbound connectivity
         req = urllib.request.Request(
             f"{TUNNELSATS_API_URL}/subscription/info",
-            headers={"User-Agent": "TunnelSats-StartOS/0.4.0"}
+            headers={"User-Agent": f"TunnelSats-StartOS/{get_package_version()}"}
         )
         try:
             with urllib.request.urlopen(req, timeout=3) as resp:
@@ -626,70 +628,6 @@ def validate_config(wg_conf):
         raise ValueError("Missing 'Endpoint' routing property.")
     if not re.search(r'#\s*(?:VPNPort|Port Forwarding):\s*\d+', wg_conf, re.IGNORECASE):
         raise ValueError("Missing port-forwarding metadata (e.g., # Port Forwarding: XXXXX).")
-
-def get_properties():
-    try:
-        with open(CONFIG_PATH, 'r') as f:
-            config_content = f.read()
-            
-        vpn_port = extract_vpn_port(config_content)
-        
-        endpoint_match = re.search(r'^\s*(?!#|;)\s*Endpoint\s*=\s*([^:\s]+):\d+', config_content, re.IGNORECASE | re.MULTILINE)
-        public_ip = endpoint_match.group(1) if endpoint_match else "Unknown"
-        
-        pubkey = get_wg_pubkey()
-                
-        wg_ip = get_wg_ip()
-        internal_octet = wg_ip.split('.')[-1] if wg_ip else "Unknown"
-        
-        properties = {
-            "version": 2,
-            "data": {
-                "WireGuard Public Key": {
-                    "type": "string",
-                    "value": pubkey,
-                    "description": "Used to link this StartOS node to your tunnelsats.com dashboard.",
-                    "copyable": True
-                },
-                "Internal IP (Last Octet)": {
-                    "type": "string",
-                    "value": internal_octet,
-                    "description": "Provide this 3-digit octet on the dashboard to confirm your identity.",
-                    "copyable": True
-                },
-                "TunnelSats Public IP": {
-                    "type": "string",
-                    "value": public_ip,
-                    "description": "Your designated external IPv4 address for Clearnet routing.",
-                    "copyable": True
-                },
-                "Forwarding Port": {
-                    "type": "string",
-                    "value": str(vpn_port),
-                    "description": "Your assigned port for inbound Lightning connections.",
-                    "copyable": True
-                },
-                "Subscription Expiry": {
-                    "type": "string",
-                    "value": format_subscription_expiry(),
-                    "description": "Remaining validity of your TunnelSats subscription.",
-                    "copyable": False
-                }
-            }
-        }
-        
-    except FileNotFoundError:
-        properties = {
-            "version": 2,
-            "data": {
-                "Service Status": {
-                    "type": "string",
-                    "value": "Unconfigured",
-                    "description": "Configure your TunnelSats config in the settings to display connection properties."
-                }
-            }
-        }
-    print(json.dumps(properties))
 
 def main():
     if len(sys.argv) < 2:
@@ -772,151 +710,9 @@ def main():
             else:
                 print(json.dumps({"result": "VPN is not connected"}))
                 sys.exit(1)
-        elif target == "proxy":
-            status = check_proxy_health()
-            if status["proxy_ready"]:
-                print(json.dumps({"result": "ok"}))
-                sys.exit(0)
-            else:
-                print(json.dumps({"result": "Proxy is not ready"}))
-                sys.exit(1)
 
 
-    elif command == "properties":
-        get_properties()
-        
-    elif command == "config":
-        subcommand = sys.argv[2] if len(sys.argv) > 2 else None
-        
-        if subcommand == "get":
-            # The UI requires the 'spec' metadata exactly as defined in config_spec.yaml
-            spec = {
-                "enabled": {
-                    "type": "boolean",
-                    "name": "Enable TunnelSats",
-                    "description": "Turn the TunnelSats VPN tunnel On or Off.",
-                    "nullable": True,
-                    "default": False,
-                    "depends-on": {}
-                },
-                "target-node": {
-                    "type": "enum",
-                    "name": "Target Lightning Node",
-                    "description": "Select which Lightning service on your StartOS server will receive inbound connections.",
-                    "values": ["lnd", "cln"],
-                    "value-names": {
-                        "lnd": "LND (lnd.embassy)",
-                        "cln": "Core Lightning (c-lightning.embassy)"
-                    },
-                    "default": "lnd",
-                    "depends-on": {}
-                },
-                "tunnelsats-conf": {
-                    "type": "string",
-                    "name": "WireGuard Configuration",
-                    "description": "Paste the content of your TunnelSats .conf file here. Ensure it includes the '# VPNPort: XXXXX' metadata comment for automatic port-forwarding.",
-                    "nullable": True,
-                    "default": None,
-                    "placeholder": "[Interface]\nPrivateKey = <your_private_key>\nAddress = 10.x.x.x/32\n# VPNPort: 12345\n...\n",
-                    "textarea": True,
-                    "copyable": True,
-                    "masked": False,
-                    "depends-on": {}
-                }
-            }
-            
-            # StartOS calls this to populate the UI
-            if os.path.exists(APP_CONFIG_PATH):
-                try:
-                    with open(APP_CONFIG_PATH, 'r') as f:
-                        config_data = json.load(f)
-                except Exception:
-                    config_data = None
-            else:
-                config_data = None
 
-            if not isinstance(config_data, dict):
-                config_data = {
-                    "enabled": False,
-                    "target-node": "lnd",
-                    "tunnelsats-conf": ""
-                }
-                
-            target_node = config_data.get("target-node", "lnd")
-            depends_on = {}
-            if target_node == "lnd":
-                depends_on["lnd"] = []
-            elif target_node in ("cln", "c-lightning"):
-                depends_on["c-lightning"] = []
-
-            print(json.dumps({
-                "config": config_data,
-                "spec": spec,
-                "depends-on": depends_on
-            }))
-                
-        elif subcommand == "set":
-            # StartOS passes the UI values via stdin
-            try:
-                raw_input = json.load(sys.stdin)
-                
-                # Handle both wrapped and unwrapped (for tests) formats
-                if isinstance(raw_input, dict) and "config" in raw_input:
-                    config_data = raw_input.get("config", {})
-                    depends_on = raw_input.get("depends-on", {})
-                else:
-                    config_data = raw_input
-                    depends_on = {}
-                
-                if not isinstance(config_data, dict):
-                    config_data = {}
-
-                enabled = config_data.get("enabled", False)
-                wg_conf = config_data.get("tunnelsats-conf") or ""
-                
-                if enabled and not wg_conf:
-                    print("Invalid WireGuard Configuration: enabled tunnels require a WireGuard configuration", file=sys.stderr)
-                    sys.exit(1)
-                
-                if wg_conf:
-                    try:
-                        validate_config(wg_conf)
-                    except ValueError as ve:
-                        print(f"Invalid WireGuard Configuration: {str(ve)}", file=sys.stderr)
-                        sys.exit(1)
-                
-                # 1. Save the JSON config for future "get" calls
-                atomic_write_json(APP_CONFIG_PATH, config_data)
-                
-                # 2. Extract the .conf blob and write it to the WireGuard path
-                if wg_conf:
-                    with open(CONFIG_PATH, 'w') as f:
-                        f.write(wg_conf)
-                elif "tunnelsats-conf" in config_data and config_data["tunnelsats-conf"] in ("", None):
-                    if os.path.exists(CONFIG_PATH):
-                        try:
-                            os.remove(CONFIG_PATH)
-                        except Exception:
-                            pass
-                
-
-                
-                target_node = config_data.get("target-node", "lnd")
-                depends_on = {}
-                if target_node == "lnd":
-                    depends_on["lnd"] = []
-                elif target_node in ("cln", "c-lightning"):
-                    depends_on["c-lightning"] = []
-
-                # StartOS always expects the wrapped format with top-level depends-on
-                print(json.dumps({
-                    "config": config_data,
-                    "depends-on": depends_on
-                }))
-                    
-            except Exception as e:
-                print(f"Error setting config: {str(e)}", file=sys.stderr)
-                sys.exit(1)
     else:
         print(f"Unknown command: {command}")
         sys.exit(1)

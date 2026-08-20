@@ -14,6 +14,9 @@ tag_version=${BASH_REMATCH[1]}.${BASH_REMATCH[2]}.${BASH_REMATCH[3]}
 script_dir=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
 repo_root=$(cd -- "$script_dir/.." && pwd)
 
+# Unconditionally synchronize version.json first
+node "$script_dir/sync-version.js"
+
 package_version=$(jq -er '.version | select(type == "string" and length > 0)' "$repo_root/package.json")
 package_version=${package_version%%[-+]*}
 
@@ -27,6 +30,15 @@ startos_version=${startos_version%%:*}
 if [ "$package_version" != "$startos_version" ]; then
   echo "package.json version $package_version does not match StartOS version $startos_version" >&2
   exit 1
+fi
+
+if [ -f "$repo_root/version.json" ]; then
+  json_version=$(jq -er '.semver // .version | select(type == "string" and length > 0)' "$repo_root/version.json")
+  json_version=${json_version%%:*}
+  if [ "$json_version" != "$package_version" ]; then
+    echo "version.json version $json_version does not match package version $package_version" >&2
+    exit 1
+  fi
 fi
 
 if [ "$tag_version" != "$package_version" ]; then

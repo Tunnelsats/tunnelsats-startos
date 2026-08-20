@@ -36,3 +36,20 @@ Address = 10.0.0.1/32
 
 if __name__ == '__main__':
     unittest.main()
+
+class TestPackageVersion(unittest.TestCase):
+    def setUp(self):
+        bridge._package_version_cache = None
+
+    def tearDown(self):
+        bridge._package_version_cache = None
+
+    def test_get_package_version_from_version_json(self):
+        ver = bridge.get_package_version()
+        self.assertEqual(ver, "0.4.0")
+
+    def test_get_package_version_from_env(self):
+        with unittest.mock.patch.dict(os.environ, {"PACKAGE_VERSION": "1.2.3:4"}):
+            bridge._package_version_cache = None
+            ver = bridge.get_package_version()
+            self.assertEqual(ver, "1.2.3")
