@@ -29,6 +29,17 @@ if [ "$package_version" != "$startos_version" ]; then
   exit 1
 fi
 
+# Synchronize and validate version.json
+node "$script_dir/sync-version.js"
+if [ -f "$repo_root/version.json" ]; then
+  json_version=$(jq -er '.semver // .version | select(type == "string" and length > 0)' "$repo_root/version.json")
+  json_version=${json_version%%:*}
+  if [ "$json_version" != "$package_version" ]; then
+    echo "version.json version $json_version does not match package version $package_version" >&2
+    exit 1
+  fi
+fi
+
 if [ "$tag_version" != "$package_version" ]; then
   echo "Release tag version $tag_version does not match package version $package_version" >&2
   exit 1
