@@ -1,7 +1,9 @@
 ARCHES := x86_64 aarch64
 
-# Ensure version.json is synchronized from startos/versions/current.ts
-version.json: startos/versions/current.ts scripts/sync-version.js
+.PHONY: version.json
+
+# Always synchronize version.json from startos/versions/current.ts on every build
+version.json:
 	node scripts/sync-version.js
 
 # overrides to s9pk.mk must precede the include statement
