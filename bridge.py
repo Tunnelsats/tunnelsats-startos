@@ -255,19 +255,24 @@ def get_package_version():
     if _package_version_cache is not None:
         return _package_version_cache
 
+    env_ver = os.environ.get("PACKAGE_VERSION")
+    if env_ver:
+        _package_version_cache = env_ver.partition(':')[0]
+        return _package_version_cache
+
     vpath = os.path.join(os.path.dirname(__file__), "version.json")
     if os.path.exists(vpath):
         try:
             with open(vpath, "r") as f:
                 data = json.load(f)
-                ver = data.get("version")
+                ver = data.get("semver") or data.get("version")
                 if ver:
                     _package_version_cache = ver.partition(':')[0]
                     return _package_version_cache
         except Exception:
             pass
 
-    _package_version_cache = "Unknown"
+    _package_version_cache = "0.4.0"
     return _package_version_cache
 
 class DashboardHTTPRequestHandler(BaseHTTPRequestHandler):

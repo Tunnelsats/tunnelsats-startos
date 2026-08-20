@@ -3,7 +3,7 @@
   "version": "0.4.0",
   "scripts": {
     "test": "tsx --test tests/*.test.ts",
-    "build": "rm -rf ./javascript && ncc build startos/index.ts -o ./javascript",
+    "build": "node scripts/sync-version.js && rm -rf ./javascript && ncc build startos/index.ts -o ./javascript",
     "prettier": "prettier --write startos",
     "check": "tsc --noEmit"
   },
