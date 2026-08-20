@@ -1,0 +1,11 @@
+.git
+.gitignore
+.github
+node_modules
+*.s9pk
+docker-images
+*.tar
+.agents
+.vscode
+.idea
+tests
