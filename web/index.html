@@ -133,13 +133,19 @@
         <!-- Documentation & Guides Card -->
         <section class="card glass-card span-2 docs-card">
           <div class="docs-header">
-            <h2>Lightning Routing Setup Guides</h2>
+            <h2>Lightning Routing &amp; Gateway Setup Guides</h2>
             <div class="tabs">
               <button
                 class="tab-btn active"
+                onclick="switchTab('gateway-tab', this)"
+              >
+                WireGuard Gateway
+              </button>
+              <button
+                class="tab-btn"
                 onclick="switchTab('lnd-tab', this)"
               >
-                LND
+                LND Node
               </button>
               <button class="tab-btn" onclick="switchTab('cln-tab', this)">
                 Core Lightning (CLN)
@@ -147,7 +153,22 @@
             </div>
           </div>
 
-          <div class="tab-content active" id="lnd-tab">
+          <div class="tab-content active" id="gateway-tab">
+            <p class="guide-intro">
+              <strong>Step-by-Step StartOS 0.4.0 Native Gateway Configuration:</strong>
+            </p>
+            <ol style="padding-left: 1.25rem; line-height: 1.6; margin: 0.75rem 0; color: #cbd5e1; font-size: 0.9rem;">
+              <li><strong>Add Gateway in StartOS:</strong> Navigate to <strong>System</strong> &rarr; <strong>Gateways</strong> &rarr; click <strong>Add Gateway</strong>.</li>
+              <li><strong>Select WireGuard:</strong> Choose <strong>WireGuard</strong> and paste your TunnelSats <code>.conf</code> file content.</li>
+              <li><strong>Set Outbound Policy Routing:</strong> Open your target node (<strong>LND</strong> or <strong>Core Lightning</strong>) &rarr; <strong>Actions</strong> &rarr; <strong>Set Outbound Gateway</strong> &rarr; select your TunnelSats gateway.</li>
+              <li><strong>Inbound Lightning Traffic:</strong> Inbound connections to your TunnelSats port automatically forward to port <code>9735</code> on your node.</li>
+            </ol>
+            <div class="info-box" style="margin-top: 1rem; background: rgba(51, 153, 255, 0.1); border: 1px solid rgba(51, 153, 255, 0.3); border-radius: 8px; padding: 0.75rem 1rem; font-size: 0.875rem;">
+              <strong>Host-Managed Privacy:</strong> StartOS manages kernel WireGuard encapsulation and outbound policy routing natively. IPv6 traffic is automatically blackholed by StartOS when routing through an IPv4-only gateway to prevent ISP leaks.
+            </div>
+          </div>
+
+          <div class="tab-content" id="lnd-tab">
             <p class="guide-intro">
               <strong>StartOS 0.4.0 Zero-Hassle LND Setup:</strong><br />
               When TunnelSats is enabled, StartOS automatically prompts you with a <strong>1-Click Task</strong>! Alternatively, open <strong>LND</strong> &rarr; <strong>Actions &amp; Config</strong> &rarr; <strong>Configuration</strong> &rarr; <strong>Custom External Host</strong>:

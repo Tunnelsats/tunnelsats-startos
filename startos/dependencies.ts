@@ -1,8 +1,10 @@
 import { isIPv6, isIPv4 } from 'node:net'
 import { sdk } from './sdk'
 import { configJson } from './fileModels/config.json'
+import { tunnelsatsMeta } from './fileModels/tunnelsatsMeta'
 import { i18n } from './i18n'
 import { parseWireguardTunnelInfo } from './utils'
+import { configure } from './actions/configure'
 import { customExternalHostConfig } from 'lnd-startos/startos/actions/config/customExternalHost'
 import { config as clnConfigAction } from 'cln-startos/startos/actions/config/config'
 
@@ -11,6 +13,22 @@ export interface TargetGatewayConfig {
   clearPackage: 'lnd' | 'c-lightning'
   gatewayName: string
   announceEndpoint: string | null
+}
+
+export interface SubscriptionMeta {
+  expiresAt?: string
+  lastSync?: string
+  syncSuccess?: boolean
+  syncError?: string | null
+  serverDomain?: string
+  vpnPort?: number
+}
+
+export interface SubscriptionExpiryTask {
+  shouldCreateTask: boolean
+  severity?: 'critical' | 'important'
+  reason?: string
+  clearTaskKey: string
 }
 
 export function getAnnounceEndpoint(
@@ -108,6 +126,86 @@ export function getGatewayTaskDetails(
   }
 }
 
+export function getSubscriptionExpiryTask(
+  config: {
+    enabled?: boolean
+    'tunnelsats-conf'?: string | null
+  } | null | undefined,
+  meta?: SubscriptionMeta | null,
+  currentDate = new Date(),
+): SubscriptionExpiryTask {
+  const clearTaskKey = 'tunnelsats:configure'
+
+  if (!config?.enabled || !config['tunnelsats-conf']) {
+    return { shouldCreateTask: false, clearTaskKey }
+  }
+
+  const candidateDates: Date[] = []
+
+  if (meta?.expiresAt) {
+    const metaDate = new Date(meta.expiresAt.trim())
+    if (!isNaN(metaDate.getTime())) {
+      candidateDates.push(metaDate)
+    }
+  }
+
+  const wgConf = config['tunnelsats-conf']
+  const validUntilMatch = wgConf.match(/#\s*(?:Valid Until|Expires At|Expiry):\s*(.+)/i)
+  if (validUntilMatch) {
+    const commentDate = new Date(validUntilMatch[1].trim())
+    if (!isNaN(commentDate.getTime())) {
+      candidateDates.push(commentDate)
+    }
+  }
+
+  if (candidateDates.length === 0) {
+    return { shouldCreateTask: false, clearTaskKey }
+  }
+
+  // Use the latest known valid expiration date between live synchronization and user configuration
+  const expiryDate = new Date(
+    Math.max(...candidateDates.map((d) => d.getTime())),
+  )
+
+  const timeDiffMs = expiryDate.getTime() - currentDate.getTime()
+  const daysRemaining = Math.floor(timeDiffMs / (1000 * 60 * 60 * 24))
+
+  if (timeDiffMs <= 0) {
+    return {
+      shouldCreateTask: true,
+      severity: 'critical',
+      reason: i18n(
+        'TunnelSats WireGuard subscription has expired. Paste a renewed configuration in settings to restore inbound connectivity.',
+      ),
+      clearTaskKey,
+    }
+  }
+
+  if (daysRemaining <= 3) {
+    return {
+      shouldCreateTask: true,
+      severity: 'critical',
+      reason: i18n(
+        'TunnelSats subscription expires in <= 3 days. Renew subscription to avoid connection disruption.',
+      ),
+      clearTaskKey,
+    }
+  }
+
+  if (daysRemaining <= 7) {
+    return {
+      shouldCreateTask: true,
+      severity: 'important',
+      reason: i18n(
+        'TunnelSats subscription expires in <= 7 days. Plan your renewal to maintain uptime.',
+      ),
+      clearTaskKey,
+    }
+  }
+
+  return { shouldCreateTask: false, clearTaskKey }
+}
+
 export function getDependenciesForConfig(
   config: { enabled?: boolean; 'target-node'?: 'lnd' | 'cln' } | null | undefined,
 ) {
@@ -136,8 +234,25 @@ export function getDependenciesForConfig(
 
 export const setDependencies = sdk.setupDependencies(async ({ effects }) => {
   const config = await configJson.read().const(effects)
-  const gatewayConfig = getTargetGatewayConfig(config)
+  const meta = await tunnelsatsMeta.read().const(effects).catch(() => null)
 
+  // 1. Proactive Subscription Expiry Alert Task
+  const expiryTask = getSubscriptionExpiryTask(config, meta)
+  if (expiryTask.shouldCreateTask && expiryTask.severity && expiryTask.reason) {
+    await sdk.action.createOwnTask(
+      effects,
+      configure,
+      expiryTask.severity,
+      {
+        reason: expiryTask.reason,
+      },
+    )
+  } else {
+    await sdk.action.clearTask(effects, expiryTask.clearTaskKey)
+  }
+
+  // 2. 1-Click Lightning Node External Host Announcement Task
+  const gatewayConfig = getTargetGatewayConfig(config)
   if (gatewayConfig && gatewayConfig.announceEndpoint) {
     const taskDetails = getGatewayTaskDetails(
       gatewayConfig.targetPackage,

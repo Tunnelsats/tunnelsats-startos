@@ -22,6 +22,9 @@ export const es_ES: LangDict = {
   18: 'El panel web no es accesible',
   19: 'Estado de la suscripción',
   20: 'La suscripción está activa',
+  21: 'La suscripción de WireGuard a TunnelSats ha caducado. Pegue una configuración renovada en los ajustes para restaurar la conectividad entrante.',
+  22: 'La suscripción a TunnelSats caduca en <= 3 días. Renuévela para evitar interrupciones de conexión.',
+  23: 'La suscripción a TunnelSats caduca en <= 7 días. Planifique su renovación para mantener el servicio activo.',
 }
 
 export const de_DE: LangDict = {
@@ -46,6 +49,9 @@ export const de_DE: LangDict = {
   18: 'Web-Dashboard ist nicht erreichbar',
   19: 'Abonnementstatus',
   20: 'Abonnement ist aktiv',
+  21: 'Das TunnelSats WireGuard-Abonnement ist abgelaufen. Fügen Sie in den Einstellungen eine erneuerte Konfiguration ein, um eingehende Verbindungen wiederherzustellen.',
+  22: 'Das TunnelSats-Abonnement läuft in <= 3 Tagen ab. Bitte erneuern Sie das Abonnement, um Verbindungsunterbrechungen zu vermeiden.',
+  23: 'Das TunnelSats-Abonnement läuft in <= 7 Tagen ab. Planen Sie Ihre Erneuerung, um Ausfallzeiten zu vermeiden.',
 }
 
 export const pl_PL: LangDict = {
@@ -70,6 +76,9 @@ export const pl_PL: LangDict = {
   18: 'Pulpit sieciowy jest niedostępny',
   19: 'Status subskrypcji',
   20: 'Subskrypcja jest aktywna',
+  21: 'Subskrypcja WireGuard TunnelSats wygasła. Wklej odnowioną konfigurację w ustawieniach, aby przywrócić łączność przychodzącą.',
+  22: 'Subskrypcja TunnelSats wygasa za <= 3 dni. Odnów subskrypcję, aby uniknąć przerw w połączeniu.',
+  23: 'Subskrypcja TunnelSats wygasa za <= 7 dni. Zaplanuj odnowienie, aby utrzymać ciągłość działania.',
 }
 
 export const fr_FR: LangDict = {
@@ -94,6 +103,9 @@ export const fr_FR: LangDict = {
   18: 'Le tableau de bord Web n’est pas accessible',
   19: 'État de l’abonnement',
   20: 'L’abonnement est actif',
+  21: 'L’abonnement WireGuard TunnelSats a expiré. Collez une configuration renouvelée dans les paramètres pour rétablir la connectivité entrante.',
+  22: 'L’abonnement TunnelSats expire dans <= 3 jours. Renouvelez votre abonnement pour éviter toute interruption de connexion.',
+  23: 'L’abonnement TunnelSats expire dans <= 7 jours. Planifiez votre renouvellement pour maintenir la disponibilité.',
 }
 
 export default {
