@@ -30,3 +30,74 @@ test('getDependenciesForConfig returns c-lightning dependency when enabled and t
     },
   })
 })
+
+import { getSubscriptionExpiryTask } from '../startos/dependencies'
+
+test('getSubscriptionExpiryTask returns no task when disabled or unconfigured', () => {
+  const resNull = getSubscriptionExpiryTask(null)
+  assert.equal(resNull.shouldCreateTask, false)
+  assert.equal(resNull.clearTaskKey, 'tunnelsats:configure')
+
+  const resDisabled = getSubscriptionExpiryTask({
+    enabled: false,
+    'tunnelsats-conf': '[Interface]\n# Valid Until: 2026-08-25T12:00:00Z\n',
+  })
+  assert.equal(resDisabled.shouldCreateTask, false)
+  assert.equal(resDisabled.clearTaskKey, 'tunnelsats:configure')
+})
+
+test('getSubscriptionExpiryTask returns no task when subscription has > 7 days remaining', () => {
+  const currentDate = new Date('2026-08-20T12:00:00Z')
+  const conf = '[Interface]\n# Valid Until: 2026-08-30T12:00:00Z\nPrivateKey=xxx\nAddress=10.9.0.1/32\n# VPNPort: 12345\n[Peer]\nEndpoint=1.2.3.4:51820'
+  const res = getSubscriptionExpiryTask({ enabled: true, 'tunnelsats-conf': conf }, currentDate)
+  assert.equal(res.shouldCreateTask, false)
+  assert.equal(res.clearTaskKey, 'tunnelsats:configure')
+})
+
+test('getSubscriptionExpiryTask returns important task when subscription has <= 7 days remaining', () => {
+  const currentDate = new Date('2026-08-20T12:00:00Z')
+  const conf = '[Interface]\n# Valid Until: 2026-08-26T12:00:00Z\nPrivateKey=xxx\nAddress=10.9.0.1/32\n# VPNPort: 12345\n[Peer]\nEndpoint=1.2.3.4:51820'
+  const res = getSubscriptionExpiryTask({ enabled: true, 'tunnelsats-conf': conf }, currentDate)
+  assert.equal(res.shouldCreateTask, true)
+  assert.equal(res.severity, 'important')
+  assert.match(res.reason || '', /7 days/i)
+})
+
+test('getSubscriptionExpiryTask returns critical task when subscription has <= 3 days remaining', () => {
+  const currentDate = new Date('2026-08-20T12:00:00Z')
+  const conf = '[Interface]\n# Valid Until: 2026-08-22T12:00:00Z\nPrivateKey=xxx\nAddress=10.9.0.1/32\n# VPNPort: 12345\n[Peer]\nEndpoint=1.2.3.4:51820'
+  const res = getSubscriptionExpiryTask({ enabled: true, 'tunnelsats-conf': conf }, currentDate)
+  assert.equal(res.shouldCreateTask, true)
+  assert.equal(res.severity, 'critical')
+  assert.match(res.reason || '', /3 days/i)
+})
+
+test('getSubscriptionExpiryTask returns critical task when subscription is expired', () => {
+  const currentDate = new Date('2026-08-20T12:00:00Z')
+  const conf = '[Interface]\n# Valid Until: 2026-08-15T12:00:00Z\nPrivateKey=xxx\nAddress=10.9.0.1/32\n# VPNPort: 12345\n[Peer]\nEndpoint=1.2.3.4:51820'
+  const res = getSubscriptionExpiryTask({ enabled: true, 'tunnelsats-conf': conf }, currentDate)
+  assert.equal(res.shouldCreateTask, true)
+  assert.equal(res.severity, 'critical')
+  assert.match(res.reason || '', /expired/i)
+})
+
+test('getSubscriptionExpiryTask prioritizes synchronized meta over static comment', () => {
+  const currentDate = new Date('2026-08-20T12:00:00Z')
+  // Old comment says 2 days remaining (expires 2026-08-22), but synchronized meta says renewed to 2026-09-20 (> 30 days)
+  const conf = '[Interface]\n# Valid Until: 2026-08-22T12:00:00Z\nPrivateKey=xxx\nAddress=10.9.0.1/32\n# VPNPort: 12345\n[Peer]\nEndpoint=1.2.3.4:51820'
+  const meta = { expiresAt: '2026-09-20T12:00:00Z', syncSuccess: true }
+  const res = getSubscriptionExpiryTask({ enabled: true, 'tunnelsats-conf': conf }, meta, currentDate)
+  assert.equal(res.shouldCreateTask, false)
+  assert.equal(res.clearTaskKey, 'tunnelsats:configure')
+})
+
+test('getSubscriptionExpiryTask detects expiry from meta when config has no comment', () => {
+  const currentDate = new Date('2026-08-20T12:00:00Z')
+  // Conf has NO valid until comment
+  const conf = '[Interface]\nPrivateKey=xxx\nAddress=10.9.0.1/32\n# VPNPort: 12345\n[Peer]\nEndpoint=1.2.3.4:51820'
+  const meta = { expiresAt: '2026-08-22T12:00:00Z', syncSuccess: true }
+  const res = getSubscriptionExpiryTask({ enabled: true, 'tunnelsats-conf': conf }, meta, currentDate)
+  assert.equal(res.shouldCreateTask, true)
+  assert.equal(res.severity, 'critical')
+  assert.match(res.reason || '', /3 days/i)
+})

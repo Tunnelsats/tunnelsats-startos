@@ -22,6 +22,9 @@ const dict = {
   'Web Dashboard is not accessible': 18,
   'Subscription Status': 19,
   'Subscription is active': 20,
+  'TunnelSats WireGuard subscription has expired. Paste a renewed configuration in settings to restore inbound connectivity.': 21,
+  'TunnelSats subscription expires in <= 3 days. Renew subscription to avoid connection disruption.': 22,
+  'TunnelSats subscription expires in <= 7 days. Plan your renewal to maintain uptime.': 23,
 } as const
 
 /**
