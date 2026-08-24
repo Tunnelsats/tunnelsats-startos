@@ -22,10 +22,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Set up Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v7
         with:
           node-version: 22
 
@@ -33,7 +33,7 @@ jobs:
         run: npm ci
 
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v7
         with:
           python-version: '3.11'
 
@@ -46,4 +46,4 @@ jobs:
   build:
     name: Build StartOS Package
     needs: test
-    uses: Start9Labs/start-technologies/.github/workflows/build.yml@be6d7dc7613bb7a7abe1d2318ba1d233cdef725e # master
+    uses: Start9Labs/start-technologies/.github/workflows/build.yml@fa6e8eb0dfc2b51238107c9694c689708322b3b2 # master
