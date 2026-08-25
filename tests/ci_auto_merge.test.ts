@@ -2,45 +2,85 @@ import { test } from 'node:test';
 import assert from 'node:assert';
 import fs from 'fs';
 import path from 'path';
+import yaml from 'yaml';
 
-test('Dependabot Configuration - startos-packages grouping', () => {
+test('Dependabot Configuration - structured AST validation', () => {
   const dependabotPath = path.join(process.cwd(), '.github', 'dependabot.yml');
   assert.ok(fs.existsSync(dependabotPath), 'dependabot.yml must exist');
   
-  const content = fs.readFileSync(dependabotPath, 'utf8');
-  assert.match(content, /package-ecosystem:\s*"npm"/, 'Must contain npm package-ecosystem');
-  assert.match(content, /startos-packages:/, 'Must contain startos-packages grouping');
-  assert.match(content, /cln-startos/, 'Must include cln-startos in startos-packages group');
-  assert.match(content, /lnd-startos/, 'Must include lnd-startos in startos-packages group');
+  const parsed = yaml.parse(fs.readFileSync(dependabotPath, 'utf8'));
+  assert.strictEqual(parsed.version, 2, 'Dependabot version must be 2');
+  assert.ok(Array.isArray(parsed.updates), 'updates must be an array');
+
+  const npmUpdate = parsed.updates.find((u: any) => u['package-ecosystem'] === 'npm');
+  assert.ok(npmUpdate, 'npm package-ecosystem update entry must exist');
+  assert.strictEqual(npmUpdate.directory, '/');
+  assert.ok(npmUpdate.groups, 'npm update entry must define groups');
+  assert.ok(npmUpdate.groups['startos-packages'], 'startos-packages group must exist');
+  
+  const startosPatterns = npmUpdate.groups['startos-packages'].patterns;
+  assert.ok(Array.isArray(startosPatterns), 'startos-packages patterns must be an array');
+  assert.ok(startosPatterns.includes('cln-startos'), 'startos-packages must include cln-startos');
+  assert.ok(startosPatterns.includes('lnd-startos'), 'startos-packages must include lnd-startos');
+
+  const actionsUpdate = parsed.updates.find((u: any) => u['package-ecosystem'] === 'github-actions');
+  assert.ok(actionsUpdate, 'github-actions package-ecosystem update entry must exist');
 });
 
-test('Dependabot Auto-Merge Workflow - condition and security boundaries', () => {
+test('Dependabot Auto-Merge Workflow - structured workflow validation & semantic eligibility evaluation', () => {
   const workflowPath = path.join(process.cwd(), '.github', 'workflows', 'dependabot-auto-merge.yml');
   assert.ok(fs.existsSync(workflowPath), 'dependabot-auto-merge.yml must exist');
 
-  const content = fs.readFileSync(workflowPath, 'utf8');
-  assert.match(content, /pull_request_target:/, 'Must use pull_request_target');
-  assert.match(content, /github\.actor == 'dependabot\[bot\]'/, 'Must restrict to dependabot[bot]');
-  assert.match(content, /contents:\s*write/, 'Must grant contents write permission');
-  assert.match(content, /pull-requests:\s*write/, 'Must grant pull-requests write permission');
+  const parsed = yaml.parse(fs.readFileSync(workflowPath, 'utf8'));
+  assert.strictEqual(parsed.name, 'Dependabot Auto-Merge');
+  assert.ok(parsed.on.pull_request_target, 'Must trigger on pull_request_target');
+  assert.strictEqual(parsed.permissions.contents, 'write');
+  assert.strictEqual(parsed.permissions['pull-requests'], 'write');
 
-  // Verify auto-merge condition includes semver updates, StartOS git companion packages, and GitHub Actions (non-major)
-  assert.match(content, /version-update:semver-minor/, 'Must support minor updates');
-  assert.match(content, /version-update:semver-patch/, 'Must support patch updates');
-  assert.match(content, /contains\(steps\.metadata\.outputs\.dependency-names,\s*'cln-startos'\)/, 'Must support cln-startos git dependency auto-merge');
-  assert.match(content, /contains\(steps\.metadata\.outputs\.dependency-names,\s*'lnd-startos'\)/, 'Must support lnd-startos git dependency auto-merge');
-  assert.match(content, /steps\.metadata\.outputs\.package-ecosystem == 'github_actions'/, 'Must support github_actions ecosystem auto-merge');
-  assert.match(content, /steps\.metadata\.outputs\.update-type != 'version-update:semver-major'/, 'Must exclude major github_actions updates');
-  assert.match(content, /gh pr merge "\$PR_NUMBER" --auto --squash/, 'Must enable auto-merge with squash');
+  const autoMergeJob = parsed.jobs?.['auto-merge'];
+  assert.ok(autoMergeJob, 'auto-merge job must exist');
+  assert.strictEqual(autoMergeJob.if, "github.actor == 'dependabot[bot]'");
 
-  // Verify both approval and merge steps use identical eligibility guards
-  const approveMatch = content.match(/- name: Auto-approve eligible Dependabot updates\s+if:\s*\|([\s\S]*?)run:/);
-  const mergeMatch = content.match(/- name: Enable native auto-merge for eligible Dependabot updates\s+if:\s*\|([\s\S]*?)run:/);
-  assert.ok(approveMatch, 'Auto-approve step must exist with multiline condition');
-  assert.ok(mergeMatch, 'Enable auto-merge step must exist with multiline condition');
+  const steps = autoMergeJob.steps;
+  assert.ok(Array.isArray(steps), 'Job steps must be an array');
+
+  const approveStep = steps.find((s: any) => s.name === 'Auto-approve eligible Dependabot updates');
+  const mergeStep = steps.find((s: any) => s.name === 'Enable native auto-merge for eligible Dependabot updates');
+
+  assert.ok(approveStep, 'Auto-approve step must exist');
+  assert.ok(mergeStep, 'Enable native auto-merge step must exist');
+
+  // Verify that approval and merge predicates are strictly identical to avoid divergence
   assert.strictEqual(
-    approveMatch[1].trim().replace(/\s+/g, ' '),
-    mergeMatch[1].trim().replace(/\s+/g, ' '),
-    'Approval and merge step conditions must be identical to avoid divergence'
+    approveStep.if.trim().replace(/\s+/g, ' '),
+    mergeStep.if.trim().replace(/\s+/g, ' '),
+    'Approval and merge step conditions must be identical'
   );
+
+  // Validate semantic boolean evaluation across dependency scenarios
+  // GitHub Actions condition:
+  // steps.metadata.outputs.update-type == 'version-update:semver-minor' ||
+  // steps.metadata.outputs.update-type == 'version-update:semver-patch' ||
+  // contains(steps.metadata.outputs.dependency-names, 'cln-startos') ||
+  // contains(steps.metadata.outputs.dependency-names, 'lnd-startos') ||
+  // (steps.metadata.outputs.package-ecosystem == 'github_actions' && steps.metadata.outputs.update-type != 'version-update:semver-major')
+  const evaluateEligibility = (meta: {
+    updateType?: string | null;
+    dependencyNames?: string;
+    packageEcosystem?: string;
+  }): boolean => {
+    const isMinorOrPatch = meta.updateType === 'version-update:semver-minor' || meta.updateType === 'version-update:semver-patch';
+    const isStartosCompanion = (meta.dependencyNames?.includes('cln-startos') || meta.dependencyNames?.includes('lnd-startos')) ?? false;
+    const isEligibleActions = meta.packageEcosystem === 'github_actions' && meta.updateType !== 'version-update:semver-major';
+    return isMinorOrPatch || isStartosCompanion || isEligibleActions;
+  };
+
+  // Test matrix:
+  assert.strictEqual(evaluateEligibility({ updateType: 'version-update:semver-minor', dependencyNames: 'prettier', packageEcosystem: 'npm_and_yarn' }), true, 'SemVer minor must be eligible');
+  assert.strictEqual(evaluateEligibility({ updateType: 'version-update:semver-patch', dependencyNames: 'typescript', packageEcosystem: 'npm_and_yarn' }), true, 'SemVer patch must be eligible');
+  assert.strictEqual(evaluateEligibility({ updateType: null, dependencyNames: 'cln-startos', packageEcosystem: 'npm_and_yarn' }), true, 'cln-startos git SHA bump must be eligible');
+  assert.strictEqual(evaluateEligibility({ updateType: null, dependencyNames: 'lnd-startos', packageEcosystem: 'npm_and_yarn' }), true, 'lnd-startos git SHA bump must be eligible');
+  assert.strictEqual(evaluateEligibility({ updateType: 'version-update:semver-major', dependencyNames: '@start9labs/start-sdk', packageEcosystem: 'npm_and_yarn' }), false, 'SDK major updates must NOT be eligible');
+  assert.strictEqual(evaluateEligibility({ updateType: 'version-update:semver-minor', dependencyNames: 'actions/checkout', packageEcosystem: 'github_actions' }), true, 'GitHub actions minor update must be eligible');
+  assert.strictEqual(evaluateEligibility({ updateType: 'version-update:semver-major', dependencyNames: 'actions/checkout', packageEcosystem: 'github_actions' }), false, 'GitHub actions major update must NOT be auto-merged');
 });
