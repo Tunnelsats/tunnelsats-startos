@@ -46,4 +46,4 @@ jobs:
   build:
     name: Build StartOS Package
     needs: test
-    uses: Start9Labs/start-technologies/.github/workflows/build.yml@fa6e8eb0dfc2b51238107c9694c689708322b3b2 # master
+    uses: Start9Labs/start-technologies/.github/workflows/build.yml@262dbeb93bb8522141e130aa6c7b0f1905d8848c # master
