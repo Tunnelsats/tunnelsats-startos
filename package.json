@@ -15,14 +15,17 @@
     "lnd-startos": "github:Start9Labs/lnd-startos#master"
   },
   "overrides": {
-    "@start9labs/start-sdk": "$@start9labs/start-sdk"
+    "@start9labs/start-sdk": "$@start9labs/start-sdk",
+    "brace-expansion": "^1.1.18",
+    "js-yaml": "^4.3.1"
   },
   "devDependencies": {
     "@types/node": "^22.15.3",
     "@vercel/ncc": "^0.45.0",
     "prettier": "^3.9.6",
     "tsx": "^4.23.12",
-    "typescript": "^5.7.3"
+    "typescript": "^5.7.3",
+    "yaml": "^2.7.0"
   },
   "prettier": {
     "trailingComma": "all",
