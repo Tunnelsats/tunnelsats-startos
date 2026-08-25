@@ -27,7 +27,7 @@ test('Dependabot Configuration - structured AST validation', () => {
   assert.ok(actionsUpdate, 'github-actions package-ecosystem update entry must exist');
 });
 
-test('Dependabot Auto-Merge Workflow - structured workflow validation & semantic eligibility evaluation', () => {
+test('Dependabot Auto-Merge Workflow - structured workflow validation & parsed condition evaluation', () => {
   const workflowPath = path.join(process.cwd(), '.github', 'workflows', 'dependabot-auto-merge.yml');
   assert.ok(fs.existsSync(workflowPath), 'dependabot-auto-merge.yml must exist');
 
@@ -50,37 +50,42 @@ test('Dependabot Auto-Merge Workflow - structured workflow validation & semantic
   assert.ok(approveStep, 'Auto-approve step must exist');
   assert.ok(mergeStep, 'Enable native auto-merge step must exist');
 
-  // Verify that approval and merge predicates are strictly identical to avoid divergence
+  const condition = approveStep.if.trim();
+  const mergeCondition = mergeStep.if.trim();
+
+  // Verify that approval and merge predicates are strictly identical
   assert.strictEqual(
-    approveStep.if.trim().replace(/\s+/g, ' '),
-    mergeStep.if.trim().replace(/\s+/g, ' '),
+    condition.replace(/\s+/g, ' '),
+    mergeCondition.replace(/\s+/g, ' '),
     'Approval and merge step conditions must be identical'
   );
 
-  // Validate semantic boolean evaluation across dependency scenarios
-  // GitHub Actions condition:
-  // steps.metadata.outputs.update-type == 'version-update:semver-minor' ||
-  // steps.metadata.outputs.update-type == 'version-update:semver-patch' ||
-  // contains(steps.metadata.outputs.dependency-names, 'cln-startos') ||
-  // contains(steps.metadata.outputs.dependency-names, 'lnd-startos') ||
-  // (steps.metadata.outputs.package-ecosystem == 'github_actions' && steps.metadata.outputs.update-type != 'version-update:semver-major')
-  const evaluateEligibility = (meta: {
-    updateType?: string | null;
-    dependencyNames?: string;
-    packageEcosystem?: string;
-  }): boolean => {
-    const isMinorOrPatch = meta.updateType === 'version-update:semver-minor' || meta.updateType === 'version-update:semver-patch';
-    const isStartosCompanion = (meta.dependencyNames?.includes('cln-startos') || meta.dependencyNames?.includes('lnd-startos')) ?? false;
-    const isEligibleActions = meta.packageEcosystem === 'github_actions' && meta.updateType !== 'version-update:semver-major';
-    return isMinorOrPatch || isStartosCompanion || isEligibleActions;
+  // Directly evaluate the actual parsed workflow condition expression against mock metadata
+  const evaluateParsedExpression = (
+    expr: string,
+    meta: {
+      updateType: string | null;
+      dependencyNames: string;
+      packageEcosystem: string;
+    }
+  ): boolean => {
+    // Replace GitHub Actions expression syntax with JS evaluation
+    let jsExpr = expr
+      .replace(/steps\.metadata\.outputs\.update-type/g, JSON.stringify(meta.updateType))
+      .replace(/steps\.metadata\.outputs\.dependency-names/g, JSON.stringify(meta.dependencyNames))
+      .replace(/steps\.metadata\.outputs\.package-ecosystem/g, JSON.stringify(meta.packageEcosystem))
+      .replace(/contains\(([^,]+),\s*([^)]+)\)/g, '($1 && $1.includes($2))');
+
+    // Run safe boolean evaluation of the parsed expression
+    return Function(`"use strict"; return Boolean(${jsExpr});`)();
   };
 
-  // Test matrix:
-  assert.strictEqual(evaluateEligibility({ updateType: 'version-update:semver-minor', dependencyNames: 'prettier', packageEcosystem: 'npm_and_yarn' }), true, 'SemVer minor must be eligible');
-  assert.strictEqual(evaluateEligibility({ updateType: 'version-update:semver-patch', dependencyNames: 'typescript', packageEcosystem: 'npm_and_yarn' }), true, 'SemVer patch must be eligible');
-  assert.strictEqual(evaluateEligibility({ updateType: null, dependencyNames: 'cln-startos', packageEcosystem: 'npm_and_yarn' }), true, 'cln-startos git SHA bump must be eligible');
-  assert.strictEqual(evaluateEligibility({ updateType: null, dependencyNames: 'lnd-startos', packageEcosystem: 'npm_and_yarn' }), true, 'lnd-startos git SHA bump must be eligible');
-  assert.strictEqual(evaluateEligibility({ updateType: 'version-update:semver-major', dependencyNames: '@start9labs/start-sdk', packageEcosystem: 'npm_and_yarn' }), false, 'SDK major updates must NOT be eligible');
-  assert.strictEqual(evaluateEligibility({ updateType: 'version-update:semver-minor', dependencyNames: 'actions/checkout', packageEcosystem: 'github_actions' }), true, 'GitHub actions minor update must be eligible');
-  assert.strictEqual(evaluateEligibility({ updateType: 'version-update:semver-major', dependencyNames: 'actions/checkout', packageEcosystem: 'github_actions' }), false, 'GitHub actions major update must NOT be auto-merged');
+  // Test matrix against the actual parsed condition string:
+  assert.strictEqual(evaluateParsedExpression(condition, { updateType: 'version-update:semver-minor', dependencyNames: 'prettier', packageEcosystem: 'npm_and_yarn' }), true, 'SemVer minor must be eligible');
+  assert.strictEqual(evaluateParsedExpression(condition, { updateType: 'version-update:semver-patch', dependencyNames: 'typescript', packageEcosystem: 'npm_and_yarn' }), true, 'SemVer patch must be eligible');
+  assert.strictEqual(evaluateParsedExpression(condition, { updateType: null, dependencyNames: 'cln-startos', packageEcosystem: 'npm_and_yarn' }), true, 'cln-startos git SHA bump must be eligible');
+  assert.strictEqual(evaluateParsedExpression(condition, { updateType: null, dependencyNames: 'lnd-startos', packageEcosystem: 'npm_and_yarn' }), true, 'lnd-startos git SHA bump must be eligible');
+  assert.strictEqual(evaluateParsedExpression(condition, { updateType: 'version-update:semver-major', dependencyNames: '@start9labs/start-sdk', packageEcosystem: 'npm_and_yarn' }), false, 'SDK major updates must NOT be eligible');
+  assert.strictEqual(evaluateParsedExpression(condition, { updateType: 'version-update:semver-minor', dependencyNames: 'actions/checkout', packageEcosystem: 'github_actions' }), true, 'GitHub actions minor update must be eligible');
+  assert.strictEqual(evaluateParsedExpression(condition, { updateType: 'version-update:semver-major', dependencyNames: 'actions/checkout', packageEcosystem: 'github_actions' }), false, 'GitHub actions major update must NOT be auto-merged');
 });
