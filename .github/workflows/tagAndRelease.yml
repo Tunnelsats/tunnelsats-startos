@@ -11,7 +11,7 @@ permissions:
 jobs:
   tag-and-release:
     name: Tag and Release
-    uses: Start9Labs/start-technologies/.github/workflows/tagAndRelease.yml@262dbeb93bb8522141e130aa6c7b0f1905d8848c # master
+    uses: Start9Labs/start-technologies/.github/workflows/tagAndRelease.yml@7824e4169ef7dbc7413d076855ea20f2e77be1a2 # master
     with:
       REFERENCE_REGISTRY: 'https://community-registry.start9.com'
     secrets:
