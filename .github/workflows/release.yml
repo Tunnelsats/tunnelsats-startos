@@ -11,7 +11,7 @@ permissions:
 jobs:
   release:
     name: Release StartOS Package
-    uses: Start9Labs/start-technologies/.github/workflows/release.yml@262dbeb93bb8522141e130aa6c7b0f1905d8848c # master
+    uses: Start9Labs/start-technologies/.github/workflows/release.yml@7824e4169ef7dbc7413d076855ea20f2e77be1a2 # master
     secrets:
       DEV_KEY: ${{ secrets.DEV_KEY || secrets.STARTOS_DEVELOPER_KEY }}
       S3_ACCESS_KEY: ${{ secrets.S3_ACCESS_KEY }}
