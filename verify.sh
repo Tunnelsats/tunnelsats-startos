@@ -307,7 +307,7 @@ elif [ "$ENGINE" == "host" ]; then
 Host: api.ipify.org
 Connection: close
 
-"; while(<$s>){ chomp; $ip = $_; } print $ip; }' 2>/dev/null)
+"; while(<$s>){ chomp; $ip = $_; } print $ip; }' 2>/dev/null || true)
     else
         TARGET_EGRESS=$($ATTACH_CMD -- curl -s --connect-timeout 5 https://api.ipify.org 2>/dev/null || true)
     fi
