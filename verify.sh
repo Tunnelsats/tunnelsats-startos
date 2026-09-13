@@ -90,6 +90,7 @@ GW_MODE="host_managed"
 VPN_IP=""
 VPN_PORT=""
 SERVER=""
+RESOLVED_SERVER_IP=""
 TARGET_HOST="lnd.embassy"
 TARGET_PORT="9735"
 ALLOW_IPV6="False"
@@ -117,6 +118,10 @@ except Exception as e:
 " 2>/dev/null | tr -d '\r' || true)
     
     IFS='|' read -r STATUS SUB_ACTIVE GW_MODE VPN_IP VPN_PORT SERVER TARGET_HOST TARGET_PORT ALLOW_IPV6 PUBKEY <<< "$PARSED_VALUES"
+
+    if [ -n "$SERVER" ] && [ "$SERVER" != "unknown" ]; then
+        RESOLVED_SERVER_IP=$(python3 -c "import socket; print(socket.gethostbyname('$SERVER'))" 2>/dev/null || true)
+    fi
     
     log_info "Gateway Status Properties:"
     echo "  - Status: ${STATUS:-unknown}"
@@ -193,10 +198,7 @@ if [[ "$TARGET_HOST" =~ "c-lightning" ]] || [[ "$TARGET_HOST" =~ "cln" ]]; then
     TARGET_PKG="c-lightning"
 fi
 
-RESOLVED_SERVER_IP=""
-if [ -n "$SERVER" ] && [ "$SERVER" != "unknown" ]; then
-    RESOLVED_SERVER_IP=$(python3 -c "import socket; print(socket.gethostbyname('$SERVER'))" 2>/dev/null || true)
-fi
+# (RESOLVED_SERVER_IP resolved earlier during gateway discovery)
 
 # 3. Target Lightning Node Inbound Reachability Audit
 log_step "3. Target Lightning Node Inbound Reachability Audit"
