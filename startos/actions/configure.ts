@@ -63,7 +63,9 @@ export const configure = sdk.Action.withInput(
     }
   },
   async ({ effects, input }) => {
-    let processedConf = input['tunnelsats-conf']
+    let processedConf = input['tunnelsats-conf']?.trim()
+      ? input['tunnelsats-conf']
+      : undefined
     if (input.enabled && !processedConf) {
       throw new Error('Enabled tunnels require a WireGuard configuration')
     }
