@@ -64,10 +64,11 @@ export const configure = sdk.Action.withInput(
   },
   async ({ effects, input }) => {
     let processedConf = input['tunnelsats-conf']
-    if (input.enabled) {
-      if (!processedConf) {
-        throw new Error('Enabled tunnels require a WireGuard configuration')
-      }
+    if (input.enabled && !processedConf) {
+      throw new Error('Enabled tunnels require a WireGuard configuration')
+    }
+
+    if (processedConf) {
       const validation = validateWireguardConfig(processedConf)
       if (!validation.valid) {
         throw new Error(validation.error || 'Invalid WireGuard configuration')
@@ -84,6 +85,12 @@ export const configure = sdk.Action.withInput(
 
     if (input.enabled && processedConf) {
       await tunnelsatsConf.write(effects, processedConf)
+    } else {
+      const confPath = sdk.volumes.main.subpath('./tunnelsatsv3.conf')
+      await rm(confPath, { force: true })
+    }
+
+    if (processedConf) {
       return {
         version: '1' as const,
         title: 'Configuration Saved',
@@ -97,10 +104,8 @@ export const configure = sdk.Action.withInput(
           qr: false,
         },
       }
-    } else {
-      const confPath = sdk.volumes.main.subpath('./tunnelsatsv3.conf')
-      await rm(confPath, { force: true })
-      return null
     }
+
+    return null
   },
 )
