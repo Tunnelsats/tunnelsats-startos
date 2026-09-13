@@ -9,6 +9,7 @@
 2. **Add Gateway in StartOS**:
    - In StartOS, navigate to **System** &rarr; **Gateways** &rarr; click **Add Gateway**.
    - Select **WireGuard** and paste the content of your TunnelSats `.conf` file.
+   - Ensure the configuration includes `# inbound: yes` (TunnelSats automatically ensures this marker is present upon saving in the service configure action). StartOS uses this marker to auto-classify the gateway as **Inbound/Outbound** for public port-forwarding.
    - Connect the gateway.
 
 3. **Configure TunnelSats Package**:

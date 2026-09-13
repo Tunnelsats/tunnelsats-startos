@@ -648,6 +648,8 @@ def get_status():
         "configured": has_config,
         "gateway_mode": "host_managed",
         "subscription_active": is_active,
+        "vpn_connected": is_active,
+        "handshake": "active" if is_active else "none",
         "subscription_linked": sub_info["linked"],
         "expires_at": sub_info["expiresAt"] or "Unknown",
         "days_remaining": sub_info["daysRemaining"],

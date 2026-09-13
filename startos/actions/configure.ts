@@ -2,7 +2,7 @@ import { sdk } from '../sdk'
 import { configJson } from '../fileModels/config.json'
 import { tunnelsatsConf } from '../fileModels/tunnelsatsConf'
 import { i18n } from '../i18n'
-import { validateWireguardConfig } from '../utils'
+import { validateWireguardConfig, ensureInboundMarker } from '../utils'
 import { rm } from 'node:fs/promises'
 
 const { InputSpec, Value } = sdk
@@ -31,7 +31,7 @@ export const inputSpec = InputSpec.of({
     ),
     required: false,
     default: null,
-    placeholder: `[Interface]\nPrivateKey = <your_private_key>\nAddress = 10.x.x.x/32\n# VPNPort: 12345\n...`,
+    placeholder: `[Interface]\n# inbound: yes\nPrivateKey = <your_private_key>\nAddress = 10.x.x.x/32\n# VPNPort: 12345\n...`,
   }),
   'allow-ipv6': Value.toggle({
     name: i18n('Allow Home IPv6 Coexistence'),
@@ -63,25 +63,27 @@ export const configure = sdk.Action.withInput(
     }
   },
   async ({ effects, input }) => {
+    let processedConf = input['tunnelsats-conf']
     if (input.enabled) {
-      if (!input['tunnelsats-conf']) {
+      if (!processedConf) {
         throw new Error('Enabled tunnels require a WireGuard configuration')
       }
-      const validation = validateWireguardConfig(input['tunnelsats-conf'])
+      const validation = validateWireguardConfig(processedConf)
       if (!validation.valid) {
         throw new Error(validation.error || 'Invalid WireGuard configuration')
       }
+      processedConf = ensureInboundMarker(processedConf)
     }
 
     await configJson.merge(effects, {
       enabled: input.enabled,
       'target-node': input['target-node'],
-      'tunnelsats-conf': input['tunnelsats-conf'] || undefined,
+      'tunnelsats-conf': processedConf || undefined,
       'allow-ipv6': input['allow-ipv6'],
     })
 
-    if (input.enabled && input['tunnelsats-conf']) {
-      await tunnelsatsConf.write(effects, input['tunnelsats-conf'])
+    if (input.enabled && processedConf) {
+      await tunnelsatsConf.write(effects, processedConf)
     } else {
       const confPath = sdk.volumes.main.subpath('./tunnelsatsv3.conf')
       await rm(confPath, { force: true })

@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { validateWireguardConfig, parseWireguardTunnelInfo } from '../startos/utils'
+import { validateWireguardConfig, parseWireguardTunnelInfo, ensureInboundMarker } from '../startos/utils'
 
 test('validateWireguardConfig accepts valid WireGuard configuration', () => {
   const conf = `[Interface]
@@ -117,4 +117,48 @@ Endpoint = 2001:db8::1:51820
   const infoRaw = parseWireguardTunnelInfo(confRaw)
   assert.equal(infoBracketed.serverDomain, '2001:db8::1')
   assert.equal(infoRaw.serverDomain, '2001:db8::1')
+})
+
+test('ensureInboundMarker injects # inbound: yes under [Interface] when missing', () => {
+  const conf = `[Interface]
+PrivateKey = DUMMY_TEST_PRIVATE_KEY_FOR_TESTING_123456=
+Address = 10.9.0.102/32
+# VPNPort: 24556
+
+[Peer]
+PublicKey = DUMMY_TEST_PUBLIC_KEY_FOR_TESTING_123456=
+Endpoint = ch1.tunnelsats.com:51820
+`
+  const updated = ensureInboundMarker(conf)
+  assert.match(updated, /\[Interface\]\r?\n# inbound: yes/i)
+  assert.equal(updated.split(/# inbound: yes/gi).length - 1, 1)
+})
+
+test('ensureInboundMarker preserves existing # inbound: yes without duplicating', () => {
+  const conf = `[Interface]
+# inbound: yes
+PrivateKey = DUMMY_TEST_PRIVATE_KEY_FOR_TESTING_123456=
+Address = 10.9.0.102/32
+# VPNPort: 24556
+
+[Peer]
+PublicKey = DUMMY_TEST_PUBLIC_KEY_FOR_TESTING_123456=
+Endpoint = ch1.tunnelsats.com:51820
+`
+  const updated = ensureInboundMarker(conf)
+  assert.equal(updated, conf)
+})
+
+test('ensureInboundMarker prepends # inbound: yes if [Interface] header is absent', () => {
+  const conf = `PrivateKey = DUMMY_TEST_PRIVATE_KEY_FOR_TESTING_123456=
+Address = 10.9.0.102/32
+# VPNPort: 24556
+`
+  const updated = ensureInboundMarker(conf)
+  assert.ok(updated.startsWith('# inbound: yes\n'))
+})
+
+test('ensureInboundMarker handles empty or whitespace input gracefully', () => {
+  assert.equal(ensureInboundMarker(''), '')
+  assert.equal(ensureInboundMarker('   '), '   ')
 })

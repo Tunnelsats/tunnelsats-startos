@@ -91,3 +91,25 @@ export function parseWireguardTunnelInfo(
 
   return info
 }
+
+export function ensureInboundMarker(wgConf: string): string {
+  if (!wgConf || !wgConf.trim()) return wgConf
+
+  const lines = wgConf.split(/\r?\n/)
+  const hasMarker = lines.some(
+    (line) => line.trim().toLowerCase() === "# inbound: yes",
+  )
+  if (hasMarker) {
+    return wgConf
+  }
+
+  const interfaceIndex = lines.findIndex((line) =>
+    /^\s*\[Interface\]\s*$/i.test(line),
+  )
+  if (interfaceIndex !== -1) {
+    lines.splice(interfaceIndex + 1, 0, "# inbound: yes")
+    return lines.join("\n")
+  }
+
+  return `# inbound: yes\n${wgConf}`
+}

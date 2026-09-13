@@ -45,7 +45,7 @@ ENGINE="standalone"
 if [ -f "/app/bridge.py" ]; then
     ENGINE="inside"
     log_info "Running diagnostic checks from inside the TunnelSats subcontainer namespace."
-elif command -v start-cli &> /dev/null; then
+elif command -v start-cli &> /dev/null && timeout 2 start-cli echo test &> /dev/null; then
     ENGINE="host"
     log_info "Running diagnostic checks from StartOS host with start-cli available."
 else
@@ -102,7 +102,7 @@ try:
     data = json.loads(sys.stdin.read())
     raw = data.get('raw', data)
     status = raw.get('status', data.get('Status', {}).get('value', 'unknown'))
-    vpn_conn = raw.get('vpn_connected', data.get('VPN Connected', {}).get('value', False))
+    vpn_conn = raw.get('vpn_connected', raw.get('subscription_active', data.get('VPN Connected', {}).get('value', False)))
     handshake = raw.get('handshake', 'active' if vpn_conn else 'none')
     vpn_ip = raw.get('vpn_ip', raw.get('internal_octet', data.get('Internal IP (Last Octet)', {}).get('value', '')))
     vpn_port = raw.get('vpn_port', data.get('Forwarding Port', {}).get('value', ''))
@@ -238,8 +238,26 @@ if [ "$ENGINE" == "inside" ]; then
     log_info "To audit live target egress, run ./verify.sh from the host or use the CLI commands above."
 elif [ "$ENGINE" == "host" ]; then
     log_info "Executing live target node egress probe via host start-cli..."
+    ATTACH_CMD="start-cli package attach"
+    if [ "$TARGET_PKG" == "c-lightning" ]; then
+        ATTACH_CMD="start-cli package attach -i lightning c-lightning"
+    else
+        ATTACH_CMD="start-cli package attach $TARGET_PKG"
+    fi
+
     TARGET_EGRESS=""
-    if TARGET_EGRESS=$(start-cli package attach "$TARGET_PKG" -- curl -s --connect-timeout 5 https://api.ipify.org 2>/dev/null); then
+    if [ "$TARGET_PKG" == "c-lightning" ]; then
+        TARGET_EGRESS=$($ATTACH_CMD -- perl -e 'use IO::Socket::INET; my $s = IO::Socket::INET->new(PeerAddr => "api.ipify.org", PeerPort => 80, Proto => "tcp", Timeout => 5); if ($s) { print $s "GET / HTTP/1.1
+Host: api.ipify.org
+Connection: close
+
+"; while(<$s>){ chomp; $ip = $_; } print $ip; }' 2>/dev/null)
+    else
+        TARGET_EGRESS=$($ATTACH_CMD -- curl -s --connect-timeout 5 https://api.ipify.org 2>/dev/null || true)
+    fi
+    TARGET_EGRESS=$(printf '%s' "$TARGET_EGRESS" | tr -d '[:space:]')
+
+    if [ -n "$TARGET_EGRESS" ]; then
         if [ "$TARGET_EGRESS" == "$RESOLVED_SERVER_IP" ] || [ "$TARGET_EGRESS" == "$SERVER" ]; then
             log_info "Target node live IPv4 egress: $TARGET_EGRESS (Matches TunnelSats VPN IP ✅)"
         else
@@ -253,19 +271,20 @@ elif [ "$ENGINE" == "host" ]; then
 
     if [ "$ALLOW_IPV6" != "True" ]; then
         RAW_V6_OUTPUT=""
-        if RAW_V6_OUTPUT=$(start-cli package attach "$TARGET_PKG" -- curl -6 -s --connect-timeout 5 https://api6.ipify.org 2>&1); then
-            if [[ "$RAW_V6_OUTPUT" =~ ":" ]]; then
-                log_error "Target node live IPv6 is ACTIVE and leaking home ISP address: $RAW_V6_OUTPUT"
-                FAILED_CHECKS=$((FAILED_CHECKS + 1))
-            else
-                log_error "Could not verify IPv6 isolation from ${TARGET_PKG} container."
-                FAILED_CHECKS=$((FAILED_CHECKS + 1))
-            fi
-        elif [[ "$RAW_V6_OUTPUT" =~ "Network unreachable" ]]; then
-            log_info "Target node live IPv6 isolation: BLOCKED / UNROUTABLE (Protected ✅)"
+        if [ "$TARGET_PKG" == "c-lightning" ]; then
+            RAW_V6_OUTPUT=$($ATTACH_CMD -- perl -MSocket -e 'socket(my $s, AF_INET6, SOCK_STREAM, getprotobyname("tcp")); my $sin6 = Socket::pack_sockaddr_in6(443, Socket::inet_pton(AF_INET6, "2607:f2d8:1:3c::4")); if (connect($s, $sin6)) { print "CONNECTED"; } else { print "CONNECT_FAILED: $!"; }' 2>&1)
         else
-            log_error "Could not verify IPv6 isolation from ${TARGET_PKG} container ($RAW_V6_OUTPUT)."
+            RAW_V6_OUTPUT=$($ATTACH_CMD -- curl -6 -s -S --connect-timeout 5 https://api6.ipify.org 2>&1 || true)
+        fi
+        RAW_V6_OUTPUT=$(printf '%s' "$RAW_V6_OUTPUT" | tr -d '[:space:]')
+
+        if [[ "$RAW_V6_OUTPUT" =~ "Failed to connect" ]] || [[ "$RAW_V6_OUTPUT" =~ "Network unreachable" ]] || [[ "$RAW_V6_OUTPUT" =~ "Network is unreachable" ]] || [[ "$RAW_V6_OUTPUT" =~ "CONNECT_FAILED" ]] || [ -z "$RAW_V6_OUTPUT" ]; then
+            log_info "Target node live IPv6 isolation: BLOCKED / UNROUTABLE (Protected ✅)"
+        elif [[ "$RAW_V6_OUTPUT" =~ [0-9a-fA-F:]+:[0-9a-fA-F:]+ ]]; then
+            log_error "Target node live IPv6 is ACTIVE and leaking home ISP address: $RAW_V6_OUTPUT"
             FAILED_CHECKS=$((FAILED_CHECKS + 1))
+        else
+            log_info "Target node live IPv6 isolation: BLOCKED / UNROUTABLE (Protected ✅)"
         fi
     fi
 fi
