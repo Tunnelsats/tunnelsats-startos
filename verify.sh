@@ -110,12 +110,13 @@ try:
     target_h = raw.get('target_host', 'lnd.embassy')
     target_p = str(raw.get('target_port', 9735))
     allow_v6 = str(raw.get('allow_ipv6', False))
-    print('|'.join([str(v) for v in [status, sub_active, gw_mode, vpn_ip, vpn_port, server, target_h, target_p, allow_v6]]))
+    pubkey = raw.get('pubkey', '')
+    print('|'.join([str(v) for v in [status, sub_active, gw_mode, vpn_ip, vpn_port, server, target_h, target_p, allow_v6, pubkey]]))
 except Exception as e:
     print('ERROR||||||||' + str(e))
 " 2>/dev/null | tr -d '\r' || true)
     
-    IFS='|' read -r STATUS SUB_ACTIVE GW_MODE VPN_IP VPN_PORT SERVER TARGET_HOST TARGET_PORT ALLOW_IPV6 <<< "$PARSED_VALUES"
+    IFS='|' read -r STATUS SUB_ACTIVE GW_MODE VPN_IP VPN_PORT SERVER TARGET_HOST TARGET_PORT ALLOW_IPV6 PUBKEY <<< "$PARSED_VALUES"
     
     log_info "Gateway Status Properties:"
     echo "  - Status: ${STATUS:-unknown}"
@@ -131,25 +132,54 @@ except Exception as e:
     fi
 
     if [ "$ENGINE" == "host" ]; then
-        if command -v wg &> /dev/null && sudo wg show wg0 &> /dev/null; then
-            WG_HANDSHAKE=$(sudo wg show wg0 latest-handshakes 2>/dev/null | awk '{print $2}' || echo "0")
-            CURRENT_EPOCH=$(date +%s)
-            if [ -n "$WG_HANDSHAKE" ] && [ "$WG_HANDSHAKE" -gt 0 ]; then
-                DIFF=$((CURRENT_EPOCH - WG_HANDSHAKE))
-                if [ "$DIFF" -lt 300 ]; then
-                    log_info "Host WireGuard interface (wg0) handshake confirmed active (${DIFF}s ago) ✅"
+        TS_WG_IFACE=""
+        if command -v wg &> /dev/null && sudo wg show interfaces &> /dev/null; then
+            for iface in $(sudo wg show interfaces); do
+                IFACE_PUBKEY=$(sudo wg show "$iface" public-key 2>/dev/null || true)
+                IFACE_ENDPOINTS=$(sudo wg show "$iface" endpoints 2>/dev/null || true)
+                if [ -n "$PUBKEY" ] && [ "$PUBKEY" != "None" ] && [ "$IFACE_PUBKEY" == "$PUBKEY" ]; then
+                    TS_WG_IFACE="$iface"
+                    break
+                elif [ -n "$RESOLVED_SERVER_IP" ] && [[ "$IFACE_ENDPOINTS" =~ "$RESOLVED_SERVER_IP" ]]; then
+                    TS_WG_IFACE="$iface"
+                    break
+                fi
+            done
+        fi
+
+        if [ -z "$TS_WG_IFACE" ] && command -v start-cli &> /dev/null; then
+            TS_WG_IFACE=$(start-cli net gateway list 2>/dev/null | awk -v ip="$VPN_IP" -v wan="$RESOLVED_SERVER_IP" '
+                ($0 ~ ip && ip != "") || ($0 ~ wan && wan != "") {
+                    for (i=1; i<=NF; i++) {
+                        if ($i ~ /^wg[0-9]+$/) {
+                            print $i
+                            exit
+                        }
+                    }
+                }' | head -n 1)
+        fi
+
+        if [ -n "$TS_WG_IFACE" ]; then
+            if command -v wg &> /dev/null && sudo wg show "$TS_WG_IFACE" &> /dev/null; then
+                WG_HANDSHAKE=$(sudo wg show "$TS_WG_IFACE" latest-handshakes 2>/dev/null | awk '{print $2}' || echo "0")
+                CURRENT_EPOCH=$(date +%s)
+                if [ -n "$WG_HANDSHAKE" ] && [ "$WG_HANDSHAKE" -gt 0 ]; then
+                    DIFF=$((CURRENT_EPOCH - WG_HANDSHAKE))
+                    if [ "$DIFF" -lt 300 ]; then
+                        log_info "Host WireGuard interface ($TS_WG_IFACE) confirmed active for TunnelSats with recent handshake (${DIFF}s ago) ✅"
+                    else
+                        log_error "Host WireGuard interface ($TS_WG_IFACE) handshake is stale (${DIFF}s ago)."
+                        FAILED_CHECKS=$((FAILED_CHECKS + 1))
+                    fi
                 else
-                    log_error "Host WireGuard interface (wg0) handshake is stale (${DIFF}s ago)."
+                    log_error "Host WireGuard interface ($TS_WG_IFACE) has never completed a handshake."
                     FAILED_CHECKS=$((FAILED_CHECKS + 1))
                 fi
             else
-                log_error "Host WireGuard interface (wg0) has never completed a handshake."
-                FAILED_CHECKS=$((FAILED_CHECKS + 1))
+                log_info "StartOS host WireGuard gateway ($TS_WG_IFACE) detected in gateway list ✅"
             fi
-        elif start-cli net gateway list 2>/dev/null | grep -qi "wireguard"; then
-            log_info "StartOS host WireGuard gateway detected in gateway list ✅"
         else
-            log_error "No active WireGuard gateway interface detected on StartOS host."
+            log_error "No host WireGuard gateway matching TunnelSats configuration (IP: ${VPN_IP}, Endpoint: ${RESOLVED_SERVER_IP:-$SERVER}) was detected."
             FAILED_CHECKS=$((FAILED_CHECKS + 1))
         fi
     fi
@@ -302,9 +332,12 @@ Connection: close
         fi
         RAW_V6_OUTPUT=$(printf '%s' "$RAW_V6_OUTPUT" | tr -d '\r')
 
-        # Fail-Closed Verification: Proof of isolation requires explicit kernel-level unreachable confirmation
-        if [[ "$RAW_V6_OUTPUT" =~ [0-9a-fA-F:]{4,}:[0-9a-fA-F:]{4,} ]] && [[ ! "$RAW_V6_OUTPUT" =~ "failed:" ]] && [[ ! "$RAW_V6_OUTPUT" =~ "CONNECT_FAILED" ]]; then
-            log_error "Target node live IPv6 is ACTIVE and leaking home ISP address: $RAW_V6_OUTPUT"
+        # Fail-Closed Verification:
+        # 1. Successful connection indicates active IPv6 egress (home IP leak)
+        # 2. Explicit kernel unreachable status indicates proper fail-closed isolation
+        # 3. Any ambiguous failure (timeout, connection refused, DNS error, empty output) must fail closed as unverified
+        if [[ "$RAW_V6_OUTPUT" =~ "CONNECTED" ]] || ([[ "$RAW_V6_OUTPUT" =~ "< HTTP/" ]] && [[ ! "$RAW_V6_OUTPUT" =~ "failed:" ]]); then
+            log_error "Target node live IPv6 is ACTIVE and leaking home ISP connection: $RAW_V6_OUTPUT"
             FAILED_CHECKS=$((FAILED_CHECKS + 1))
         elif [[ "$RAW_V6_OUTPUT" =~ "Network unreachable" ]] || [[ "$RAW_V6_OUTPUT" =~ "Network is unreachable" ]] || [[ "$RAW_V6_OUTPUT" =~ "ENETUNREACH" ]]; then
             log_info "Target node live IPv6 isolation: BLOCKED / UNROUTABLE (Kernel route unreachable confirmed ✅)"
