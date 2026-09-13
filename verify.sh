@@ -217,9 +217,96 @@ except Exception:
     sys.exit(1)
 ' "$TARGET_HOST" "$TARGET_PORT" 2>/dev/null; then
     LN_REACHABLE="true"
-    log_info "Target Lightning node is listening on ${TARGET_HOST}:${TARGET_PORT} (Inbound Ready ✅)"
+    log_info "Target Lightning node is listening on ${TARGET_HOST}:${TARGET_PORT} (Container bridge reachability ✅)"
 else
     log_warn "Target Lightning node (${TARGET_HOST}:${TARGET_PORT}) is currently unreachable or starting up."
+fi
+
+if [ "$ENGINE" == "host" ]; then
+    BINDING_JSON=$(start-cli package host "$TARGET_PKG" binding peer list --format json 2>/dev/null || true)
+    if [ -n "$BINDING_JSON" ]; then
+        ASSIGNED_PORT=$(printf "%s" "$BINDING_JSON" | python3 -c '
+import json, sys
+try:
+    data = json.loads(sys.stdin.read())
+    for k, v in data.items():
+        print(v.get("net", {}).get("assignedPort", ""))
+        break
+except Exception:
+    pass
+' 2>/dev/null || true)
+
+        ENABLED_ADDRS=$(printf "%s" "$BINDING_JSON" | python3 -c '
+import json, sys
+try:
+    data = json.loads(sys.stdin.read())
+    addrs = []
+    for k, v in data.items():
+        addrs.extend(v.get("addresses", {}).get("enabled", []))
+    print(",".join(addrs))
+except Exception:
+    pass
+' 2>/dev/null || true)
+
+        if [ "$ASSIGNED_PORT" == "9735" ]; then
+            log_info "Target node ($TARGET_PKG) holds internal port 9735 ✅"
+        elif [ -n "$ASSIGNED_PORT" ]; then
+            log_error "Target node ($TARGET_PKG) is bound to port $ASSIGNED_PORT instead of 9735! Inbound TunnelSats traffic is forwarded to port 9735. If another service holds 9735, release it."
+            FAILED_CHECKS=$((FAILED_CHECKS + 1))
+        fi
+
+        CLEAN_VPN_IP="${VPN_IP%%/*}"
+        MATCHING_ENABLED_ADDR=$(printf "%s" "$BINDING_JSON" | python3 -c '
+import json, sys
+vpn_ip = sys.argv[1]
+server = sys.argv[2]
+resolved_server = sys.argv[3]
+
+expected = set()
+if vpn_ip: expected.add(f"{vpn_ip}:9735")
+if server and server != "unknown": expected.add(f"{server}:9735")
+if resolved_server and resolved_server != "unknown": expected.add(f"{resolved_server}:9735")
+
+try:
+    data = json.loads(sys.stdin.read())
+    found = []
+    for k, v in data.items():
+        enabled = v.get("addresses", {}).get("enabled", [])
+        for addr in enabled:
+            if addr in expected:
+                found.append(addr)
+    print(",".join(found))
+except Exception:
+    pass
+' "$CLEAN_VPN_IP" "$SERVER" "$RESOLVED_SERVER_IP" 2>/dev/null || true)
+
+        if [ -n "$MATCHING_ENABLED_ADDR" ]; then
+            log_info "Target node ($TARGET_PKG) has public address toggle ENABLED in Peer Interface (${MATCHING_ENABLED_ADDR}) ✅"
+        else
+            log_error "Target node ($TARGET_PKG) does NOT have TunnelSats public address enabled in Peer Interface! Go to $TARGET_PKG -> Interfaces -> Peer Interface and toggle ON ${RESOLVED_SERVER_IP:-${SERVER:-$CLEAN_VPN_IP}}:9735 to open the firewall."
+            FAILED_CHECKS=$((FAILED_CHECKS + 1))
+        fi
+    fi
+
+    if [ -n "$SERVER" ] && [ "$SERVER" != "unknown" ] && [ -n "$VPN_PORT" ] && [ "$VPN_PORT" != "unknown" ]; then
+        if python3 -c '
+import socket, sys
+s = socket.socket()
+s.settimeout(3)
+try:
+    s.connect((sys.argv[1], int(sys.argv[2])))
+    s.close()
+    sys.exit(0)
+except Exception:
+    sys.exit(1)
+' "$SERVER" "$VPN_PORT" 2>/dev/null; then
+            log_info "External WAN ingress probe to ${SERVER}:${VPN_PORT} SUCCEEDED ✅"
+        else
+            log_warn "Direct probe to ${SERVER}:${VPN_PORT} did not connect from this host (may be blocked by NAT loopback). Test externally via https://portchecker.co."
+        fi
+    fi
+elif [ "$ENGINE" == "inside" ]; then
+    log_warn "Note: Internal container reachability does not guarantee external WAN ingress or firewall open state. Run './verify.sh' on the StartOS host to audit host bindings and WAN reachability."
 fi
 
 # 4. Tor Coexistence & SOCKS Proxy Check

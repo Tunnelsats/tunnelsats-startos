@@ -27,11 +27,11 @@ export const inputSpec = InputSpec.of({
   'tunnelsats-conf': Value.textarea({
     name: i18n('WireGuard Configuration'),
     description: i18n(
-      "Paste the content of your TunnelSats .conf file here. The required '# inbound: yes' gateway marker will be automatically added for you, and a copyable configuration will be provided on save to paste into System -> Gateways.",
+      "Paste the content of your TunnelSats .conf file here. Required gateway markers ('# StartTunnel' & '# inbound: yes') will be automatically added for you, and a copyable configuration will be provided on save to paste into System -> Gateways.",
     ),
     required: false,
     default: null,
-    placeholder: `[Interface]\n# inbound: yes\nPrivateKey = <your_private_key>\nAddress = 10.x.x.x/32\n# VPNPort: 12345\n...`,
+    placeholder: `[Interface]\n# StartTunnel\n# inbound: yes\nPrivateKey = <your_private_key>\nAddress = 10.x.x.x/32\n# VPNPort: 12345\n...`,
   }),
   'allow-ipv6': Value.toggle({
     name: i18n('Allow Home IPv6 Coexistence'),
@@ -95,9 +95,14 @@ export const configure = sdk.Action.withInput(
     if (processedConf) {
       return {
         version: '1' as const,
-        title: 'Configuration Saved',
+        title: 'Configuration Saved — Next Steps',
         message:
-          'TunnelSats configuration has been saved with "# inbound: yes". If adding or updating your host gateway in StartOS (System -> Gateways), paste this configuration so inbound Lightning connections are forwarded to port 9735.',
+          'TunnelSats configuration has been saved with inbound gateway markers (# StartTunnel & # inbound: yes).\n\n' +
+          'Complete these remaining steps in StartOS to enable inbound connectivity:\n' +
+          '1. System -> Gateways: If adding or updating your host VPN gateway, paste the configuration below.\n' +
+          '2. Target Node Announcement: Accept the automated 1-Click Task on your StartOS dashboard (or enter Custom External Host in node config).\n' +
+          '3. Target Node -> Interfaces -> Peer Interface: Toggle ON the public VPN address (<VPN_IP>:9735) to open the firewall. (When StartOS displays the "Address Requirements" modal to test port 9735, click "Later" — TunnelSats maps your dedicated external port rather than generic 9735, so generic port 9735 testing is expected to fail).\n\n' +
+          '⚠️ Multi-Node Notice: The target node MUST hold internal port 9735 for TunnelSats forwarding. If another node (such as Core Lightning) was installed first, it may have claimed 9735.',
         result: {
           type: 'single' as const,
           value: processedConf,

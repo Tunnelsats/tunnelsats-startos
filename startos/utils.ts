@@ -96,20 +96,29 @@ export function ensureInboundMarker(wgConf: string): string {
   if (!wgConf || !wgConf.trim()) return wgConf
 
   const lines = wgConf.split(/\r?\n/)
-  const hasMarker = lines.some(
-    (line) => line.trim().toLowerCase() === "# inbound: yes",
-  )
-  if (hasMarker) {
+  const hasStartTunnel = lines.some((line) => {
+    const trimmed = line.trim().toLowerCase()
+    return trimmed === "# starttunnel" || trimmed === "starttunnel"
+  })
+  const hasInboundYes = lines.some((line) => {
+    return line.trim().toLowerCase() === "# inbound: yes"
+  })
+
+  if (hasStartTunnel && hasInboundYes) {
     return wgConf
   }
+
+  const markersToAdd: string[] = []
+  if (!hasStartTunnel) markersToAdd.push("# StartTunnel")
+  if (!hasInboundYes) markersToAdd.push("# inbound: yes")
 
   const interfaceIndex = lines.findIndex((line) =>
     /^\s*\[Interface\]\s*$/i.test(line),
   )
   if (interfaceIndex !== -1) {
-    lines.splice(interfaceIndex + 1, 0, "# inbound: yes")
+    lines.splice(interfaceIndex + 1, 0, ...markersToAdd)
     return lines.join("\n")
   }
 
-  return `# inbound: yes\n${wgConf}`
+  return `${markersToAdd.join("\n")}\n${wgConf}`
 }

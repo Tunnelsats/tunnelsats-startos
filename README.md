@@ -52,15 +52,13 @@ actions:
     name: Configure
 tasks:
   - tunnelsats:configure (subscription expiry alert)
-  - lnd:custom-external-host-config (1-click external host advertisement)
-  - c-lightning:config (1-click external host advertisement)
 ```
 
 ## Architecture & How It Works
 
-1. **Host-Managed Gateway**: The WireGuard tunnel is configured under StartOS **System > Gateways**. Per [Start9Labs/start-technologies#3893](https://github.com/Start9Labs/start-technologies/pull/3893), configs carrying `# inbound: yes` are automatically classified by StartOS as **Inbound/Outbound** gateways. StartOS kernel networking encapsulates outbound Lightning traffic and forwards inbound connections on your TunnelSats port to port `9735` on your Lightning container.
+1. **Host-Managed Gateway**: The WireGuard tunnel is configured under StartOS **System > Gateways**. Configs carrying `# StartTunnel` and `# inbound: yes` are automatically classified by StartOS as **Inbound/Outbound** gateways. StartOS kernel networking encapsulates outbound Lightning traffic and forwards inbound connections on your TunnelSats port to port `9735` on your Lightning container.
 2. **Companion Service**: The `tunnelsats` container runs as a companion service, hosting the Web Dashboard and maintaining synchronization with the TunnelSats subscription API.
-3. **1-Click External Host Configuration**: Once configured, StartOS prompts the user with a 1-Click task to announce the TunnelSats public IP and port to the Lightning Network on LND or Core Lightning.
+3. **External Host Announcement & Firewall Policy**: StartOS presents an automated 1-Click task on the dashboard to announce the TunnelSats public endpoint (`custom-external-host`), with manual configuration available as a fallback. The user enables the public address toggle under **Interfaces > Peer Interface** to open the incoming firewall.
 4. **Subscription Lifecycle & Renewal**: The background daemon monitors subscription expiration, updating the local dashboard and raising StartOS tasks when renewal is required.
 
 ## Volumes & Mount Points
@@ -83,10 +81,9 @@ tasks:
 
 ## Actions & Tasks
 
-- **Configure (`configure`)**: Allows users to enable/disable TunnelSats, select their target Lightning node (`lnd` or `cln`), paste their WireGuard configuration, and toggle IPv6 coexistence.
+- **Configure (`configure`)**: Allows users to enable/disable TunnelSats, select their target Lightning node (`lnd` or `cln`), paste their WireGuard configuration, and toggle IPv6 coexistence. Automatically ensures inbound gateway markers (`# StartTunnel` & `# inbound: yes`) on save.
 - **Automated Tasks**:
   - `tunnelsats:configure`: Raised when subscription has `<= 7 days` (Important) or `<= 3 days` / expired (Critical). Automatically cleared upon successful renewal.
-  - `lnd:custom-external-host-config` / `c-lightning:config`: 1-Click task to populate `custom-external-host` on the target Lightning node.
 
 ## Network & Privacy Disclosure
 
