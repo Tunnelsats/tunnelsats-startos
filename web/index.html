@@ -361,7 +361,7 @@
                   <strong>Target Node Announcement:</strong> Accept the automated <strong>1-Click Task</strong> prompt on your StartOS dashboard to advertise your endpoint, or enter it manually in your target node (e.g. <strong>LND → Config → Custom External Host</strong>).
                 </li>
                 <li>
-                  <strong>Firewall Port Toggle:</strong> Go to your target node (e.g. <strong>LND → Interfaces → Peer Interface</strong>), find your TunnelSats public IP (<code>&lt;VPN_IP&gt;:9735</code>), and toggle it <strong>ON</strong> to open the firewall.
+                  <strong>Firewall Port Toggle:</strong> Go to your target node (e.g. <strong>LND → Interfaces → Peer Interface</strong>), find your TunnelSats public IP (<code>&lt;VPN_IP&gt;:9735</code>), and toggle it <strong>ON</strong>. When StartOS prompts to test port 9735 in <em>"Address Requirements"</em>, click <strong>"Later"</strong>.
                 </li>
               </ol>
             </div>
@@ -472,7 +472,7 @@
                     Locate your TunnelSats public IP address (<code>&lt;VPN_IP&gt;:9735</code>) in the list of available addresses.
                   </li>
                   <li>
-                    Toggle the address to <strong>ON</strong>. This instructs StartOS nftables to forward incoming connections to your node.
+                    Toggle the address to <strong>ON</strong>. When StartOS displays the <em>"Address Requirements"</em> modal asking to test port 9735, click <strong>"Later"</strong>. StartOS tests generic external port 9735, which is not open on the VPN server, but clicking "Later" successfully enables the firewall rule for your assigned TunnelSats port.
                   </li>
                 </ol>
               </div>
@@ -480,6 +480,27 @@
           </details>
 
           <!-- Q3b -->
+          <details class="faq-item">
+            <summary class="faq-question">
+              Why does the StartOS "Address Requirements" port test fail when enabling the Public peer interface?
+            </summary>
+            <div class="faq-answer">
+              <p>
+                <strong>The StartOS built-in test probes external port 9735, which is not mapped to your node.</strong>
+              </p>
+              <p>
+                When you toggle the Public switch ON, StartOS assumes a 1:1 NAT model and attempts to test <code>&lt;VPN_IP&gt;:9735</code> from an external server. However, TunnelSats provides dedicated port mapping using a unique high port (e.g. <code>server.tunnelsats.com:24556</code> &rarr; internal <code>9735</code>).
+              </p>
+              <p>
+                Because external port 9735 is closed on the WireGuard server, clicking <strong>"Test"</strong> will report a failure. 
+              </p>
+              <p>
+                <strong>What to do:</strong> Click <strong>"Later"</strong>. This saves and enables the public interface forwarding rule in StartOS nftables. Your node is now fully reachable on your assigned TunnelSats port!
+              </p>
+            </div>
+          </details>
+
+          <!-- Q3c -->
           <details class="faq-item">
             <summary class="faq-question">
               Why does port forwarding fail if both LND and Core Lightning are installed?

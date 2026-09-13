@@ -101,7 +101,7 @@ export const configure = sdk.Action.withInput(
           'Complete these remaining steps in StartOS to enable inbound connectivity:\n' +
           '1. System -> Gateways: If adding or updating your host VPN gateway, paste the configuration below.\n' +
           '2. Target Node Announcement: Accept the automated 1-Click Task on your StartOS dashboard (or enter Custom External Host in node config).\n' +
-          '3. Target Node -> Interfaces -> Peer Interface: Toggle ON the public VPN address (<VPN_IP>:9735) to open the firewall.\n\n' +
+          '3. Target Node -> Interfaces -> Peer Interface: Toggle ON the public VPN address (<VPN_IP>:9735) to open the firewall. (When StartOS displays the "Address Requirements" modal to test port 9735, click "Later" — TunnelSats maps your dedicated external port rather than generic 9735, so generic port 9735 testing is expected to fail).\n\n' +
           '⚠️ Multi-Node Notice: The target node MUST hold internal port 9735 for TunnelSats forwarding. If another node (such as Core Lightning) was installed first, it may have claimed 9735.',
         result: {
           type: 'single' as const,

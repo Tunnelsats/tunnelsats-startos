@@ -26,7 +26,8 @@
 5. **Enable Public Address Firewall Toggle**:
    - In StartOS, open your target node (**LND** or **Core Lightning**).
    - Go to **Interfaces** &rarr; **Peer Interface** &rarr; find your TunnelSats public IP (`<VPN_IP>:9735`).
-   - Toggle the switch to **ON**. This directs StartOS nftables to open the firewall and forward incoming peer connections from the VPN tunnel to your node.
+   - Toggle the switch to **ON**.
+   - 💡 **StartOS Port Check Prompt ("Address Requirements")**: StartOS will display an "Address Requirements" modal prompting to test port forwarding on port `9735:9735`. Because TunnelSats maps your dedicated external port (e.g. `24556`) rather than generic `9735`, clicking **"Test"** will fail. Simply **click "Later"** to save and proceed. This directs StartOS nftables to open the firewall and forward incoming peer connections from the VPN tunnel to your node.
 
 6. **Set Outbound Policy Routing**:
    - In StartOS, open your target node (**LND** or **Core Lightning**).
