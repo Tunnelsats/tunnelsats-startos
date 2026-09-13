@@ -27,7 +27,7 @@ export const inputSpec = InputSpec.of({
   'tunnelsats-conf': Value.textarea({
     name: i18n('WireGuard Configuration'),
     description: i18n(
-      "Paste the content of your TunnelSats .conf file here. Ensure it includes the '# VPNPort: XXXXX' metadata comment for automatic port-forwarding.",
+      "Paste the content of your TunnelSats .conf file here. The required '# inbound: yes' gateway marker will be automatically added for you, and a copyable configuration will be provided on save to paste into System -> Gateways.",
     ),
     required: false,
     default: null,
