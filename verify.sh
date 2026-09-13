@@ -120,7 +120,7 @@ except Exception as e:
     IFS='|' read -r STATUS SUB_ACTIVE GW_MODE VPN_IP VPN_PORT SERVER TARGET_HOST TARGET_PORT ALLOW_IPV6 PUBKEY <<< "$PARSED_VALUES"
 
     if [ -n "$SERVER" ] && [ "$SERVER" != "unknown" ]; then
-        RESOLVED_SERVER_IP=$(python3 -c "import socket; print(socket.gethostbyname('$SERVER'))" 2>/dev/null || true)
+        RESOLVED_SERVER_IP=$(python3 -c 'import sys, socket; print(socket.gethostbyname(sys.argv[1]))' "$SERVER" 2>/dev/null || true)
     fi
     
     log_info "Gateway Status Properties:"
@@ -205,17 +205,17 @@ log_step "3. Target Lightning Node Inbound Reachability Audit"
 log_info "Testing internal TCP reachability to target node: ${TARGET_HOST}:${TARGET_PORT}"
 
 LN_REACHABLE="false"
-if python3 -c "
-import socket
+if python3 -c '
+import socket, sys
 s = socket.socket()
 s.settimeout(3)
 try:
-    s.connect(('$TARGET_HOST', int('$TARGET_PORT')))
+    s.connect((sys.argv[1], int(sys.argv[2])))
     s.close()
-    exit(0)
+    sys.exit(0)
 except Exception:
-    exit(1)
-" 2>/dev/null; then
+    sys.exit(1)
+' "$TARGET_HOST" "$TARGET_PORT" 2>/dev/null; then
     LN_REACHABLE="true"
     log_info "Target Lightning node is listening on ${TARGET_HOST}:${TARGET_PORT} (Inbound Ready ✅)"
 else
@@ -226,17 +226,17 @@ fi
 log_step "4. Tor Coexistence & SOCKS Proxy Check"
 TOR_FOUND=false
 for tor_host in "tor.embassy" "127.0.0.1" "localhost"; do
-    if python3 -c "
-import socket
+    if python3 -c '
+import socket, sys
 s = socket.socket()
 s.settimeout(2)
 try:
-    s.connect(('$tor_host', 9050))
+    s.connect((sys.argv[1], int(sys.argv[2])))
     s.close()
-    exit(0)
+    sys.exit(0)
 except Exception:
-    exit(1)
-" 2>/dev/null; then
+    sys.exit(1)
+' "$tor_host" 9050 2>/dev/null; then
         TOR_FOUND=true
         log_info "Tor proxy accessible ($tor_host:9050). Onion routing coexistence functional."
         break
