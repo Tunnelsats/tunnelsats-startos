@@ -48,14 +48,14 @@
   - Refactor `verify.sh` to eliminate Docker assumptions and dynamically audit host interfaces, port 9735 bindings, and WAN ingress.
   - Comprehensive documentation and FAQ updates explaining the Peer Interface toggle, Address Requirements "Later" bypass, and multi-node port 9735 gotchas.
 
-- [ ] **Future Enhancement: Node-Funded Auto-Renewals via TunnelSats API** ([Issue #54 Discussion](https://github.com/Tunnelsats/tunnelsats-startos/issues/54#issuecomment-5359358874))
+- [ ] **Future Enhancement: Node-Funded Auto-Renewals via TunnelSats API** ([#83](https://github.com/Tunnelsats/tunnelsats-startos/issues/83) / [Issue #54 Discussion](https://github.com/Tunnelsats/tunnelsats-startos/issues/54#issuecomment-5359358874))
   - Automatically request renewal invoices from the TunnelSats public API (`https://tunnelsats.com/api/public/v1/subscription/renew`) using the stored WireGuard public key when the subscription enters the expiration warning window ($\le 7$ days).
   - Support automated or 1-click renewal payment via:
     1. Direct Lightning RPC from the target node (LND `lncli payinvoice` / CLN `lightning-cli pay`).
     2. Nostr Wallet Connect (NWC) or LNbits sub-wallet with a configurable maximum sat limit per renewal.
   - Automatically update `tunnelsats-meta.json` with the extended expiration date, clear pending warning tasks, and push a success notification to the StartOS notification center.
 
-- [ ] **Future Enhancement: In-App WAN Reachability Self-Test**
+- [ ] **Future Enhancement: In-App WAN Reachability Self-Test** ([#84](https://github.com/Tunnelsats/tunnelsats-startos/issues/84))
   - Add a dedicated "Test Inbound Connection" button inside the TunnelSats companion web dashboard (`web/index.html` / `bridge.py`).
   - Probes the live assigned public endpoint (`server.tunnelsats.com:port`) directly from the node or via an external ping service, displaying a green checkmark to provide immediate peace of mind for operators when StartOS's generic port 9735 test fails.
 
