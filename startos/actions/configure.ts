@@ -2,7 +2,7 @@ import { sdk } from '../sdk'
 import { configJson } from '../fileModels/config.json'
 import { tunnelsatsConf } from '../fileModels/tunnelsatsConf'
 import { i18n } from '../i18n'
-import { validateWireguardConfig } from '../utils'
+import { validateWireguardConfig, ensureInboundMarker } from '../utils'
 import { rm } from 'node:fs/promises'
 
 const { InputSpec, Value } = sdk
@@ -27,11 +27,11 @@ export const inputSpec = InputSpec.of({
   'tunnelsats-conf': Value.textarea({
     name: i18n('WireGuard Configuration'),
     description: i18n(
-      "Paste the content of your TunnelSats .conf file here. Ensure it includes the '# VPNPort: XXXXX' metadata comment for automatic port-forwarding.",
+      "Paste the content of your TunnelSats .conf file here. The required '# inbound: yes' gateway marker will be automatically added for you, and a copyable configuration will be provided on save to paste into System -> Gateways.",
     ),
     required: false,
     default: null,
-    placeholder: `[Interface]\nPrivateKey = <your_private_key>\nAddress = 10.x.x.x/32\n# VPNPort: 12345\n...`,
+    placeholder: `[Interface]\n# inbound: yes\nPrivateKey = <your_private_key>\nAddress = 10.x.x.x/32\n# VPNPort: 12345\n...`,
   }),
   'allow-ipv6': Value.toggle({
     name: i18n('Allow Home IPv6 Coexistence'),
@@ -63,28 +63,51 @@ export const configure = sdk.Action.withInput(
     }
   },
   async ({ effects, input }) => {
-    if (input.enabled) {
-      if (!input['tunnelsats-conf']) {
-        throw new Error('Enabled tunnels require a WireGuard configuration')
-      }
-      const validation = validateWireguardConfig(input['tunnelsats-conf'])
+    let processedConf = input['tunnelsats-conf']?.trim()
+      ? input['tunnelsats-conf']
+      : undefined
+    if (input.enabled && !processedConf) {
+      throw new Error('Enabled tunnels require a WireGuard configuration')
+    }
+
+    if (processedConf) {
+      const validation = validateWireguardConfig(processedConf)
       if (!validation.valid) {
         throw new Error(validation.error || 'Invalid WireGuard configuration')
       }
+      processedConf = ensureInboundMarker(processedConf)
     }
 
     await configJson.merge(effects, {
       enabled: input.enabled,
       'target-node': input['target-node'],
-      'tunnelsats-conf': input['tunnelsats-conf'] || undefined,
+      'tunnelsats-conf': processedConf || undefined,
       'allow-ipv6': input['allow-ipv6'],
     })
 
-    if (input.enabled && input['tunnelsats-conf']) {
-      await tunnelsatsConf.write(effects, input['tunnelsats-conf'])
+    if (input.enabled && processedConf) {
+      await tunnelsatsConf.write(effects, processedConf)
     } else {
       const confPath = sdk.volumes.main.subpath('./tunnelsatsv3.conf')
       await rm(confPath, { force: true })
     }
+
+    if (processedConf) {
+      return {
+        version: '1' as const,
+        title: 'Configuration Saved',
+        message:
+          'TunnelSats configuration has been saved with "# inbound: yes". If adding or updating your host gateway in StartOS (System -> Gateways), paste this configuration so inbound Lightning connections are forwarded to port 9735.',
+        result: {
+          type: 'single' as const,
+          value: processedConf,
+          copyable: true,
+          masked: false,
+          qr: false,
+        },
+      }
+    }
+
+    return null
   },
 )

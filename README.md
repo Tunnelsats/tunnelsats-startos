@@ -58,7 +58,7 @@ tasks:
 
 ## Architecture & How It Works
 
-1. **Host-Managed Gateway**: The WireGuard tunnel is configured under StartOS **System > Gateways**. StartOS kernel networking encapsulates outbound Lightning traffic and forwards inbound connections on your TunnelSats port to port `9735` on your Lightning container.
+1. **Host-Managed Gateway**: The WireGuard tunnel is configured under StartOS **System > Gateways**. Per [Start9Labs/start-technologies#3893](https://github.com/Start9Labs/start-technologies/pull/3893), configs carrying `# inbound: yes` are automatically classified by StartOS as **Inbound/Outbound** gateways. StartOS kernel networking encapsulates outbound Lightning traffic and forwards inbound connections on your TunnelSats port to port `9735` on your Lightning container.
 2. **Companion Service**: The `tunnelsats` container runs as a companion service, hosting the Web Dashboard and maintaining synchronization with the TunnelSats subscription API.
 3. **1-Click External Host Configuration**: Once configured, StartOS prompts the user with a 1-Click task to announce the TunnelSats public IP and port to the Lightning Network on LND or Core Lightning.
 4. **Subscription Lifecycle & Renewal**: The background daemon monitors subscription expiration, updating the local dashboard and raising StartOS tasks when renewal is required.

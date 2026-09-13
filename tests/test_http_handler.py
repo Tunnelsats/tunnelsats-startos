@@ -27,8 +27,7 @@ class TestHTTPHandler(unittest.TestCase):
         mock_pubkey.return_value = "pubkey123"
         mock_status.return_value = {
             "status": "running",
-            "vpn_connected": True,
-            "handshake": "active"
+            "subscription_active": True
         }
         
         # Test local address: bypasses gateway check

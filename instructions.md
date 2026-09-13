@@ -6,17 +6,18 @@
    - Visit [TunnelSats.com](https://tunnelsats.com) and choose a subscription plan for your Lightning node.
    - Download or copy your WireGuard configuration file (`.conf`).
 
-2. **Add Gateway in StartOS**:
-   - In StartOS, navigate to **System** &rarr; **Gateways** &rarr; click **Add Gateway**.
-   - Select **WireGuard** and paste the content of your TunnelSats `.conf` file.
-   - Connect the gateway.
-
-3. **Configure TunnelSats Package**:
-   - Open **TunnelSats** in your StartOS Services list.
-   - Click **Configure** in the left menu.
+2. **Configure TunnelSats Companion Service**:
+   - In StartOS, navigate to **Services** &rarr; **TunnelSats** &rarr; **Configure**.
    - Select your **Target Lightning Node** (`LND` or `Core Lightning`).
    - Paste your WireGuard configuration into **WireGuard Configuration**.
    - Set **Enable TunnelSats** to **ON** and click **Save**.
+   - The package validates your configuration, automatically injects the `# inbound: yes` marker under `[Interface]`, and displays the ready-to-copy configuration.
+
+3. **Add Gateway in StartOS**:
+   - In StartOS, navigate to **System** &rarr; **Gateways** &rarr; click **Add Gateway** (or edit an existing TunnelSats gateway).
+   - Select **WireGuard** and paste the configuration carrying `# inbound: yes` (as provided by the Configure action result or dashboard).
+   - StartOS auto-classifies the gateway as **Inbound/Outbound**, enabling public port forwarding to port 9735 on your node.
+   - Connect the gateway.
 
 4. **1-Click Lightning Host Announcement**:
    - Once saved, StartOS will present a **1-Click Task** on your dashboard to configure the external host on your Lightning service.
