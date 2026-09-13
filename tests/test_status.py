@@ -44,8 +44,6 @@ class TestBridgeStatus(unittest.TestCase):
             self.assertTrue(status["enabled"])
             self.assertTrue(status["configured"])
             self.assertTrue(status["subscription_active"])
-            self.assertTrue(status["vpn_connected"])
-            self.assertEqual(status["handshake"], "active")
             self.assertEqual(status["gateway_mode"], "host_managed")
             self.assertEqual(status["vpn_ip"], "10.9.0.102")
             self.assertEqual(status["vpn_port"], 24556)
@@ -61,8 +59,6 @@ class TestBridgeStatus(unittest.TestCase):
         self.assertEqual(status["status"], "disabled")
         self.assertFalse(status["enabled"])
         self.assertFalse(status["subscription_active"])
-        self.assertFalse(status["vpn_connected"])
-        self.assertEqual(status["handshake"], "none")
 
     @patch('bridge.is_enabled', return_value=True)
     @patch('os.path.exists', return_value=False)

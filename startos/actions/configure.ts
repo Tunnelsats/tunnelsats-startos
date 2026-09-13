@@ -84,9 +84,23 @@ export const configure = sdk.Action.withInput(
 
     if (input.enabled && processedConf) {
       await tunnelsatsConf.write(effects, processedConf)
+      return {
+        version: '1' as const,
+        title: 'Configuration Saved',
+        message:
+          'TunnelSats configuration has been saved with "# inbound: yes". If adding or updating your host gateway in StartOS (System -> Gateways), paste this configuration so inbound Lightning connections are forwarded to port 9735.',
+        result: {
+          type: 'single' as const,
+          value: processedConf,
+          copyable: true,
+          masked: false,
+          qr: false,
+        },
+      }
     } else {
       const confPath = sdk.volumes.main.subpath('./tunnelsatsv3.conf')
       await rm(confPath, { force: true })
+      return null
     }
   },
 )

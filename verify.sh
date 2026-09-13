@@ -85,8 +85,8 @@ for path in ['/api/status', '/api/properties']:
 fi
 
 STATUS="unknown"
-VPN_CONNECTED="unknown"
-HANDSHAKE="unknown"
+SUB_ACTIVE="unknown"
+GW_MODE="host_managed"
 VPN_IP=""
 VPN_PORT=""
 SERVER=""
@@ -102,32 +102,56 @@ try:
     data = json.loads(sys.stdin.read())
     raw = data.get('raw', data)
     status = raw.get('status', data.get('Status', {}).get('value', 'unknown'))
-    vpn_conn = raw.get('vpn_connected', raw.get('subscription_active', data.get('VPN Connected', {}).get('value', False)))
-    handshake = raw.get('handshake', 'active' if vpn_conn else 'none')
+    sub_active = str(raw.get('subscription_active', raw.get('status') == 'running'))
+    gw_mode = raw.get('gateway_mode', 'host_managed')
     vpn_ip = raw.get('vpn_ip', raw.get('internal_octet', data.get('Internal IP (Last Octet)', {}).get('value', '')))
     vpn_port = raw.get('vpn_port', data.get('Forwarding Port', {}).get('value', ''))
     server = raw.get('server', raw.get('public_ip', data.get('TunnelSats Public IP', {}).get('value', '')))
     target_h = raw.get('target_host', 'lnd.embassy')
     target_p = str(raw.get('target_port', 9735))
     allow_v6 = str(raw.get('allow_ipv6', False))
-    print('|'.join([str(v) for v in [status, vpn_conn, handshake, vpn_ip, vpn_port, server, target_h, target_p, allow_v6]]))
+    print('|'.join([str(v) for v in [status, sub_active, gw_mode, vpn_ip, vpn_port, server, target_h, target_p, allow_v6]]))
 except Exception as e:
     print('ERROR||||||||' + str(e))
 " 2>/dev/null | tr -d '\r' || true)
     
-    IFS='|' read -r STATUS VPN_CONNECTED HANDSHAKE VPN_IP VPN_PORT SERVER TARGET_HOST TARGET_PORT ALLOW_IPV6 <<< "$PARSED_VALUES"
+    IFS='|' read -r STATUS SUB_ACTIVE GW_MODE VPN_IP VPN_PORT SERVER TARGET_HOST TARGET_PORT ALLOW_IPV6 <<< "$PARSED_VALUES"
     
     log_info "Gateway Status Properties:"
     echo "  - Status: ${STATUS:-unknown}"
-    echo "  - VPN Connected: ${VPN_CONNECTED:-unknown}"
-    echo "  - Handshake: ${HANDSHAKE:-unknown}"
+    echo "  - Subscription Active: ${SUB_ACTIVE:-unknown}"
+    echo "  - Gateway Mode: ${GW_MODE:-host_managed}"
     echo "  - Internal VPN IP: ${VPN_IP:-unknown}"
     echo "  - Forwarded Port: ${VPN_PORT:-unknown}"
     echo "  - Server: ${SERVER:-unknown}"
 
-    if [ "$VPN_CONNECTED" != "True" ] && [ "$VPN_CONNECTED" != "true" ]; then
-        log_warn "TunnelSats gateway is not connected (status: $STATUS)."
+    if [ "$SUB_ACTIVE" != "True" ] && [ "$SUB_ACTIVE" != "true" ]; then
+        log_warn "TunnelSats subscription or configuration is inactive (status: $STATUS)."
         FAILED_CHECKS=$((FAILED_CHECKS + 1))
+    fi
+
+    if [ "$ENGINE" == "host" ]; then
+        if command -v wg &> /dev/null && sudo wg show wg0 &> /dev/null; then
+            WG_HANDSHAKE=$(sudo wg show wg0 latest-handshakes 2>/dev/null | awk '{print $2}' || echo "0")
+            CURRENT_EPOCH=$(date +%s)
+            if [ -n "$WG_HANDSHAKE" ] && [ "$WG_HANDSHAKE" -gt 0 ]; then
+                DIFF=$((CURRENT_EPOCH - WG_HANDSHAKE))
+                if [ "$DIFF" -lt 300 ]; then
+                    log_info "Host WireGuard interface (wg0) handshake confirmed active (${DIFF}s ago) ✅"
+                else
+                    log_error "Host WireGuard interface (wg0) handshake is stale (${DIFF}s ago)."
+                    FAILED_CHECKS=$((FAILED_CHECKS + 1))
+                fi
+            else
+                log_error "Host WireGuard interface (wg0) has never completed a handshake."
+                FAILED_CHECKS=$((FAILED_CHECKS + 1))
+            fi
+        elif start-cli net gateway list 2>/dev/null | grep -qi "wireguard"; then
+            log_info "StartOS host WireGuard gateway detected in gateway list ✅"
+        else
+            log_error "No active WireGuard gateway interface detected on StartOS host."
+            FAILED_CHECKS=$((FAILED_CHECKS + 1))
+        fi
     fi
 else
     log_warn "Could not retrieve /api/status or /api/properties. Web server may be initializing or unconfigured."
@@ -272,19 +296,21 @@ Connection: close
     if [ "$ALLOW_IPV6" != "True" ]; then
         RAW_V6_OUTPUT=""
         if [ "$TARGET_PKG" == "c-lightning" ]; then
-            RAW_V6_OUTPUT=$($ATTACH_CMD -- perl -MSocket -e 'socket(my $s, AF_INET6, SOCK_STREAM, getprotobyname("tcp")); my $sin6 = Socket::pack_sockaddr_in6(443, Socket::inet_pton(AF_INET6, "2607:f2d8:1:3c::4")); if (connect($s, $sin6)) { print "CONNECTED"; } else { print "CONNECT_FAILED: $!"; }' 2>&1)
+            RAW_V6_OUTPUT=$($ATTACH_CMD -- perl -MSocket -e 'socket(my $s, AF_INET6, SOCK_STREAM, getprotobyname("tcp")); my $sin6 = Socket::pack_sockaddr_in6(443, Socket::inet_pton(AF_INET6, "2607:f2d8:1:3c::4")); if (connect($s, $sin6)) { print "CONNECTED"; } else { print "CONNECT_FAILED: $!"; }' 2>&1 || true)
         else
-            RAW_V6_OUTPUT=$($ATTACH_CMD -- curl -6 -s -S --connect-timeout 5 https://api6.ipify.org 2>&1 || true)
+            RAW_V6_OUTPUT=$($ATTACH_CMD -- curl -6 -v -s --connect-timeout 5 https://api6.ipify.org 2>&1 || true)
         fi
-        RAW_V6_OUTPUT=$(printf '%s' "$RAW_V6_OUTPUT" | tr -d '[:space:]')
+        RAW_V6_OUTPUT=$(printf '%s' "$RAW_V6_OUTPUT" | tr -d '\r')
 
-        if [[ "$RAW_V6_OUTPUT" =~ "Failed to connect" ]] || [[ "$RAW_V6_OUTPUT" =~ "Network unreachable" ]] || [[ "$RAW_V6_OUTPUT" =~ "Network is unreachable" ]] || [[ "$RAW_V6_OUTPUT" =~ "CONNECT_FAILED" ]] || [ -z "$RAW_V6_OUTPUT" ]; then
-            log_info "Target node live IPv6 isolation: BLOCKED / UNROUTABLE (Protected ✅)"
-        elif [[ "$RAW_V6_OUTPUT" =~ [0-9a-fA-F:]+:[0-9a-fA-F:]+ ]]; then
+        # Fail-Closed Verification: Proof of isolation requires explicit kernel-level unreachable confirmation
+        if [[ "$RAW_V6_OUTPUT" =~ [0-9a-fA-F:]{4,}:[0-9a-fA-F:]{4,} ]] && [[ ! "$RAW_V6_OUTPUT" =~ "failed:" ]] && [[ ! "$RAW_V6_OUTPUT" =~ "CONNECT_FAILED" ]]; then
             log_error "Target node live IPv6 is ACTIVE and leaking home ISP address: $RAW_V6_OUTPUT"
             FAILED_CHECKS=$((FAILED_CHECKS + 1))
+        elif [[ "$RAW_V6_OUTPUT" =~ "Network unreachable" ]] || [[ "$RAW_V6_OUTPUT" =~ "Network is unreachable" ]] || [[ "$RAW_V6_OUTPUT" =~ "ENETUNREACH" ]]; then
+            log_info "Target node live IPv6 isolation: BLOCKED / UNROUTABLE (Kernel route unreachable confirmed ✅)"
         else
-            log_info "Target node live IPv6 isolation: BLOCKED / UNROUTABLE (Protected ✅)"
+            log_error "Could not verify IPv6 isolation from ${TARGET_PKG} container. Ambiguous probe output did not confirm unroutable network state: $RAW_V6_OUTPUT"
+            FAILED_CHECKS=$((FAILED_CHECKS + 1))
         fi
     fi
 fi

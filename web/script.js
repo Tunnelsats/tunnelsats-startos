@@ -20,7 +20,7 @@ function updateUI() {
   const badgeText = badge.querySelector('.status-text')
 
   if (statusData.enabled) {
-    if (statusData.status === 'running' || (statusData.vpn_connected && statusData.handshake === 'active')) {
+    if (statusData.status === 'running' || statusData.subscription_active) {
       badge.className = 'status-badge active'
       badgeText.textContent = 'SUBSCRIPTION ACTIVE'
     } else if (statusData.status === 'expired') {

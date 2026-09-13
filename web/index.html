@@ -158,8 +158,8 @@
               <strong>Step-by-Step StartOS 0.4.0 Native Gateway Configuration:</strong>
             </p>
             <ol style="padding-left: 1.25rem; line-height: 1.6; margin: 0.75rem 0; color: #cbd5e1; font-size: 0.9rem;">
-              <li><strong>Add Gateway in StartOS:</strong> Navigate to <strong>System</strong> &rarr; <strong>Gateways</strong> &rarr; click <strong>Add Gateway</strong>.</li>
-              <li><strong>Select WireGuard:</strong> Choose <strong>WireGuard</strong> and paste your TunnelSats <code>.conf</code> file content (configs carrying <code># inbound: yes</code> are automatically classified as Inbound/Outbound gateways).</li>
+              <li><strong>Configure Companion Service:</strong> Open <strong>Services</strong> &rarr; <strong>TunnelSats</strong> &rarr; <strong>Configure</strong>, paste your downloaded <code>.conf</code>, and click <strong>Save</strong>. The service validates your configuration and automatically injects the required <code># inbound: yes</code> marker.</li>
+              <li><strong>Add Gateway in StartOS:</strong> Navigate to <strong>System</strong> &rarr; <strong>Gateways</strong> &rarr; click <strong>Add Gateway</strong> &rarr; choose <strong>WireGuard</strong> and paste the configuration carrying <code># inbound: yes</code> (StartOS uses this marker to auto-classify the gateway as Inbound/Outbound for Lightning port forwarding).</li>
               <li><strong>Set Outbound Policy Routing:</strong> Open your target node (<strong>LND</strong> or <strong>Core Lightning</strong>) &rarr; <strong>Actions</strong> &rarr; <strong>Set Outbound Gateway</strong> &rarr; select your TunnelSats gateway.</li>
               <li><strong>Inbound Lightning Traffic:</strong> Inbound connections to your TunnelSats port automatically forward to port <code>9735</code> on your node.</li>
             </ol>
