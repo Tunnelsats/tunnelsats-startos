@@ -368,6 +368,7 @@ echo "  1. Audit Target Outbound IPv4:  start-cli package attach ${TARGET_PKG} -
 if [ -n "$RESOLVED_SERVER_IP" ]; then
     echo "     (Expected Output when VPN-routed: ${RESOLVED_SERVER_IP} / ${SERVER})"
 fi
+echo "     (If output matches your home ISP, set: Services → ${TARGET_PKG} → Actions → Set Outbound Gateway → TunnelSats)"
 echo "  2. Audit Target IPv6 Isolation: start-cli package attach ${TARGET_PKG} -- curl -6 -s --connect-timeout 5 https://api6.ipify.org"
 if [ "$ALLOW_IPV6" == "True" ]; then
     echo "     (Allow IPv6 is ON: Expected Output: <Home_ISP_IPv6>)"
@@ -405,6 +406,7 @@ Connection: close
             log_info "Target node live IPv4 egress: $TARGET_EGRESS (Matches TunnelSats VPN IP ✅)"
         else
             log_error "Target node live IPv4 egress: $TARGET_EGRESS (Does not match TunnelSats VPN IP ${RESOLVED_SERVER_IP:-$SERVER})"
+            log_error "Remediation: In StartOS, navigate to Services → ${TARGET_PKG} → Actions → Set Outbound Gateway and select TunnelSats to prevent home IP leakage."
             FAILED_CHECKS=$((FAILED_CHECKS + 1))
         fi
     else

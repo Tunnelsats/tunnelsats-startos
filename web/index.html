@@ -158,9 +158,10 @@
               <strong>Step-by-Step StartOS 0.4.0 Native Gateway Configuration:</strong>
             </p>
             <ol style="padding-left: 1.25rem; line-height: 1.6; margin: 0.75rem 0; color: #cbd5e1; font-size: 0.9rem;">
-              <li><strong>Configure Companion Service:</strong> Open <strong>Services</strong> &rarr; <strong>TunnelSats</strong> &rarr; <strong>Configure</strong>, paste your downloaded <code>.conf</code>, and click <strong>Save</strong>. The service validates your configuration and automatically injects the required <code># inbound: yes</code> marker.</li>
-              <li><strong>Add Gateway in StartOS:</strong> Navigate to <strong>System</strong> &rarr; <strong>Gateways</strong> &rarr; click <strong>Add Gateway</strong> &rarr; choose <strong>WireGuard</strong> and paste the configuration carrying <code># inbound: yes</code> (StartOS uses this marker to auto-classify the gateway as Inbound/Outbound for Lightning port forwarding).</li>
-              <li><strong>Set Outbound Policy Routing:</strong> Open your target node (<strong>LND</strong> or <strong>Core Lightning</strong>) &rarr; <strong>Actions</strong> &rarr; <strong>Set Outbound Gateway</strong> &rarr; select your TunnelSats gateway.</li>
+              <li><strong>Configure Companion Service:</strong> Open <strong>Services</strong> &rarr; <strong>TunnelSats</strong> &rarr; <strong>Configure</strong>, paste your downloaded <code>.conf</code>, and click <strong>Save</strong>. The service validates your configuration and automatically injects the required markers (<code># StartTunnel</code> &amp; <code># inbound: yes</code>).</li>
+              <li><strong>Add Gateway in StartOS:</strong> Navigate to <strong>System</strong> &rarr; <strong>Gateways</strong> &rarr; click <strong>Add Gateway</strong> &rarr; choose <strong>WireGuard</strong> and paste the configuration carrying both inbound markers (StartOS uses these markers to auto-classify the gateway as Inbound/Outbound for Lightning port forwarding). Connect the gateway.</li>
+              <li><strong>Open Firewall (Peer Interface):</strong> Open your target node (<strong>LND</strong> or <strong>Core Lightning</strong>) &rarr; <strong>Interfaces</strong> &rarr; <strong>Peer Interface</strong>, toggle <code>&lt;VPN_IP&gt;:9735</code> to <strong>ON</strong>, and click <strong>"Later"</strong> on the port check prompt.</li>
+              <li><strong>Set Outbound Policy Routing (Required for Full Egress Privacy):</strong> Open your target node &rarr; <strong>Actions</strong> &rarr; <strong>Set Outbound Gateway</strong> &rarr; select your TunnelSats gateway to route all outbound peer connections and gossip through the VPN and prevent residential IP leakage.</li>
               <li><strong>Inbound Lightning Traffic:</strong> Inbound connections to your TunnelSats port automatically forward to port <code>9735</code> on your node.</li>
             </ol>
             <div class="info-box" style="margin-top: 1rem; background: rgba(51, 153, 255, 0.1); border: 1px solid rgba(51, 153, 255, 0.3); border-radius: 8px; padding: 0.75rem 1rem; font-size: 0.875rem;">
@@ -348,7 +349,7 @@
             </summary>
             <div class="faq-answer">
               <p>
-                Setup consists of four simple steps across TunnelSats, StartOS Gateways, and your Lightning node:
+                Setup consists of five simple steps across TunnelSats, StartOS Gateways, and your Lightning node:
               </p>
               <ol>
                 <li>
@@ -362,6 +363,9 @@
                 </li>
                 <li>
                   <strong>Firewall Port Toggle:</strong> Go to your target node (e.g. <strong>LND → Interfaces → Peer Interface</strong>), find your TunnelSats public IP (<code>&lt;VPN_IP&gt;:9735</code>), and toggle it <strong>ON</strong>. When StartOS prompts to test port 9735 in <em>"Address Requirements"</em>, click <strong>"Later"</strong>.
+                </li>
+                <li>
+                  <strong>Set Outbound Gateway (Full Egress Privacy):</strong> Go to your target node (e.g. <strong>LND → Actions → Set Outbound Gateway</strong>), and select <strong>TunnelSats</strong>. StartOS defaults outbound traffic to Auto; setting this action pins all outbound peer connections, gossip, and ping/pong packets to the VPN tunnel, eliminating home IP leaks.
                 </li>
               </ol>
             </div>
@@ -473,6 +477,37 @@
                   </li>
                   <li>
                     Toggle the address to <strong>ON</strong>. When StartOS displays the <em>"Address Requirements"</em> modal asking to test port 9735, click <strong>"Later"</strong>. StartOS tests generic external port 9735, which is not open on the VPN server, but clicking "Later" successfully enables the firewall rule for your assigned TunnelSats port.
+                  </li>
+                </ol>
+              </div>
+
+              <div
+                style="
+                  margin-top: 16px;
+                  border-left: 3px solid var(--accent-bitcoin);
+                  padding-left: 12px;
+                "
+              >
+                <h4
+                  style="
+                    color: var(--accent-bitcoin);
+                    font-size: 14px;
+                    margin-bottom: 8px;
+                  "
+                >
+                  3. Set Outbound Gateway (Full Egress Privacy)
+                </h4>
+                <ol
+                  style="font-size: 12.5px; padding-left: 16px; margin-top: 4px"
+                >
+                  <li>
+                    In your Lightning node service page, click <strong>Actions</strong> &rarr; <strong>Set Outbound Gateway</strong>.
+                  </li>
+                  <li>
+                    Select your <strong>TunnelSats</strong> gateway and confirm.
+                  </li>
+                  <li>
+                    StartOS defaults outbound traffic to Auto; assigning TunnelSats ensures all outgoing peer connections, gossip, and ping/pong packets route through the VPN tunnel, eliminating home IP leaks.
                   </li>
                 </ol>
               </div>

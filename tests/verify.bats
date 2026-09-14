@@ -22,3 +22,8 @@ setup() {
     [[ "$output" =~ "api.ipify.org" ]]
     [[ "$output" =~ "api6.ipify.org" ]]
 }
+
+@test "verify.sh outputs Set Outbound Gateway remediation guidance" {
+    run "$REPO_ROOT/verify.sh"
+    [[ "$output" =~ "Set Outbound Gateway" ]]
+}

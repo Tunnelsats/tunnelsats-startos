@@ -19,7 +19,7 @@ A privacy-focused companion package and routing guide for Lightning Network node
 
 ## Overview
 
-TunnelSats provides dedicated WireGuard VPN infrastructure specifically designed for Lightning Network nodes. On StartOS, WireGuard encapsulation and outbound policy routing are managed natively at the host OS level (**System > Gateways**). When properly connected and assigned as the outbound gateway on the target Lightning node, it enables clearnet inbound connectivity and routes outbound peer traffic through the VPN.
+TunnelSats provides dedicated WireGuard VPN infrastructure specifically designed for Lightning Network nodes. On StartOS, WireGuard encapsulation and outbound policy routing are managed natively at the host OS level (**System > Gateways**). When properly connected and assigned as the outbound gateway on the target Lightning node, it enables clearnet inbound connectivity and encapsulates outbound peer traffic through the VPN to eliminate residential IP leakage.
 
 > [!NOTE]
 > **Host-Managed Gateway Architecture**: WireGuard network tunnels and policy routes are configured and managed externally by the user at the StartOS host level. This companion package provides:
@@ -56,10 +56,11 @@ tasks:
 
 ## Architecture & How It Works
 
-1. **Host-Managed Gateway**: The WireGuard tunnel is configured under StartOS **System > Gateways**. Configs carrying `# StartTunnel` and `# inbound: yes` are automatically classified by StartOS as **Inbound/Outbound** gateways. StartOS kernel networking encapsulates outbound Lightning traffic and forwards inbound connections on your TunnelSats port to port `9735` on your Lightning container.
+1. **Host-Managed Gateway**: The WireGuard tunnel is configured under StartOS **System > Gateways**. Configs carrying `# StartTunnel` and `# inbound: yes` are automatically classified by StartOS as **Inbound/Outbound** gateways, forwarding incoming connections on your assigned port to port `9735` on your Lightning node.
 2. **Companion Service**: The `tunnelsats` container runs as a companion service, hosting the Web Dashboard and maintaining synchronization with the TunnelSats subscription API.
-3. **External Host Announcement & Firewall Policy**: StartOS presents an automated 1-Click task on the dashboard to announce the TunnelSats public endpoint (`custom-external-host`), with manual configuration available as a fallback. The user enables the public address toggle under **Interfaces > Peer Interface** to open the incoming firewall.
-4. **Subscription Lifecycle & Renewal**: The background daemon monitors subscription expiration, updating the local dashboard and raising StartOS tasks when renewal is required.
+3. **External Host Announcement & Firewall Policy**: StartOS presents an automated 1-Click task on the dashboard to announce the TunnelSats public endpoint (`custom-external-host`), with manual configuration available as a fallback. The user enables the public address toggle under **Interfaces > Peer Interface** to open the incoming firewall (clicking "Later" on generic port 9735 test prompts).
+4. **Outbound Policy Routing (Full Egress Privacy)**: Because StartOS defaults outbound service traffic to "Auto", node operators must explicitly assign TunnelSats under `Services → [LND / Core Lightning] → Actions → Set Outbound Gateway`. This encapsulates all outbound peer connections, gossip, and ping/pong packets within the VPN tunnel, ensuring zero residential IP leakage.
+5. **Subscription Lifecycle & Renewal**: The background daemon monitors subscription expiration, updating the local dashboard and raising StartOS tasks when renewal is required.
 
 ## Volumes & Mount Points
 

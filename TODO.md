@@ -12,6 +12,7 @@
   - Addressed comprehensive code review feedback from Start9 packaging engineers ([Issue #54](https://github.com/Tunnelsats/tunnelsats-startos/issues/54)):
     - [x] **Dual Gateway Markers**: Implemented automated `# StartTunnel` (for StartOS 0.4.0.1) and `# inbound: yes` (for StartOS 0.4.0.2+) marker injection for native StartOS gateway auto-classification ([Start9 PR #3893](https://github.com/Start9Labs/start-technologies/pull/3893)).
     - [x] **3-Step Setup Guidance**: Streamlined UI workflow across configure modal, instructions, README, and Web UI (System Gateways, Custom External Host, and Peer Interface firewall toggle).
+    - [x] **Full Egress Privacy & Outbound Gateway Routing**: Documented Outbound Gateway policy routing (`Actions -> Set Outbound Gateway -> TunnelSats`) across configure modal, instructions, README, Web UI, and host diagnostics (`verify.sh`) to eliminate residential IP leaks via outbound peer connections and gossip.
     - [x] **StartOS Port Check Resolution**: Documented clicking "Later" on StartOS "Address Requirements" port test modal (since generic 9735 probe fails while assigned high port works).
     - [x] **Multi-Node Port Allocation**: Documented internal port 9735 behavior when both LND and Core Lightning are installed.
     - [x] **Full Multilingual Localization**: Full release notes and descriptions across `en_US`, `es_ES`, `de_DE`, `pl_PL`, and `fr_FR`.
@@ -19,7 +20,8 @@
     - [x] **Version Bumps**: Released `0.4.0:4` ([PR #80](https://github.com/Tunnelsats/tunnelsats-startos/pull/80)) and `0.4.0:5` ([PR #82](https://github.com/Tunnelsats/tunnelsats-startos/pull/82)) with 5/5 Greptile confidence and 100% CI pass rates.
 
 - [ ] **Step 3: Community Beta Deployment (`community-beta`)** 👈 **CURRENT FOCUS**
-  - **Action**: Open a Pull Request from `Tunnelsats/tunnelsats-startos:main` to `Start9-Community/tunnelsats-startos:main`.
+  - **Action**: Open a Pull Request from `Tunnelsats/tunnelsats-startos:main` to `Start9-Community/tunnelsats-startos:main` ([PR #1](https://github.com/Start9-Community/tunnelsats-startos/pull/1)).
+  - Incorporates dual markers, outbound policy routing for full egress privacy, and comprehensive diagnostics.
   - Merging into the fork triggers `tagAndRelease.yml`, automatically building and deploying `0.4.0:5` to `https://community-beta-registry.start9.com`.
 
 - [ ] **Step 4: Beta Soak Period & Verification**
@@ -46,7 +48,7 @@
   - Return copyable `ActionResultV1` guidance in `configure` modal.
   - Remove synthetic `vpn_connected` / `handshake` reporting in `bridge.py` in favor of honest subscription state.
   - Refactor `verify.sh` to eliminate Docker assumptions and dynamically audit host interfaces, port 9735 bindings, and WAN ingress.
-  - Comprehensive documentation and FAQ updates explaining the Peer Interface toggle, Address Requirements "Later" bypass, and multi-node port 9735 gotchas.
+  - Comprehensive documentation and FAQ updates explaining the Peer Interface toggle, Address Requirements "Later" bypass, outbound gateway policy routing for zero residential IP leaks, and multi-node port 9735 gotchas.
 
 - [ ] **Future Enhancement: Node-Funded Auto-Renewals via TunnelSats API** ([#83](https://github.com/Tunnelsats/tunnelsats-startos/issues/83) / [Issue #54 Discussion](https://github.com/Tunnelsats/tunnelsats-startos/issues/54#issuecomment-5359358874))
   - Automatically request renewal invoices from the TunnelSats public API (`https://tunnelsats.com/api/public/v1/subscription/renew`) using the stored WireGuard public key when the subscription enters the expiration warning window ($\le 7$ days).

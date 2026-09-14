@@ -29,9 +29,10 @@
    - Toggle the switch to **ON**.
    - 💡 **StartOS Port Check Prompt ("Address Requirements")**: StartOS will display an "Address Requirements" modal prompting to test port forwarding on port `9735:9735`. Because TunnelSats maps your dedicated external port (e.g. `24556`) rather than generic `9735`, clicking **"Test"** will fail. Simply **click "Later"** to save and proceed. This directs StartOS nftables to open the firewall and forward incoming peer connections from the VPN tunnel to your node.
 
-6. **Set Outbound Policy Routing**:
+6. **Set Outbound Policy Routing (Required for Full Egress Privacy)**:
    - In StartOS, open your target node (**LND** or **Core Lightning**).
-   - Go to **Actions** &rarr; **Set Outbound Gateway** &rarr; select your TunnelSats gateway to ensure all outbound peer traffic routes through the VPN.
+   - Go to **Actions** &rarr; **Set Outbound Gateway** &rarr; select your **TunnelSats** gateway.
+   - ⚠️ **Full Egress Privacy**: StartOS defaults outbound traffic to "Auto"; importing a gateway does not automatically bind your Lightning node's outbound connections to it. Without setting TunnelSats as the outbound gateway, outbound peer traffic, gossip, and ping/pong acknowledgments continue through your residential ISP clearnet IP while advertising your TunnelSats address. Setting the outbound gateway ensures full-egress encapsulation and zero residential IP leakage.
 
 7. **Monitor & Manage**:
    - Open the **Web Dashboard** to monitor subscription expiration, time remaining, and connection properties.
