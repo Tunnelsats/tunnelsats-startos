@@ -153,5 +153,31 @@ class TestBridgeHealth(unittest.TestCase):
             self.assertEqual(output["result"], "loading")
             self.assertIn("Synchronizing subscription status", output["message"])
 
+    @patch('bridge.is_enabled', return_value=True)
+    @patch('os.path.exists', return_value=True)
+    @patch('bridge.get_subscription_info')
+    @patch('bridge.get_wg_pubkey', return_value="Unknown")
+    @patch('sys.stdout', new_callable=io.StringIO)
+    def test_health_expired_subscription_without_sync_fails_closed(self, mock_stdout, mock_pubkey, mock_sub_info, mock_exists, mock_enabled):
+        # Even if live API has never synced, a configuration that is known to be expired
+        # must fail closed (result: failure, exit code 1) instead of returning loading.
+        mock_sub_info.return_value = {
+            "linked": False,
+            "expiresAt": "2026-01-01T00:00:00Z",
+            "daysRemaining": 0,
+            "formatted": "Expired on 2026-01-01",
+            "isExpired": True,
+            "lastSync": None,
+            "syncError": None,
+            "syncSuccess": False
+        }
+        with patch('sys.argv', ['bridge.py', 'health', 'subscription']):
+            with self.assertRaises(SystemExit) as cm:
+                bridge.main()
+            self.assertEqual(cm.exception.code, 1)
+            output = json.loads(mock_stdout.getvalue())
+            self.assertEqual(output["result"], "failure")
+            self.assertIn("expired", output["message"].lower())
+
 if __name__ == '__main__':
     unittest.main()

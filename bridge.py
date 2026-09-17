@@ -739,13 +739,12 @@ def main():
         if sub_info.get("syncError"):
             print(json.dumps({"result": "failure", "message": f"Subscription synchronization failed: {sub_info['syncError']}"}))
             sys.exit(1)
+        elif sub_info.get("isExpired"):
+            print(json.dumps({"result": "failure", "message": f"Subscription expired on {sub_info['expiresAt']}"}))
+            sys.exit(1)
         elif has_synced:
-            if sub_info["isExpired"]:
-                print(json.dumps({"result": "failure", "message": f"Subscription expired on {sub_info['expiresAt']}"}))
-                sys.exit(1)
-            else:
-                print(json.dumps({"result": "ok", "message": sub_info["formatted"]}))
-                sys.exit(0)
+            print(json.dumps({"result": "ok", "message": sub_info["formatted"]}))
+            sys.exit(0)
         else:
             print(json.dumps({"result": "loading", "message": "Synchronizing subscription status with TunnelSats..."}))
             sys.exit(0)
