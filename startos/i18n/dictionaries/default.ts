@@ -17,7 +17,7 @@ const dict = {
   'Failed to parse health check result': 13,
   'Advertise TunnelSats VPN endpoint to the Lightning Network': 14,
   'Allow Home IPv6 Coexistence': 15,
-  'Allow announcing an IPv6 TunnelSats endpoint to your Lightning node if specified in your configuration. (TunnelSats provides IPv4 tunneling; leave disabled unless using an IPv6 tunnel endpoint).': 16,
+  'Allow announcing an IPv6 endpoint to your Lightning node if specified in your configuration. WARNING: TunnelSats VPN tunnels IPv4 traffic only. IPv6 connections bypass the VPN tunnel and expose your real home ISP IP address.': 16,
   'Web Dashboard is accessible': 17,
   'Web Dashboard is not accessible': 18,
   'Subscription Status': 19,

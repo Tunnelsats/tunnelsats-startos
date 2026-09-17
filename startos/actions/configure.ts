@@ -38,7 +38,7 @@ export const inputSpec = InputSpec.of({
   'allow-ipv6': Value.toggle({
     name: i18n('Allow Home IPv6 Coexistence'),
     description: i18n(
-      'Allow announcing an IPv6 TunnelSats endpoint to your Lightning node if specified in your configuration. (TunnelSats provides IPv4 tunneling; leave disabled unless using an IPv6 tunnel endpoint).',
+      'Allow announcing an IPv6 endpoint to your Lightning node if specified in your configuration. WARNING: TunnelSats VPN tunnels IPv4 traffic only. IPv6 connections bypass the VPN tunnel and expose your real home ISP IP address.',
     ),
     default: false,
   }),
