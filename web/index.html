@@ -159,8 +159,8 @@
             </p>
             <ol style="padding-left: 1.25rem; line-height: 1.6; margin: 0.75rem 0; color: #cbd5e1; font-size: 0.9rem;">
               <li><strong>Configure Companion Service:</strong> Open <strong>Services</strong> &rarr; <strong>TunnelSats</strong> &rarr; <strong>Configure</strong>, paste your downloaded <code>.conf</code>, and click <strong>Save</strong>. The service validates your configuration and automatically injects the required markers (<code># StartTunnel</code> &amp; <code># inbound: yes</code>).</li>
-              <li><strong>Add Gateway in StartOS:</strong> Navigate to <strong>System</strong> &rarr; <strong>Gateways</strong> &rarr; click <strong>Add Gateway</strong> &rarr; choose <strong>WireGuard</strong> and paste the configuration carrying both inbound markers (StartOS uses these markers to auto-classify the gateway as Inbound/Outbound for Lightning port forwarding). Connect the gateway.</li>
-              <li><strong>Open Firewall (Peer Interface):</strong> Open your target node (<strong>LND</strong> or <strong>Core Lightning</strong>) &rarr; <strong>Interfaces</strong> &rarr; <strong>Peer Interface</strong>, toggle <code>&lt;VPN_IP&gt;:9735</code> to <strong>ON</strong>, and click <strong>"Later"</strong> on the port check prompt.</li>
+              <li><strong>Add Gateway in StartOS:</strong> Navigate to <strong>System</strong> &rarr; <strong>Gateways</strong>. Delete any existing TunnelSats gateway first (updating an existing gateway cannot change its classification type). Click <strong>Add Gateway</strong> &rarr; choose <strong>WireGuard</strong> and paste the configuration carrying both inbound markers (StartOS uses these markers to auto-classify the gateway as Inbound/Outbound for Lightning port forwarding). Connect the gateway.</li>
+              <li><strong>Open Firewall:</strong> Open your target node (<strong>LND</strong> or <strong>Core Lightning</strong>) &rarr; <strong>Interfaces</strong> &rarr; <strong>Peer Interface</strong> (for LND) or <strong>Peer</strong> (for Core Lightning), toggle <code>&lt;VPN_IP&gt;:9735</code> to <strong>ON</strong>, and click <strong>"Later"</strong> on the port check prompt.</li>
               <li><strong>Set Outbound Policy Routing (Required for Full Egress Privacy):</strong> Open your target node (<strong>Services &rarr; LND</strong> or <strong>Core Lightning</strong> — <em>do not set this on TunnelSats</em>) &rarr; <strong>Actions</strong> &rarr; <strong>Set Outbound Gateway</strong> &rarr; select your TunnelSats gateway to route all outbound peer connections and gossip through the VPN and prevent residential IP leakage.</li>
               <li><strong>Inbound Lightning Traffic:</strong> Inbound connections to your TunnelSats port automatically forward to port <code>9735</code> on your node.</li>
             </ol>
@@ -356,13 +356,13 @@
                   <strong>TunnelSats Configure:</strong> Go to ⚙ → Configure in TunnelSats. Paste your WireGuard <code>.conf</code> file, toggle <em>Enable TunnelSats</em> to <strong>On</strong>, select your target node, and click <strong>Save</strong>. Inbound markers (<code># StartTunnel</code> &amp; <code># inbound: yes</code>) are automatically added, and a copyable config is provided.
                 </li>
                 <li>
-                  <strong>StartOS Gateway:</strong> Go to <strong>System → Gateways</strong>, add or update a WireGuard gateway, and paste the configuration. Connect the gateway.
+                  <strong>StartOS Gateway:</strong> Go to <strong>System → Gateways</strong>, delete any existing TunnelSats gateway first (updating an existing gateway cannot change its classification type), and click <strong>Add Gateway</strong>. Choose <strong>WireGuard</strong>, paste the configuration, and connect the gateway.
                 </li>
                 <li>
                   <strong>Target Node Announcement:</strong> Accept the automated <strong>1-Click Task</strong> prompt on your StartOS dashboard to advertise your endpoint, or enter it manually in your target node (e.g. <strong>LND → Config → Custom External Host</strong>).
                 </li>
                 <li>
-                  <strong>Firewall Port Toggle:</strong> Go to your target node (e.g. <strong>LND → Interfaces → Peer Interface</strong>), find your TunnelSats public IP (<code>&lt;VPN_IP&gt;:9735</code>), and toggle it <strong>ON</strong>. When StartOS prompts to test port 9735 in <em>"Address Requirements"</em>, click <strong>"Later"</strong>.
+                  <strong>Firewall Port Toggle:</strong> Go to your target node (e.g. <strong>LND → Interfaces → Peer Interface</strong> or <strong>Core Lightning → Interfaces → Peer</strong>), find your TunnelSats public IP (<code>&lt;VPN_IP&gt;:9735</code>), and toggle it <strong>ON</strong>. When StartOS prompts to test port 9735 in <em>"Address Requirements"</em>, click <strong>"Later"</strong>.
                 </li>
                 <li>
                   <strong>Set Outbound Gateway (Full Egress Privacy):</strong> Go to your target Lightning node (e.g. <strong>Services → LND → Actions → Set Outbound Gateway</strong> — <em>not the TunnelSats service page</em>), and select <strong>TunnelSats</strong>. StartOS defaults outbound traffic to Auto; setting this action pins all outbound peer connections, gossip, and ping/pong packets to the VPN tunnel, eliminating home IP leaks.
@@ -385,10 +385,10 @@
                   <strong>Check the Host Gateway:</strong> Ensure your WireGuard tunnel under <strong>System → Gateways</strong> is connected.
                 </li>
                 <li>
-                  <strong>Verify Peer Interface Public Address Toggle:</strong> In your target node (e.g. <strong>LND → Interfaces → Peer Interface</strong>), verify that the toggle for <code>&lt;VPN_IP&gt;:9735</code> is switched <strong>ON</strong>. If this toggle is off, StartOS firewall blocks incoming traffic.
+                  <strong>Verify Peer Interface Public Address Toggle:</strong> In your target node (e.g. <strong>LND → Interfaces → Peer Interface</strong> or <strong>Core Lightning → Interfaces → Peer</strong>), verify that the toggle for <code>&lt;VPN_IP&gt;:9735</code> is switched <strong>ON</strong>. If this toggle is off, StartOS firewall blocks incoming traffic.
                 </li>
                 <li>
-                  <strong>Verify Multi-Node Port Allocation (9735):</strong> StartOS routes TunnelSats incoming connections to internal port 9735. If you have both LND and Core Lightning installed, whichever was installed first holds port 9735. Ensure your desired target node holds internal port 9735.
+                  <strong>Verify Multi-Node Port Allocation (9735):</strong> StartOS allocates the external host port per interface binding (container port is always 9735) and retains it across restarts. Inbound TunnelSats traffic forwards to host port 9735. Whichever node was installed first holds port 9735. If another node claimed 9735, uninstall that node and reinstall the target node so it rebinds to host port 9735.
                 </li>
                 <li>
                   <strong>Check Custom External Host:</strong> Confirm your node advertises your TunnelSats external host and port under <strong>Config → Custom External Host</strong>.
@@ -470,7 +470,7 @@
                   style="font-size: 12.5px; padding-left: 16px; margin-top: 4px"
                 >
                   <li>
-                    In your Lightning node service page, click <strong>Interfaces</strong> &rarr; <strong>Peer Interface</strong>.
+                    In your Lightning node service page, click <strong>Interfaces</strong> &rarr; <strong>Peer Interface</strong> (for LND) or <strong>Peer</strong> (for Core Lightning).
                   </li>
                   <li>
                     Locate your TunnelSats public IP address (<code>&lt;VPN_IP&gt;:9735</code>) in the list of available addresses.
@@ -542,16 +542,16 @@
             </summary>
             <div class="faq-answer">
               <p>
-                <strong>StartOS assigns internal listening ports on a first-come, first-served basis:</strong>
+                <strong>StartOS allocates the external host port per interface binding (the container port is always 9735) and retains it across restarts:</strong>
               </p>
               <p>
-                Standard Lightning communication occurs on internal port <strong>9735</strong>. TunnelSats WireGuard gateways forward incoming peer traffic specifically to port 9735.
+                Standard Lightning communication occurs on port <strong>9735</strong>. TunnelSats WireGuard gateways forward incoming peer traffic specifically to host port 9735.
               </p>
               <p>
-                If multiple Lightning implementations are installed (e.g. Core Lightning was installed before LND), the first installed node receives internal port 9735, and subsequent nodes are assigned arbitrary high ports (e.g. 63989).
+                If multiple Lightning implementations are installed (e.g. both Core Lightning and LND), StartOS allocates external host port 9735 to whichever node was installed first. Any subsequent node is assigned an arbitrary high host port (e.g. 63989) while its container still listens on 9735. Inbound TunnelSats traffic will only reach the node holding host port 9735.
               </p>
               <p>
-                <strong>Solution:</strong> Only the node holding port 9735 receives TunnelSats traffic. If you want LND to receive tunnel traffic on a system where Core Lightning was installed first, Core Lightning must release port 9735 (or be uninstalled) so LND can bind to preferred port 9735.
+                <strong>Guidance:</strong> Install the Lightning node you intend to use with TunnelSats before installing any other Lightning node. If another node was already installed first and claimed host port 9735, uninstall the other node <strong>and</strong> reinstall the target node so it rebinds to host port 9735.
               </p>
             </div>
           </details>

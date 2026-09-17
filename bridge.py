@@ -525,10 +525,10 @@ def get_subscription_info():
                     delta = expiry_dt - now
                     is_expired = delta.total_seconds() <= 0
                     return {
-                        "linked": True,
+                        "linked": False,
                         "expiresAt": expiry,
                         "daysRemaining": max(0, delta.days) if not is_expired else 0,
-                        "formatted": f"Active (Expires in {delta.days}d)" if not is_expired else f"Expired on {expiry_dt.strftime('%Y-%m-%d')}",
+                        "formatted": f"Pending subscription synchronization (Expires in {delta.days}d)" if not is_expired else f"Expired on {expiry_dt.strftime('%Y-%m-%d')}",
                         "isExpired": is_expired,
                         "lastSync": None,
                         "syncError": None,
@@ -555,6 +555,8 @@ def get_subscription_info():
         last_sync = meta.get("lastSync")
         sync_error = meta.get("syncError")
         sync_success = meta.get("syncSuccess", False)
+
+        has_synced = bool(sync_success or (last_sync is not None and not sync_error))
 
         if not expires_at:
             return {
@@ -584,10 +586,10 @@ def get_subscription_info():
             formatted = f"Active (Expires in {delta.seconds // 3600}h {(delta.seconds % 3600) // 60}m)"
             
         return {
-            "linked": True,
+            "linked": has_synced,
             "expiresAt": expires_at,
             "daysRemaining": max(0, days) if not is_expired else 0,
-            "formatted": formatted,
+            "formatted": formatted if has_synced else (f"Sync failed: {sync_error}" if sync_error else "Pending subscription synchronization"),
             "isExpired": is_expired,
             "lastSync": last_sync,
             "syncError": sync_error,
@@ -721,33 +723,32 @@ def main():
             sys.exit(0)
 
         sub_info = get_subscription_info()
-        if sub_info["isExpired"]:
-            print(json.dumps({"result": "failure", "message": f"Subscription expired on {sub_info['expiresAt']}"}))
-            sys.exit(1)
-        elif sub_info.get("syncError"):
-            print(json.dumps({"result": "failure", "message": f"Subscription synchronization failed: {sub_info['syncError']}"}))
-            sys.exit(1)
-        elif sub_info["linked"]:
-            print(json.dumps({"result": "ok", "message": sub_info["formatted"]}))
-            sys.exit(0)
-        else:
+        has_synced = bool(sub_info.get("syncSuccess") is True or sub_info.get("lastSync") is not None)
+
+        if not has_synced and not sub_info.get("syncError"):
             pubkey = get_wg_pubkey()
-            if pubkey and pubkey != "Unknown":
+            if pubkey and pubkey not in ("Unknown", "Not available"):
                 try:
                     lazy_sync(pubkey)
                     sub_info = get_subscription_info()
-                    if sub_info["linked"]:
-                        print(json.dumps({"result": "ok", "message": sub_info["formatted"]}))
-                        sys.exit(0)
-                    elif sub_info.get("syncError"):
-                        print(json.dumps({"result": "failure", "message": f"Subscription synchronization failed: {sub_info['syncError']}"}))
-                        sys.exit(1)
+                    has_synced = bool(sub_info.get("syncSuccess") is True or sub_info.get("lastSync") is not None)
                 except Exception as e:
                     print(json.dumps({"result": "failure", "message": f"Subscription synchronization failed: {e}"}))
                     sys.exit(1)
 
-            print(json.dumps({"result": "failure", "message": "Subscription unverified: Unable to determine validity"}))
+        if sub_info.get("syncError"):
+            print(json.dumps({"result": "failure", "message": f"Subscription synchronization failed: {sub_info['syncError']}"}))
             sys.exit(1)
+        elif has_synced:
+            if sub_info["isExpired"]:
+                print(json.dumps({"result": "failure", "message": f"Subscription expired on {sub_info['expiresAt']}"}))
+                sys.exit(1)
+            else:
+                print(json.dumps({"result": "ok", "message": sub_info["formatted"]}))
+                sys.exit(0)
+        else:
+            print(json.dumps({"result": "loading", "message": "Synchronizing subscription status with TunnelSats..."}))
+            sys.exit(0)
 
 
 

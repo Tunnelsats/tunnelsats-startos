@@ -52,6 +52,8 @@ actions:
     name: Configure
 tasks:
   - tunnelsats:configure (subscription expiry alert)
+  - lnd:custom-external-host-config (1-Click LND external host announcement)
+  - c-lightning:config (1-Click Core Lightning external host announcement)
 ```
 
 ## Architecture & How It Works
@@ -85,6 +87,8 @@ tasks:
 - **Configure (`configure`)**: Allows users to enable/disable TunnelSats, select their target Lightning node (`lnd` or `cln`), paste their WireGuard configuration, and toggle IPv6 coexistence. Automatically ensures inbound gateway markers (`# StartTunnel` & `# inbound: yes`) on save.
 - **Automated Tasks**:
   - `tunnelsats:configure`: Raised when subscription has `<= 7 days` (Important) or `<= 3 days` / expired (Critical). Automatically cleared upon successful renewal.
+  - `lnd:custom-external-host-config`: Raised for LND when TunnelSats is enabled with a valid WireGuard configuration containing port-forwarding metadata (`# VPNPort` or `# Port Forwarding`). Severity: `important`. Automatically cleared when LND's announced `custom-external-host` matches the TunnelSats endpoint (or when switching target node to Core Lightning or disabling TunnelSats).
+  - `c-lightning:config`: Raised for Core Lightning when TunnelSats is enabled with a valid WireGuard configuration containing port-forwarding metadata (`# VPNPort` or `# Port Forwarding`). Severity: `important`. Automatically cleared when Core Lightning's announced `custom-external-host` matches the TunnelSats endpoint (or when switching target node to LND or disabling TunnelSats).
 
 ## Network & Privacy Disclosure
 

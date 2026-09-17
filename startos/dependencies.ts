@@ -82,12 +82,15 @@ export function getAnnounceEndpoint(
 }
 
 export function getTargetGatewayConfig(
-  config: {
-    enabled?: boolean
-    'target-node'?: 'lnd' | 'cln'
-    'tunnelsats-conf'?: string | null
-    'allow-ipv6'?: boolean
-  } | null | undefined,
+  config:
+    | {
+        enabled?: boolean
+        'target-node'?: 'lnd' | 'cln'
+        'tunnelsats-conf'?: string | null
+        'allow-ipv6'?: boolean
+      }
+    | null
+    | undefined,
 ): TargetGatewayConfig | null {
   if (!config?.enabled) return null
 
@@ -127,10 +130,13 @@ export function getGatewayTaskDetails(
 }
 
 export function getSubscriptionExpiryTask(
-  config: {
-    enabled?: boolean
-    'tunnelsats-conf'?: string | null
-  } | null | undefined,
+  config:
+    | {
+        enabled?: boolean
+        'tunnelsats-conf'?: string | null
+      }
+    | null
+    | undefined,
   meta?: SubscriptionMeta | null,
   currentDate = new Date(),
 ): SubscriptionExpiryTask {
@@ -150,7 +156,9 @@ export function getSubscriptionExpiryTask(
   }
 
   const wgConf = config['tunnelsats-conf']
-  const validUntilMatch = wgConf.match(/#\s*(?:Valid Until|Expires At|Expiry):\s*(.+)/i)
+  const validUntilMatch = wgConf.match(
+    /#\s*(?:Valid Until|Expires At|Expiry):\s*(.+)/i,
+  )
   if (validUntilMatch) {
     const commentDate = new Date(validUntilMatch[1].trim())
     if (!isNaN(commentDate.getTime())) {
@@ -207,7 +215,8 @@ export function getSubscriptionExpiryTask(
 }
 
 export function getDependenciesForConfig(
-  config: { enabled?: boolean; 'target-node'?: 'lnd' | 'cln' } | null | undefined,
+  config:
+    { enabled?: boolean; 'target-node'?: 'lnd' | 'cln' } | null | undefined,
 ) {
   if (!config?.enabled) {
     return {}
@@ -234,19 +243,17 @@ export function getDependenciesForConfig(
 
 export const setDependencies = sdk.setupDependencies(async ({ effects }) => {
   const config = await configJson.read().const(effects)
-  const meta = await tunnelsatsMeta.read().const(effects).catch(() => null)
+  const meta = await tunnelsatsMeta
+    .read()
+    .const(effects)
+    .catch(() => null)
 
   // 1. Proactive Subscription Expiry Alert Task
   const expiryTask = getSubscriptionExpiryTask(config, meta)
   if (expiryTask.shouldCreateTask && expiryTask.severity && expiryTask.reason) {
-    await sdk.action.createOwnTask(
-      effects,
-      configure,
-      expiryTask.severity,
-      {
-        reason: expiryTask.reason,
-      },
-    )
+    await sdk.action.createOwnTask(effects, configure, expiryTask.severity, {
+      reason: expiryTask.reason,
+    })
   } else {
     await sdk.action.clearTask(effects, expiryTask.clearTaskKey)
   }

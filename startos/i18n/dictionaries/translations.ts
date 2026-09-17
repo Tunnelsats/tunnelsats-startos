@@ -3,7 +3,7 @@ import { LangDict } from './default'
 export const es_ES: LangDict = {
   0: '¡Iniciando TunnelSats!',
   1: 'Habilitar TunnelSats',
-  2: 'Enciende o apaga el túnel VPN de TunnelSats.',
+  2: 'Habilita la monitorización de la suscripción y el anuncio automatizado de host externo para TunnelSats.',
   3: 'Nodo Lightning de destino',
   4: 'Selecciona qué servicio Lightning en tu servidor StartOS recibirá las conexiones entrantes.',
   5: 'Configuración de WireGuard',
@@ -17,7 +17,7 @@ export const es_ES: LangDict = {
   13: 'Error al analizar el resultado de la comprobación de estado',
   14: 'Anunciar el punto final de la VPN de TunnelSats a la red Lightning',
   15: 'Permitir coexistencia con IPv6 local',
-  16: 'Permite anunciar direcciones IPv6 sin procesar en su nodo. ADVERTENCIA: La VPN TunnelSats solo enruta tráfico IPv4. Las conexiones IPv6 eluden el túnel VPN y exponen la dirección IP real de su ISP doméstico.',
+  16: 'Permite anunciar un punto final IPv6 de TunnelSats a su nodo Lightning si se especifica en su configuración. (TunnelSats proporciona túneles IPv4; déjelo deshabilitado a menos que use un punto final de túnel IPv6).',
   17: 'El panel web es accesible',
   18: 'El panel web no es accesible',
   19: 'Estado de la suscripción',
@@ -25,12 +25,14 @@ export const es_ES: LangDict = {
   21: 'La suscripción de WireGuard a TunnelSats ha caducado. Pegue una configuración renovada en los ajustes para restaurar la conectividad entrante.',
   22: 'La suscripción a TunnelSats caduca en <= 3 días. Renuévela para evitar interrupciones de conexión.',
   23: 'La suscripción a TunnelSats caduca en <= 7 días. Planifique su renovación para mantener el servicio activo.',
+  24: 'Configuración guardada',
+  25: 'Agregue esto como una nueva puerta de enlace en Sistema → Puertas de enlace (elimine primero cualquier puerta de enlace de TunnelSats existente). Luego abra la interfaz Peer de su nodo para habilitar la dirección y asignar la puerta de enlace de salida (consulte las Instrucciones).',
 }
 
 export const de_DE: LangDict = {
   0: 'TunnelSats wird gestartet!',
   1: 'TunnelSats aktivieren',
-  2: 'Schalten Sie den TunnelSats-VPN-Tunnel ein oder aus.',
+  2: 'Aktivieren Sie die Abonnementüberwachung und die automatisierte externe Host-Ankündigung für TunnelSats.',
   3: 'Ziel-Lightning-Knoten',
   4: 'Wählen Sie aus, welcher Lightning-Dienst auf Ihrem StartOS-Server eingehende Verbindungen empfangen soll.',
   5: 'WireGuard-Konfiguration',
@@ -44,7 +46,7 @@ export const de_DE: LangDict = {
   13: 'Fehler beim Parsen des Ergebnisses der Integritätsprüfung',
   14: 'TunnelSats VPN-Endpunkt im Lightning-Netzwerk ankündigen',
   15: 'Heim-IPv6-Koexistenz zulassen',
-  16: 'Erlaubt das Ankündigen von IPv6-Adressen auf Ihrem Knoten. WARNUNG: Das TunnelSats-VPN tunnelt nur IPv4-Verkehr. IPv6-Verbindungen umgehen den VPN-Tunnel und legen Ihre echte Heim-IP-Adresse offen.',
+  16: 'Erlaubt das Ankündigen eines IPv6-TunnelSats-Endpunkts für Ihren Lightning-Knoten, falls in Ihrer Konfiguration angegeben. (TunnelSats bietet IPv4-Tunneling; deaktiviert lassen, es sei denn, Sie verwenden einen IPv6-Tunnel-Endpunkt).',
   17: 'Web-Dashboard ist erreichbar',
   18: 'Web-Dashboard ist nicht erreichbar',
   19: 'Abonnementstatus',
@@ -52,12 +54,14 @@ export const de_DE: LangDict = {
   21: 'Das TunnelSats WireGuard-Abonnement ist abgelaufen. Fügen Sie in den Einstellungen eine erneuerte Konfiguration ein, um eingehende Verbindungen wiederherzustellen.',
   22: 'Das TunnelSats-Abonnement läuft in <= 3 Tagen ab. Bitte erneuern Sie das Abonnement, um Verbindungsunterbrechungen zu vermeiden.',
   23: 'Das TunnelSats-Abonnement läuft in <= 7 Tagen ab. Planen Sie Ihre Erneuerung, um Ausfallzeiten zu vermeiden.',
+  24: 'Konfiguration gespeichert',
+  25: 'Fügen Sie dies als neues Gateway unter System → Gateways hinzu (löschen Sie vorher ein eventuell vorhandenes TunnelSats-Gateway). Öffnen Sie anschließend die Peer-Schnittstelle Ihres Knotens, um die Adresse zu aktivieren und das Outbound-Gateway zuzuweisen (siehe Anweisungen).',
 }
 
 export const pl_PL: LangDict = {
   0: 'Uruchamianie TunnelSats!',
   1: 'Włącz TunnelSats',
-  2: 'Włącz lub wyłącz tunel VPN TunnelSats.',
+  2: 'Włącz monitorowanie subskrypcji i automatyczne rozgłaszanie zewnętrznego hosta dla TunnelSats.',
   3: 'Docelowy węzeł Lightning',
   4: 'Wybierz, która usługa Lightning na Twoim serwerze StartOS będzie odbierać połączenia przychodzące.',
   5: 'Konfiguracja WireGuard',
@@ -71,7 +75,7 @@ export const pl_PL: LangDict = {
   13: 'Nie udało się przeanalizować wyniku sprawdzania stanu',
   14: 'Rozgłaszaj punkt końcowy VPN TunnelSats w sieci Lightning',
   15: 'Zezwól na współistnienie domowego IPv6',
-  16: 'Zezwalaj na ogłaszanie surowych adresów IPv6 w węźle. OSTRZEŻENIE: TunnelSats VPN tuneluje tylko ruch IPv4. Połączenia IPv6 omijają tunel VPN i ujawniają Twój prawdziwy domowy adres IP dostawcy Internetu.',
+  16: 'Zezwalaj na ogłaszanie punktu końcowego IPv6 TunnelSats w węźle Lightning, jeśli określono go w konfiguracji. (TunnelSats zapewnia tunelowanie IPv4; pozostaw wyłączone, chyba że używasz punktu końcowego tunelu IPv6).',
   17: 'Pulpit sieciowy jest dostępny',
   18: 'Pulpit sieciowy jest niedostępny',
   19: 'Status subskrypcji',
@@ -79,12 +83,14 @@ export const pl_PL: LangDict = {
   21: 'Subskrypcja WireGuard TunnelSats wygasła. Wklej odnowioną konfigurację w ustawieniach, aby przywrócić łączność przychodzącą.',
   22: 'Subskrypcja TunnelSats wygasa za <= 3 dni. Odnów subskrypcję, aby uniknąć przerw w połączeniu.',
   23: 'Subskrypcja TunnelSats wygasa za <= 7 dni. Zaplanuj odnowienie, aby utrzymać ciągłość działania.',
+  24: 'Konfiguracja zapisana',
+  25: 'Dodaj to jako nową bramę w System → Bramy (najpierw usuń istniejącą bramę TunnelSats). Następnie otwórz interfejs Peer swojego węzła, aby włączyć adres i przypisać bramę wychodzącą (patrz Instrukcje).',
 }
 
 export const fr_FR: LangDict = {
   0: 'Démarrage de TunnelSats !',
   1: 'Activer TunnelSats',
-  2: 'Activez ou désactivez le tunnel VPN TunnelSats.',
+  2: "Activez la surveillance de l'abonnement et l'annonce automatisée de l'hôte externe pour TunnelSats.",
   3: 'Nœud Lightning cible',
   4: 'Sélectionnez le service Lightning sur votre serveur StartOS qui recevra les connexions entrantes.',
   5: 'Configuration WireGuard',
@@ -98,7 +104,7 @@ export const fr_FR: LangDict = {
   13: 'Échec de l’analyse du résultat du contrôle d’état',
   14: 'Annoncer le point de terminaison VPN TunnelSats au réseau Lightning',
   15: 'Autoriser la coexistence IPv6 domestique',
-  16: 'Autorise l’annonce d’adresses IPv6 brutes sur votre nœud. AVERTISSEMENT : Le VPN TunnelSats ne tunnelise que le trafic IPv4. Les connexions IPv6 contournent le tunnel VPN et exposent votre véritable adresse IP de FAI résidentiel.',
+  16: "Autorise l'annonce d'un point de terminaison IPv6 TunnelSats à votre nœud Lightning si spécifié dans votre configuration. (TunnelSats fournit un tunneling IPv4 ; laissez désactivé sauf si vous utilisez un point de terminaison de tunnel IPv6).",
   17: 'Le tableau de bord Web est accessible',
   18: 'Le tableau de bord Web n’est pas accessible',
   19: 'État de l’abonnement',
@@ -106,6 +112,8 @@ export const fr_FR: LangDict = {
   21: 'L’abonnement WireGuard TunnelSats a expiré. Collez une configuration renouvelée dans les paramètres pour rétablir la connectivité entrante.',
   22: 'L’abonnement TunnelSats expire dans <= 3 jours. Renouvelez votre abonnement pour éviter toute interruption de connexion.',
   23: 'L’abonnement TunnelSats expire dans <= 7 jours. Planifiez votre renouvellement pour maintenir la disponibilité.',
+  24: 'Configuration enregistrée',
+  25: "Ajoutez ceci en tant que nouvelle passerelle sous Système → Passerelles (supprimez d'abord toute passerelle TunnelSats existante). Ouvrez ensuite l'interface Peer de votre nœud pour activer l'adresse et assigner la passerelle sortante (voir Instructions).",
 }
 
 export default {

@@ -90,12 +90,11 @@ export const main = sdk.setupMain(async ({ effects }) => {
             const data = JSON.parse(res.stdout.toString())
             const isOk = data.result === 'ok' || data.result === 'success'
             return {
-              result:
-                isOk
-                  ? 'success'
-                  : data.result === 'loading'
-                    ? 'loading'
-                    : 'failure',
+              result: isOk
+                ? 'success'
+                : data.result === 'loading'
+                  ? 'loading'
+                  : 'failure',
               message:
                 data.message ||
                 (isOk ? i18n('Subscription is active') : String(data.result)),

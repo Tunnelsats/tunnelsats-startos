@@ -1,9 +1,12 @@
 export const short = {
   en_US: 'A privacy-focused VPN gateway for Lightning Nodes (LND/CLN).',
-  es_ES: 'Una puerta de enlace VPN centrada en la privacidad para nodos Lightning (LND/CLN).',
-  de_DE: 'Ein datenschutzorientiertes VPN-Gateway für Lightning-Knoten (LND/CLN).',
+  es_ES:
+    'Una puerta de enlace VPN centrada en la privacidad para nodos Lightning (LND/CLN).',
+  de_DE:
+    'Ein datenschutzorientiertes VPN-Gateway für Lightning-Knoten (LND/CLN).',
   pl_PL: 'Bramka VPN chroniąca prywatność dla węzłów Lightning (LND/CLN).',
-  fr_FR: 'Une passerelle VPN axée sur la confidentialité pour les nœuds Lightning (LND/CLN).',
+  fr_FR:
+    'Une passerelle VPN axée sur la confidentialité pour les nœuds Lightning (LND/CLN).',
 }
 
 export const long = {

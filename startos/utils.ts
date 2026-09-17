@@ -19,7 +19,10 @@ export function validateWireguardConfig(wgConf: string | null | undefined): {
   }
 
   if (!/^\s*(?!#|;)\s*PrivateKey\s*=/im.test(wgConf)) {
-    return { valid: false, error: "Missing 'PrivateKey' property in [Interface]." }
+    return {
+      valid: false,
+      error: "Missing 'PrivateKey' property in [Interface].",
+    }
   }
 
   if (!/^\s*(?!#|;)\s*Address\s*=/im.test(wgConf)) {
@@ -33,7 +36,8 @@ export function validateWireguardConfig(wgConf: string | null | undefined): {
   if (!/#\s*(?:VPNPort|Port Forwarding):\s*\d+/i.test(wgConf)) {
     return {
       valid: false,
-      error: 'Missing port forwarding metadata (e.g. # Port Forwarding: XXXXX).',
+      error:
+        'Missing port forwarding metadata (e.g. # Port Forwarding: XXXXX).',
     }
   }
 
@@ -98,10 +102,10 @@ export function ensureInboundMarker(wgConf: string): string {
   const lines = wgConf.split(/\r?\n/)
   const hasStartTunnel = lines.some((line) => {
     const trimmed = line.trim().toLowerCase()
-    return trimmed === "# starttunnel" || trimmed === "starttunnel"
+    return trimmed === '# starttunnel' || trimmed === 'starttunnel'
   })
   const hasInboundYes = lines.some((line) => {
-    return line.trim().toLowerCase() === "# inbound: yes"
+    return line.trim() === '# inbound: yes'
   })
 
   if (hasStartTunnel && hasInboundYes) {
@@ -109,16 +113,16 @@ export function ensureInboundMarker(wgConf: string): string {
   }
 
   const markersToAdd: string[] = []
-  if (!hasStartTunnel) markersToAdd.push("# StartTunnel")
-  if (!hasInboundYes) markersToAdd.push("# inbound: yes")
+  if (!hasStartTunnel) markersToAdd.push('# StartTunnel')
+  if (!hasInboundYes) markersToAdd.push('# inbound: yes')
 
   const interfaceIndex = lines.findIndex((line) =>
     /^\s*\[Interface\]\s*$/i.test(line),
   )
   if (interfaceIndex !== -1) {
     lines.splice(interfaceIndex + 1, 0, ...markersToAdd)
-    return lines.join("\n")
+    return lines.join('\n')
   }
 
-  return `${markersToAdd.join("\n")}\n${wgConf}`
+  return `${markersToAdd.join('\n')}\n${wgConf}`
 }

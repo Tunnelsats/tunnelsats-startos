@@ -10,7 +10,9 @@ const { InputSpec, Value } = sdk
 export const inputSpec = InputSpec.of({
   enabled: Value.toggle({
     name: i18n('Enable TunnelSats'),
-    description: i18n('Turn the TunnelSats VPN tunnel On or Off.'),
+    description: i18n(
+      'Enable subscription monitoring and automated external host announcement for TunnelSats.',
+    ),
     default: false,
   }),
   'target-node': Value.select({
@@ -36,7 +38,7 @@ export const inputSpec = InputSpec.of({
   'allow-ipv6': Value.toggle({
     name: i18n('Allow Home IPv6 Coexistence'),
     description: i18n(
-      'Allow advertising raw IPv6 addresses on your node. WARNING: TunnelSats VPN tunnels IPv4 traffic only. IPv6 connections bypass the VPN tunnel and expose your real home ISP IP address.',
+      'Allow announcing an IPv6 TunnelSats endpoint to your Lightning node if specified in your configuration. (TunnelSats provides IPv4 tunneling; leave disabled unless using an IPv6 tunnel endpoint).',
     ),
     default: false,
   }),
@@ -95,20 +97,15 @@ export const configure = sdk.Action.withInput(
     if (processedConf) {
       return {
         version: '1' as const,
-        title: 'Configuration Saved — Next Steps',
-        message:
-          'TunnelSats configuration has been saved with inbound gateway markers (# StartTunnel & # inbound: yes).\n\n' +
-          'Complete these remaining steps in StartOS to enable full connectivity and privacy:\n' +
-          '1. System -> Gateways: If adding or updating your host VPN gateway, paste the configuration below.\n' +
-          '2. Target Node Announcement: Accept the automated 1-Click Task on your StartOS dashboard (or enter Custom External Host in node config).\n' +
-          '3. Target Node -> Interfaces -> Peer Interface: Toggle ON the public VPN address (<VPN_IP>:9735) to open the firewall. (When StartOS displays the "Address Requirements" modal to test port 9735, click "Later" — TunnelSats maps your dedicated external port rather than generic 9735, so generic port 9735 testing is expected to fail).\n' +
-          "4. Target Node (Services -> LND or Core Lightning) -> Actions -> Set Outbound Gateway: Select your TunnelSats gateway. (⚠️ Important: Do NOT set this on the TunnelSats service page. You must open your Lightning node's service page. Required for Full Egress Privacy: StartOS defaults outbound traffic to Auto. Setting this action pins your node's outbound peer traffic, gossip, and ping/pong acknowledgments to the VPN tunnel, preventing residential IP leaks).\n\n" +
-          '⚠️ Multi-Node Notice: The target node MUST hold internal port 9735 for TunnelSats forwarding. If another node (such as Core Lightning) was installed first, it may have claimed 9735.',
+        title: i18n('Configuration Saved'),
+        message: i18n(
+          "Add this as a new gateway under System → Gateways (delete any existing TunnelSats gateway first). Then open your node's Peer interface to enable the address and assign the Outbound Gateway (see Instructions).",
+        ),
         result: {
           type: 'single' as const,
           value: processedConf,
           copyable: true,
-          masked: false,
+          masked: true,
           qr: false,
         },
       }

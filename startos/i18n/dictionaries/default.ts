@@ -3,7 +3,7 @@ export const DEFAULT_LANG = 'en_US'
 const dict = {
   'Starting TunnelSats!': 0,
   'Enable TunnelSats': 1,
-  'Turn the TunnelSats VPN tunnel On or Off.': 2,
+  'Enable subscription monitoring and automated external host announcement for TunnelSats.': 2,
   'Target Lightning Node': 3,
   'Select which Lightning service on your StartOS server will receive inbound connections.': 4,
   'WireGuard Configuration': 5,
@@ -17,7 +17,7 @@ const dict = {
   'Failed to parse health check result': 13,
   'Advertise TunnelSats VPN endpoint to the Lightning Network': 14,
   'Allow Home IPv6 Coexistence': 15,
-  'Allow advertising raw IPv6 addresses on your node. WARNING: TunnelSats VPN tunnels IPv4 traffic only. IPv6 connections bypass the VPN tunnel and expose your real home ISP IP address.': 16,
+  'Allow announcing an IPv6 TunnelSats endpoint to your Lightning node if specified in your configuration. (TunnelSats provides IPv4 tunneling; leave disabled unless using an IPv6 tunnel endpoint).': 16,
   'Web Dashboard is accessible': 17,
   'Web Dashboard is not accessible': 18,
   'Subscription Status': 19,
@@ -25,6 +25,8 @@ const dict = {
   'TunnelSats WireGuard subscription has expired. Paste a renewed configuration in settings to restore inbound connectivity.': 21,
   'TunnelSats subscription expires in <= 3 days. Renew subscription to avoid connection disruption.': 22,
   'TunnelSats subscription expires in <= 7 days. Plan your renewal to maintain uptime.': 23,
+  'Configuration Saved': 24,
+  "Add this as a new gateway under System → Gateways (delete any existing TunnelSats gateway first). Then open your node's Peer interface to enable the address and assign the Outbound Gateway (see Instructions).": 25,
 } as const
 
 /**
