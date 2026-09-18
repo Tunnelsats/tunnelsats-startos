@@ -23,6 +23,7 @@ TunnelSats provides dedicated WireGuard VPN infrastructure specifically designed
 
 > [!NOTE]
 > **Native Storefront & Full Egress Privacy Architecture**:
+>
 > - **In-Process Keygen**: Generates Curve25519 WireGuard keypairs in-process on your device; private keys never leave your node.
 > - **Native Storefront**: Browse plans, generate BOLT11 invoices, and pay directly via WebLN or any Lightning wallet.
 > - **Full Egress Privacy**: Outbound Gateway routing encapsulates both inbound peer traffic and outbound egress (gossip, handshakes, ping/pong acks) with zero residential IP leakage.
@@ -55,25 +56,27 @@ actions:
     name: Export WireGuard Configuration
 tasks:
   - tunnelsats:configure (subscription expiry alert)
+  - lnd:custom-external-host-config (1-click external host announcement prompt on LND)
+  - c-lightning:config (1-click external host announcement prompt on Core Lightning)
 ```
 
 ## Architecture & How It Works
 
 1. **Native Storefront**: Users can purchase or renew subscriptions directly from the Web Dashboard. The package generates a fresh Curve25519 WireGuard keypair locally, submits an order to `api.tunnelsats.com`, and displays a BOLT11 invoice. Once settled, the active `.conf` is provisioned automatically.
 2. **Bring Your Own Config**: Users with an existing TunnelSats subscription can paste their `.conf` via the **Configure** action or Web Dashboard.
-3. **In-Container Clearnet VPN**: WireGuard routing operates directly inside the target node's container, encapsulating inbound and outbound clearnet P2P traffic to prevent residential IP leakage.
+3. **Host-Managed System Gateway & Port Forwarding**: The WireGuard tunnel operates via StartOS native gateway routing (**System → Gateways**). The package provisions configurations with inbound gateway markers (`# StartTunnel` & `# inbound: yes`), enabling StartOS to classify the gateway as Inbound/Outbound and forward incoming peer connections directly to port 9735 on your target Lightning node. Full egress privacy is achieved by setting the target node's Outbound Gateway to TunnelSats, encapsulating outbound peer gossip and acknowledgments through the VPN.
 4. **Subscription Lifecycle & Renewal**: The background daemon monitors subscription expiration, updating the local dashboard and raising StartOS tasks when renewal is required.
 
 ## Volumes & Mount Points
 
-| Volume Name | Container Path | Purpose |
-|-------------|----------------|---------|
+| Volume Name | Container Path | Purpose                                                                                        |
+| ----------- | -------------- | ---------------------------------------------------------------------------------------------- |
 | `main`      | `/data`        | Stores `config.json`, `tunnelsatsv3.conf`, and synchronized metadata (`tunnelsats-meta.json`). |
 
 ## Subcontainers
 
-| Subcontainer | Base Image | Entrypoint | Purpose |
-|--------------|------------|------------|---------|
+| Subcontainer | Base Image             | Entrypoint             | Purpose                                                                    |
+| ------------ | ---------------------- | ---------------------- | -------------------------------------------------------------------------- |
 | `main`       | Debian Slim (Python 3) | `docker_entrypoint.sh` | Serves web UI on port 80 and runs the subscription synchronization daemon. |
 
 ## File Models
@@ -88,6 +91,8 @@ tasks:
 - **Export Configuration (`export-config`)**: Displays the active WireGuard configuration in a masked, copyable modal with download support.
 - **Automated Tasks**:
   - `tunnelsats:configure`: Raised when subscription has `<= 7 days` (Important) or `<= 3 days` / expired (Critical). Automatically cleared upon successful renewal.
+  - `lnd:custom-external-host-config`: Raised on the LND service page when TunnelSats is enabled with a valid configuration. Severity: `important`. Automatically clears when LND's `custom-external-host` setting matches your assigned TunnelSats endpoint (`<VPN_IP>:<VPN_PORT>`).
+  - `c-lightning:config`: Raised on the Core Lightning service page when TunnelSats is enabled with a valid configuration. Severity: `important`. Automatically clears when Core Lightning's announced address matches your assigned TunnelSats endpoint (`<VPN_IP>:<VPN_PORT>`).
 
 ## Network & Privacy Disclosure
 

@@ -330,7 +330,11 @@ async function generateKeys() {
 
 async function startCheckout() {
   const serverSelect = document.getElementById('select-server')
-  const serverId = serverSelect ? serverSelect.value : 'eu-de'
+  const serverId = serverSelect ? serverSelect.value : ''
+  if (!serverId) {
+    alert('Please select a VPN server region.')
+    return
+  }
 
   openPaymentModal()
   setPaymentStatus('Generating WireGuard keypair...', 'pulse-amber')
@@ -574,7 +578,8 @@ const SERVER_DOMAIN_TO_ID = {
 }
 
 function mapDomainToServerId(domainOrId) {
-  if (!domainOrId || domainOrId === 'Unknown') return 'eu-de'
+  if (!domainOrId || domainOrId === 'Unknown' || domainOrId === 'None')
+    return null
   const lower = String(domainOrId).toLowerCase().trim()
   if (SERVER_DOMAIN_TO_ID[lower]) return SERVER_DOMAIN_TO_ID[lower]
   if (
@@ -605,6 +610,7 @@ function mapDomainToServerId(domainOrId) {
     return 'eu-ch'
   if (
     lower.includes('us3') ||
+    lower.includes('us1') ||
     lower.includes('new york') ||
     lower.includes('us-east')
   )
@@ -635,7 +641,7 @@ function mapDomainToServerId(domainOrId) {
     lower.includes('sa-br')
   )
     return 'sa-br'
-  return 'eu-de'
+  return null
 }
 
 function openRenewalModal() {
@@ -646,18 +652,21 @@ function openRenewalModal() {
   const pubkeyEl = document.getElementById('renewal-pubkey')
   const expiryEl = document.getElementById('renewal-current-expiry')
 
+  // Only derive from server domain or server metadata, never from public_ip
   const currentServer =
     statusData.server && statusData.server !== 'Unknown'
       ? statusData.server
       : statusData.server_domain && statusData.server_domain !== 'Unknown'
         ? statusData.server_domain
-        : statusData.public_ip && statusData.public_ip !== 'Unknown'
-          ? statusData.public_ip
-          : ''
+        : ''
 
   const canonicalServerId = mapDomainToServerId(currentServer)
   if (serverSelectEl) {
-    serverSelectEl.value = canonicalServerId
+    if (canonicalServerId) {
+      serverSelectEl.value = canonicalServerId
+    } else {
+      serverSelectEl.value = ''
+    }
   }
 
   if (pubkeyEl) pubkeyEl.textContent = statusData.pubkey || '...'
@@ -668,15 +677,18 @@ function openRenewalModal() {
 
 function closeRenewalModal() {
   const modal = document.getElementById('renewal-modal')
-  if (modal) modal.close()
+  if (!modal) return
+  modal.close()
 }
 
 async function startRenewalCheckout() {
-  closeRenewalModal()
-  openPaymentModal()
-  setPaymentStatus('Requesting renewal invoice...', 'pulse-amber')
-
   const pubkey = statusData.pubkey
+  if (!pubkey || pubkey === 'None' || pubkey === 'Unknown') {
+    alert(
+      'No active WireGuard public key found for renewal. Please configure a tunnel first.',
+    )
+    return
+  }
 
   const serverSelectEl = document.getElementById('renewal-server-select')
   let serverId = serverSelectEl ? serverSelectEl.value : ''
@@ -689,6 +701,15 @@ async function startRenewalCheckout() {
           : ''
     serverId = mapDomainToServerId(rawServer)
   }
+
+  if (!serverId) {
+    alert('Please select your VPN server region before renewing.')
+    return
+  }
+
+  closeRenewalModal()
+  openPaymentModal()
+  setPaymentStatus('Requesting renewal invoice...', 'pulse-amber')
 
   try {
     const res = await fetch(
