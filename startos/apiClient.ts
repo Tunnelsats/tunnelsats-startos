@@ -1,4 +1,4 @@
-export const DEFAULT_API_BASE = 'https://api.tunnelsats.com'
+export const DEFAULT_API_BASE = 'https://tunnelsats.com'
 export const MONTHLY_BANDWIDTH_LIMIT_GB = 100
 
 export interface ServerInfo {

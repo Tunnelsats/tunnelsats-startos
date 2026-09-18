@@ -53,3 +53,65 @@ class TestPackageVersion(unittest.TestCase):
             bridge._package_version_cache = None
             ver = bridge.get_package_version()
             self.assertEqual(ver, "1.2.3")
+
+class TestBridgeKeygenAndConfig(unittest.TestCase):
+    def test_generate_wg_keypair(self):
+        priv, pub = bridge.generate_wg_keypair()
+        self.assertTrue(isinstance(priv, str) and len(priv) == 44)
+        self.assertTrue(isinstance(pub, str) and len(pub) == 44)
+        self.assertTrue(priv.endswith("="))
+        self.assertTrue(pub.endswith("="))
+
+    def test_save_configuration_valid(self):
+        import tempfile
+        with tempfile.TemporaryDirectory() as tmpdir:
+            conf_file = os.path.join(tmpdir, "tunnelsatsv3.conf")
+            app_conf_file = os.path.join(tmpdir, "config.json")
+            meta_file = os.path.join(tmpdir, "tunnelsats-meta.json")
+
+            orig_conf = bridge.CONFIG_PATH
+            orig_app = bridge.APP_CONFIG_PATH
+            orig_meta = bridge.META_FILE_PATH
+            try:
+                bridge.CONFIG_PATH = conf_file
+                bridge.APP_CONFIG_PATH = app_conf_file
+                bridge.META_FILE_PATH = meta_file
+
+                sample_conf = (
+                    "[Interface]\n"
+                    "PrivateKey = aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa=\n"
+                    "Address = 10.9.0.2/32\n"
+                    "# VPNPort: 24556\n"
+                    "# Valid Until: 2026-12-31T23:59:59Z\n"
+                    "\n"
+                    "[Peer]\n"
+                    "PublicKey = bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb=\n"
+                    "Endpoint = de2.tunnelsats.com:51820\n"
+                )
+
+                bridge.save_configuration(sample_conf, "cln")
+
+                self.assertTrue(os.path.exists(conf_file))
+                with open(conf_file, "r") as f:
+                    self.assertEqual(f.read(), sample_conf)
+
+                self.assertTrue(os.path.exists(app_conf_file))
+                with open(app_conf_file, "r") as f:
+                    import json
+                    app_data = json.load(f)
+                    self.assertTrue(app_data.get("enabled"))
+                    self.assertEqual(app_data.get("target-node"), "cln")
+
+                self.assertTrue(os.path.exists(meta_file))
+                with open(meta_file, "r") as f:
+                    meta_data = json.load(f)
+                    self.assertEqual(meta_data.get("vpnPort"), 24556)
+                    self.assertEqual(meta_data.get("expiresAt"), "2026-12-31T23:59:59Z")
+            finally:
+                bridge.CONFIG_PATH = orig_conf
+                bridge.APP_CONFIG_PATH = orig_app
+                bridge.META_FILE_PATH = orig_meta
+
+    def test_save_configuration_invalid(self):
+        with self.assertRaises(ValueError):
+            bridge.save_configuration("invalid content without private key", "lnd")

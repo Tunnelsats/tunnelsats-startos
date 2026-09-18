@@ -20,6 +20,7 @@ export interface SubscriptionMeta {
   syncError?: string | null
   serverDomain?: string
   vpnPort?: number
+  bandwidth_used_gb?: number
 }
 
 export interface SubscriptionExpiryTask {

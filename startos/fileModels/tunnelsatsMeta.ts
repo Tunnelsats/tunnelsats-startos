@@ -8,6 +8,7 @@ export const metaShape = z.object({
   syncError: z.string().optional().nullable(),
   serverDomain: z.string().optional(),
   vpnPort: z.number().optional(),
+  bandwidth_used_gb: z.number().optional(),
 })
 
 export const tunnelsatsMeta = FileHelper.json(

@@ -56,6 +56,82 @@ def atomic_write_json(filepath, data):
                 pass
         raise e
 
+def atomic_write_file(filepath, content):
+    tmp_path = filepath + ".tmp"
+    try:
+        with open(tmp_path, 'w') as f:
+            f.write(content)
+        os.replace(tmp_path, filepath)
+    except Exception as e:
+        if os.path.exists(tmp_path):
+            try:
+                os.remove(tmp_path)
+            except Exception:
+                pass
+        raise e
+
+def validate_config(wg_conf):
+    if not wg_conf:
+        raise ValueError("Configuration content is empty.")
+    if not re.search(r'^\s*(?!#|;)\s*PrivateKey\s*=', wg_conf, re.IGNORECASE | re.MULTILINE):
+        raise ValueError("Missing 'PrivateKey' property.")
+    if not re.search(r'^\s*(?!#|;)\s*Address\s*=', wg_conf, re.IGNORECASE | re.MULTILINE):
+        raise ValueError("Missing 'Address' property.")
+    if not re.search(r'^\s*(?!#|;)\s*Endpoint\s*=', wg_conf, re.IGNORECASE | re.MULTILINE):
+        raise ValueError("Missing 'Endpoint' routing property.")
+    if not re.search(r'#\s*(?:VPNPort|Port Forwarding):\s*\d+', wg_conf, re.IGNORECASE):
+        raise ValueError("Missing port-forwarding metadata (e.g., # Port Forwarding: XXXXX).")
+
+def generate_wg_keypair():
+    try:
+        proc_priv = subprocess.run(["wg", "genkey"], capture_output=True, check=True)
+        priv = proc_priv.stdout.decode().strip()
+        proc_pub = subprocess.run(["wg", "pubkey"], input=priv.encode(), capture_output=True, check=True)
+        pub = proc_pub.stdout.decode().strip()
+        if priv and pub:
+            return priv, pub
+    except Exception:
+        pass
+
+    try:
+        from cryptography.hazmat.primitives.asymmetric.x25519 import X25519PrivateKey
+        from cryptography.hazmat.primitives import serialization
+        import base64
+        key = X25519PrivateKey.generate()
+        raw_priv = key.private_bytes(
+            encoding=serialization.Encoding.Raw,
+            format=serialization.PrivateFormat.Raw,
+            encryption_algorithm=serialization.NoEncryption()
+        )
+        raw_pub = key.public_key().public_bytes(
+            encoding=serialization.Encoding.Raw,
+            format=serialization.PublicFormat.Raw
+        )
+        return base64.b64encode(raw_priv).decode(), base64.b64encode(raw_pub).decode()
+    except Exception as e:
+        raise RuntimeError(f"Unable to generate WireGuard keypair: {e}")
+
+def save_configuration(conf_content, target_node="lnd"):
+    validate_config(conf_content)
+    atomic_write_file(CONFIG_PATH, conf_content)
+
+    app_config = {}
+    if os.path.exists(APP_CONFIG_PATH):
+        try:
+            with open(APP_CONFIG_PATH, "r") as f:
+                app_config = json.load(f)
+        except Exception:
+            pass
+    app_config["enabled"] = True
+    app_config["target-node"] = target_node
+    app_config["tunnelsats-conf"] = conf_content
+    atomic_write_json(APP_CONFIG_PATH, app_config)
+
+    meta = parse_config_comments(conf_content)
+    meta["lastSync"] = None
+    meta["syncSuccess"] = False
+    atomic_write_json(META_FILE_PATH, meta)
+
 def get_default_gateway():
     if hasattr(get_default_gateway, "_cache"):
         return get_default_gateway._cache
@@ -104,7 +180,7 @@ def lazy_sync(wg_pubkey):
         },
         method="POST"
     )
-    
+
     meta = {}
     loaded_existing = False
     try:
@@ -141,15 +217,21 @@ def lazy_sync(wg_pubkey):
             expiry = response_data.get("expiry")
             if expiry and is_valid_iso_expiry(expiry):
                 meta["expiresAt"] = expiry
-            
+
             server_domain = response_data.get("server_domain")
             if server_domain:
                 meta["serverDomain"] = server_domain
-            
+
             vpn_port = response_data.get("vpn_port")
             if vpn_port:
                 meta["vpnPort"] = vpn_port
-                
+
+            if "bandwidth_used_gb" in response_data:
+                try:
+                    meta["bandwidth_used_gb"] = float(response_data["bandwidth_used_gb"])
+                except (ValueError, TypeError):
+                    pass
+
             meta["lastSync"] = datetime.now(timezone.utc).isoformat()
             meta["syncSuccess"] = True
 
@@ -169,14 +251,14 @@ def lazy_sync(wg_pubkey):
         if meta or not loaded_existing:
             meta["syncError"] = None
             atomic_write_json(META_FILE_PATH, meta)
-            
+
     except Exception as e:
         err_msg = str(e)
         print(f"Error during lazy subscription sync: {err_msg}", file=sys.stderr)
         meta["syncSuccess"] = False
         meta["syncError"] = err_msg
         meta["lastSyncAttempt"] = datetime.now(timezone.utc).isoformat()
-        
+
         # Fallback to comments parsing on error if file does not have expiry
         if not meta.get("expiresAt") and os.path.exists(CONFIG_PATH):
             try:
@@ -196,27 +278,27 @@ def lazy_sync(wg_pubkey):
 def format_subscription_expiry():
     if not os.path.exists(META_FILE_PATH):
         return "Unknown"
-    
+
     try:
         with open(META_FILE_PATH, 'r') as f:
             meta = json.load(f)
         expires_at = meta.get("expiresAt")
         if not expires_at:
             return "Unknown"
-            
+
         try:
             expiry_dt = datetime.fromisoformat(expires_at.replace("Z", "+00:00"))
             if expiry_dt.tzinfo is None:
                 expiry_dt = expiry_dt.replace(tzinfo=timezone.utc)
-            
+
             now = datetime.now(timezone.utc)
             if expiry_dt < now:
                 return f"Expired (on {expiry_dt.strftime('%Y-%m-%d')})"
-                
+
             delta = expiry_dt - now
             days = delta.days
             hours = delta.seconds // 3600
-            
+
             if days > 0:
                 return f"Active (Expires in {days}d {hours}h)"
             else:
@@ -249,7 +331,7 @@ def subscription_sync_loop():
                         pass
         except Exception as e:
             print(f"Error in subscription sync loop: {e}", file=sys.stderr)
-        
+
         try:
             sleep_time = 86400 if sync_success else 300
             time.sleep(sleep_time)
@@ -289,68 +371,69 @@ class DashboardHTTPRequestHandler(BaseHTTPRequestHandler):
     def log_message(self, format, *args):
         pass
 
+    def is_trusted_request(self):
+        client_ip = self.client_address[0]
+        if client_ip.startswith("::ffff:"):
+            client_ip = client_ip[7:]
+        is_local = client_ip in ("127.0.0.1", "::1", "localhost")
+
+        gateway_ip = get_default_gateway()
+        embassy_ip = None
+        try:
+            import socket
+            embassy_ip = socket.gethostbyname("embassy")
+        except Exception:
+            pass
+
+        is_trusted_proxy = (
+            (gateway_ip and client_ip == gateway_ip) or
+            (embassy_ip and client_ip == embassy_ip)
+        )
+
+        if not is_local and not is_trusted_proxy:
+            self.send_error(403, "Access denied")
+            return False
+
+        host_header = self.headers.get("Host", "").lower()
+        if host_header.startswith('['):
+            host_name = host_header.partition(']')[0] + ']'
+        else:
+            host_name = host_header.partition(':')[0]
+
+        if is_local:
+            is_allowed_host = host_name in ("localhost", "127.0.0.1", "[::1]")
+        else:
+            allowed_suffixes = (".local", ".lan", ".onion")
+            is_allowed_host = any(host_name.endswith(suffix) for suffix in allowed_suffixes)
+            if not is_allowed_host:
+                ip_str = host_name
+                if ip_str.startswith('[') and ip_str.endswith(']'):
+                    ip_str = ip_str[1:-1]
+                import ipaddress
+                try:
+                    is_allowed_host = ipaddress.ip_address(ip_str).is_private
+                except ValueError:
+                    pass
+
+        if not is_allowed_host:
+            self.send_error(403, "Access denied")
+            return False
+
+        return True
+
     def do_GET(self):
         path_only = self.path.partition('?')[0].partition('#')[0]
         if path_only == "/api/status":
-            # Prevent unauthorized container-to-container scraping from within the same network
-            client_ip = self.client_address[0]
-            if client_ip.startswith("::ffff:"):
-                client_ip = client_ip[7:]
-            is_local = client_ip in ("127.0.0.1", "::1", "localhost")
-            
-            # Identify the network gateway IP
-            gateway_ip = get_default_gateway()
-            
-            # Resolve the StartOS host/proxy IP
-            embassy_ip = None
-            try:
-                import socket
-                embassy_ip = socket.gethostbyname("embassy")
-            except Exception:
-                pass
-                
-            # Enforce that remote connections must strictly originate from the host gateway or the embassy proxy IP
-            is_trusted_proxy = (
-                (gateway_ip and client_ip == gateway_ip) or
-                (embassy_ip and client_ip == embassy_ip)
-            )
-            
-            if not is_local and not is_trusted_proxy:
-                self.send_error(403, "Access denied")
-                return
-
-            host_header = self.headers.get("Host", "").lower()
-            if host_header.startswith('['):
-                host_name = host_header.partition(']')[0] + ']'
-            else:
-                host_name = host_header.partition(':')[0]
-
-            if is_local:
-                is_allowed_host = host_name in ("localhost", "127.0.0.1", "[::1]")
-            else:
-                allowed_suffixes = (".local", ".lan", ".onion")
-                is_allowed_host = any(host_name.endswith(suffix) for suffix in allowed_suffixes)
-                if not is_allowed_host:
-                    ip_str = host_name
-                    if ip_str.startswith('[') and ip_str.endswith(']'):
-                        ip_str = ip_str[1:-1]
-                    import ipaddress
-                    try:
-                        is_allowed_host = ipaddress.ip_address(ip_str).is_private
-                    except ValueError:
-                        pass
-            
-            if not is_allowed_host:
-                self.send_error(403, "Access denied")
+            if not self.is_trusted_request():
                 return
 
             self.send_response(200)
             self.send_header("Content-Type", "application/json")
             self.end_headers()
-            
+
             status_data = get_status()
             target_host, target_port = get_target_details()
-            
+
             response = {
                 "version": status_data.get("version", get_package_version()),
                 "enabled": status_data.get("enabled", is_enabled()),
@@ -372,15 +455,41 @@ class DashboardHTTPRequestHandler(BaseHTTPRequestHandler):
                 "vpn_ip": status_data.get("vpn_ip", "None"),
                 "internal_octet": status_data.get("internal_octet", "Unknown"),
                 "last_sync": status_data.get("last_sync"),
+                "bandwidth_used_gb": status_data.get("bandwidth_used_gb", 0.0),
+                "bandwidth_limit_gb": 100,
             }
             self.wfile.write(json.dumps(response).encode("utf-8"))
             return
+
+        if path_only == "/api/config/export":
+            if not self.is_trusted_request():
+                return
+
+            if os.path.exists(CONFIG_PATH):
+                try:
+                    with open(CONFIG_PATH, "r") as f:
+                        conf_content = f.read()
+                    self.send_response(200)
+                    self.send_header("Content-Type", "text/plain; charset=utf-8")
+                    self.send_header("Content-Disposition", 'attachment; filename="tunnelsats.conf"')
+                    self.end_headers()
+                    self.wfile.write(conf_content.encode("utf-8"))
+                    return
+                except Exception as e:
+                    self.send_error(500, f"Error reading configuration: {e}")
+                    return
+            else:
+                self.send_response(404)
+                self.send_header("Content-Type", "application/json")
+                self.end_headers()
+                self.wfile.write(json.dumps({"error": "No active WireGuard configuration"}).encode("utf-8"))
+                return
 
         web_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "web"))
         target_path = path_only.lstrip("/")
         if not target_path or target_path == "":
             target_path = "index.html"
-            
+
         safe_path = os.path.abspath(os.path.join(web_dir, target_path))
         if os.path.commonpath([web_dir, safe_path]) != web_dir:
             self.send_error(403, "Access denied")
@@ -403,11 +512,56 @@ class DashboardHTTPRequestHandler(BaseHTTPRequestHandler):
             else:
                 self.send_header("Content-Type", "application/octet-stream")
             self.end_headers()
-            
+
             with open(safe_path, "rb") as f:
                 self.wfile.write(f.read())
         else:
             self.send_error(404, "File not found")
+
+    def do_POST(self):
+        path_only = self.path.partition('?')[0].partition('#')[0]
+        if not self.is_trusted_request():
+            return
+
+        if path_only == "/api/keys/generate":
+            try:
+                priv, pub = generate_wg_keypair()
+                self.send_response(200)
+                self.send_header("Content-Type", "application/json")
+                self.end_headers()
+                self.wfile.write(json.dumps({"private_key": priv, "public_key": pub}).encode("utf-8"))
+            except Exception as e:
+                self.send_error(500, f"Key generation failed: {e}")
+            return
+
+        if path_only == "/api/config/save":
+            try:
+                content_length = int(self.headers.get('Content-Length', 0))
+                body = self.rfile.read(content_length).decode('utf-8')
+                data = json.loads(body)
+                conf = data.get("config", "").strip()
+                target_node = data.get("target_node", "lnd")
+                if not conf:
+                    self.send_response(400)
+                    self.send_header("Content-Type", "application/json")
+                    self.end_headers()
+                    self.wfile.write(json.dumps({"error": "No configuration provided"}).encode("utf-8"))
+                    return
+
+                save_configuration(conf, target_node)
+
+                self.send_response(200)
+                self.send_header("Content-Type", "application/json")
+                self.end_headers()
+                self.wfile.write(json.dumps({"success": True, "message": "Configuration saved and activated"}).encode("utf-8"))
+            except Exception as e:
+                self.send_response(400)
+                self.send_header("Content-Type", "application/json")
+                self.end_headers()
+                self.wfile.write(json.dumps({"error": str(e)}).encode("utf-8"))
+            return
+
+        self.send_error(404, "Not found")
 
 def web_server_thread():
     try:
@@ -545,7 +699,8 @@ def get_subscription_info():
             "isExpired": False,
             "lastSync": None,
             "syncError": None,
-            "syncSuccess": False
+            "syncSuccess": False,
+            "bandwidthUsedGb": 0.0,
         }
 
     try:
@@ -569,7 +724,7 @@ def get_subscription_info():
                 "syncError": sync_error,
                 "syncSuccess": sync_success
             }
-        
+
         expiry_dt = datetime.fromisoformat(expires_at.replace("Z", "+00:00"))
         if expiry_dt.tzinfo is None:
             expiry_dt = expiry_dt.replace(tzinfo=timezone.utc)
@@ -577,14 +732,14 @@ def get_subscription_info():
         delta = expiry_dt - now
         days = delta.days
         is_expired = delta.total_seconds() <= 0
-        
+
         if is_expired:
             formatted = f"Expired on {expiry_dt.strftime('%Y-%m-%d')}"
         elif days > 0:
             formatted = f"Active (Expires in {days}d {delta.seconds // 3600}h)"
         else:
             formatted = f"Active (Expires in {delta.seconds // 3600}h {(delta.seconds % 3600) // 60}m)"
-            
+
         return {
             "linked": has_synced,
             "expiresAt": expires_at,
@@ -593,7 +748,8 @@ def get_subscription_info():
             "isExpired": is_expired,
             "lastSync": last_sync,
             "syncError": sync_error,
-            "syncSuccess": sync_success
+            "syncSuccess": sync_success,
+            "bandwidthUsedGb": meta.get("bandwidth_used_gb", 0.0),
         }
     except Exception as e:
         return {
@@ -610,10 +766,10 @@ def get_subscription_info():
 def get_status():
     enabled = is_enabled()
     has_config = os.path.exists(CONFIG_PATH)
-    
+
     vpn_ip = get_wg_ip() if (enabled and has_config) else None
     internal_octet = vpn_ip.split('.')[-1] if vpn_ip else "Unknown"
-    
+
     vpn_port = DEFAULT_VPN_PORT
     server_domain = "Unknown"
     if has_config:
@@ -628,7 +784,7 @@ def get_status():
             pass
 
     sub_info = get_subscription_info()
-    
+
     if not enabled:
         status = "disabled"
     elif not has_config:
@@ -641,9 +797,9 @@ def get_status():
         status = "sync_error"
     else:
         status = "pending_sync"
-        
+
     is_active = (enabled and has_config and sub_info["linked"] and not sub_info["isExpired"])
-        
+
     return {
         "status": status,
         "enabled": enabled,
@@ -662,28 +818,19 @@ def get_status():
         "pubkey": get_wg_pubkey() if has_config else "None",
         "last_sync": sub_info["lastSync"],
         "sync_error": sub_info.get("syncError"),
+        "bandwidth_used_gb": sub_info.get("bandwidthUsedGb", 0.0),
+        "bandwidth_limit_gb": 100,
         "version": get_package_version(),
         "allow_ipv6": is_allow_ipv6(),
     }
-def validate_config(wg_conf):
-    if not wg_conf:
-        return
-    if not re.search(r'^\s*(?!#|;)\s*PrivateKey\s*=', wg_conf, re.IGNORECASE | re.MULTILINE):
-        raise ValueError("Missing 'PrivateKey' property.")
-    if not re.search(r'^\s*(?!#|;)\s*Address\s*=', wg_conf, re.IGNORECASE | re.MULTILINE):
-        raise ValueError("Missing 'Address' property.")
-    if not re.search(r'^\s*(?!#|;)\s*Endpoint\s*=', wg_conf, re.IGNORECASE | re.MULTILINE):
-        raise ValueError("Missing 'Endpoint' routing property.")
-    if not re.search(r'#\s*(?:VPNPort|Port Forwarding):\s*\d+', wg_conf, re.IGNORECASE):
-        raise ValueError("Missing port-forwarding metadata (e.g., # Port Forwarding: XXXXX).")
 
 def main():
     if len(sys.argv) < 2:
         print("Usage: bridge.py <command> [args]")
         sys.exit(1)
-    
+
     command = sys.argv[1]
-    
+
     if command == "start":
         signal.signal(signal.SIGTERM, shutdown_handler)
         signal.signal(signal.SIGINT, shutdown_handler)
@@ -703,21 +850,21 @@ def main():
             stderr = getattr(e, 'stderr', str(e))
             print(f"Failed to start companion service: {stderr}", file=sys.stderr)
             sys.exit(1)
-            
+
     elif command == "stop":
         print("TunnelSats companion service stopped.")
         sys.exit(0)
-            
+
     elif command == "status":
         print(json.dumps(get_status(), indent=2))
-        
+
     elif command == "health":
         target = sys.argv[2] if len(sys.argv) > 2 else "subscription"
-        
+
         if not is_enabled():
             print(json.dumps({"result": "disabled", "message": "TunnelSats is disabled."}))
             sys.exit(0)
-            
+
         if not os.path.exists(CONFIG_PATH):
             print(json.dumps({"result": "ok", "message": "Unconfigured: Add WireGuard configuration in settings"}))
             sys.exit(0)

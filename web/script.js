@@ -1,8 +1,18 @@
 let statusData = {}
 let countdownInterval = null
 let targetExpiry = null
+let selectedNode = 'lnd'
+let selectedDuration = 3
+let selectedRenewalDuration = 3
+let activePaymentHash = null
+let activePollingInterval = null
+let currentKeypair = null
+let serversList = []
 
-async function fetchStatus() {
+// ─────────────────────────────────────────────
+// Initializer & Status Fetch
+// ─────────────────────────────────────────────
+async function fetchStatus(force = false) {
   try {
     const response = await fetch('/api/status')
     if (response.ok) {
@@ -15,6 +25,24 @@ async function fetchStatus() {
 }
 
 function updateUI() {
+  const isConfigured = Boolean(statusData.configured && statusData.enabled)
+  const storefrontView = document.getElementById('view-storefront')
+  const telemetryView = document.getElementById('view-telemetry')
+  const backBtn = document.getElementById('btn-back-to-telemetry')
+
+  // Determine initial view if not manually navigated
+  if (!storefrontView.dataset.userNavigated) {
+    if (isConfigured) {
+      storefrontView.style.display = 'none'
+      telemetryView.style.display = 'flex'
+      if (backBtn) backBtn.style.display = 'inline-flex'
+    } else {
+      storefrontView.style.display = 'flex'
+      telemetryView.style.display = 'none'
+      if (backBtn) backBtn.style.display = 'none'
+    }
+  }
+
   // 1. Status Badge
   const badge = document.getElementById('status-badge')
   const badgeText = badge.querySelector('.status-text')
@@ -28,53 +56,116 @@ function updateUI() {
       badgeText.textContent = 'SUBSCRIPTION EXPIRED'
     } else if (statusData.status === 'unconfigured') {
       badge.className = 'status-badge inactive'
-      badgeText.textContent = 'UNCONFIGURED (Add config in settings)'
+      badgeText.textContent = 'UNCONFIGURED'
     } else {
       badge.className = 'status-badge inactive'
-      badgeText.textContent = 'CONNECTING / SYNCING'
+      badgeText.textContent = 'SYNCING'
     }
   } else {
     badge.className = 'status-badge inactive'
-    badgeText.textContent = 'TUNNEL DISABLED (Turn on in settings)'
+    badgeText.textContent = 'TUNNEL DISABLED'
   }
 
-  // 2. Properties
-  document.getElementById('val-public-ip').textContent =
-    statusData.public_ip || 'None'
-  document.getElementById('val-vpn-port').textContent =
-    statusData.vpn_port || 'None'
-  document.getElementById('val-pubkey').textContent =
-    statusData.pubkey || 'None'
-  document.getElementById('val-pubkey').title = statusData.pubkey || 'None'
+  // 2. Telemetry Properties
+  const targetNodeEl = document.getElementById('val-target-node')
+  if (targetNodeEl) {
+    targetNodeEl.textContent =
+      statusData.target_host && statusData.target_host.includes('c-lightning')
+        ? 'Core Lightning'
+        : 'LND'
+  }
 
-  document.getElementById('val-octet').textContent =
-    statusData.internal_octet || 'Unknown'
+  const endpointEl = document.getElementById('val-public-endpoint')
+  if (endpointEl) {
+    if (statusData.public_ip && statusData.public_ip !== 'Unknown') {
+      endpointEl.textContent = `${statusData.public_ip}:${statusData.vpn_port || 9735}`
+    } else {
+      endpointEl.textContent = '...'
+    }
+  }
+
+  const pubkeyEl = document.getElementById('val-pubkey')
+  if (pubkeyEl) {
+    pubkeyEl.textContent = statusData.pubkey || '...'
+    pubkeyEl.title = statusData.pubkey || ''
+  }
+
+  const vpnIpEl = document.getElementById('val-vpn-ip')
+  if (vpnIpEl) {
+    vpnIpEl.textContent = statusData.vpn_ip || '...'
+  }
+
+  const lastSyncEl = document.getElementById('val-last-sync')
+  if (lastSyncEl) {
+    if (statusData.last_sync) {
+      try {
+        lastSyncEl.textContent = new Date(statusData.last_sync).toLocaleString()
+      } catch {
+        lastSyncEl.textContent = statusData.last_sync
+      }
+    } else {
+      lastSyncEl.textContent = 'Pending sync'
+    }
+  }
+
+  // Bandwidth Telemetry
+  const usedGb =
+    typeof statusData.bandwidth_used_gb === 'number'
+      ? statusData.bandwidth_used_gb
+      : 0.0
+  const limitGb = statusData.bandwidth_limit_gb || 100
+  const bwPct = Math.min(100, Math.max(0, (usedGb / limitGb) * 100))
+
+  const valBwUsed = document.getElementById('val-bandwidth-used')
+  if (valBwUsed) {
+    valBwUsed.textContent = `${usedGb.toFixed(2)} GB`
+  }
+
+  const bwBar = document.getElementById('bandwidth-progress')
+  if (bwBar) {
+    bwBar.style.width = `${bwPct}%`
+    bwBar.classList.remove('warning', 'critical')
+    if (bwPct >= 90) {
+      bwBar.classList.add('critical')
+    } else if (bwPct >= 70) {
+      bwBar.classList.add('warning')
+    }
+  }
+
+  // Update Bandwidth Modal Stats
+  const modalBwUsed = document.getElementById('modal-bandwidth-used')
+  if (modalBwUsed) modalBwUsed.textContent = usedGb.toFixed(2)
+
+  const modalBwFill = document.getElementById('modal-bandwidth-fill')
+  if (modalBwFill) {
+    modalBwFill.style.width = `${bwPct}%`
+    modalBwFill.classList.remove('warning', 'critical')
+    if (bwPct >= 90) modalBwFill.classList.add('critical')
+    else if (bwPct >= 70) modalBwFill.classList.add('warning')
+  }
+
+  const modalStatUsed = document.getElementById('modal-stat-used')
+  if (modalStatUsed) modalStatUsed.textContent = `${usedGb.toFixed(2)} GB`
+
+  const modalStatRemaining = document.getElementById('modal-stat-remaining')
+  if (modalStatRemaining) {
+    const remaining = Math.max(0, limitGb - usedGb)
+    modalStatRemaining.textContent = `${remaining.toFixed(2)} GB`
+  }
 
   // Footer Version
   if (statusData.version) {
     const versionEl = document.getElementById('footer-version')
-    if (versionEl) {
-      versionEl.textContent = 'v' + statusData.version
-    }
+    if (versionEl) versionEl.textContent = 'v' + statusData.version
   }
-  // Option 3 Security Warning Banner
+
+  // IPv6 Exposure Notice
   const ipv6Banner = document.getElementById('ipv6-warning-banner')
   if (ipv6Banner) {
     ipv6Banner.style.display = statusData.allow_ipv6 ? 'block' : 'none'
   }
 
-  // 3. Highlighted guide config parameters
-  const ipElements = document.querySelectorAll('.highlight-ip')
-  const portElements = document.querySelectorAll('.highlight-port')
-
-  ipElements.forEach(
-    (el) => (el.textContent = statusData.public_ip || '<TunnelSats IP>'),
-  )
-  portElements.forEach(
-    (el) => (el.textContent = statusData.vpn_port || '<Forwarding Port>'),
-  )
-
-  // 4. Expiry / Countdown
+  // 3. Expiry / Countdown Timer
   const expiryRaw = document.getElementById('expiry-date-raw')
   const timerEl = document.getElementById('countdown-timer')
   const progressEl = document.getElementById('subscription-progress')
@@ -110,7 +201,7 @@ function updateUI() {
 
       if (timeDiff <= 0) {
         tEl.textContent = 'Expired'
-        tEl.style.color = '#ff7b72'
+        tEl.style.color = '#ef4444'
         pEl.style.width = '0%'
       } else {
         tEl.style.color = ''
@@ -127,7 +218,6 @@ function updateUI() {
           tEl.textContent = `${hours}h ${minutes}m ${seconds}s`
         }
 
-        // Progress Bar (assume 30 days max subscription)
         const maxTerm = 30 * 24 * 60 * 60 * 1000
         const percentage = Math.min(
           100,
@@ -139,6 +229,463 @@ function updateUI() {
   }
 }
 
+// ─────────────────────────────────────────────
+// Navigation & Views
+// ─────────────────────────────────────────────
+function showStorefrontView() {
+  const storefrontView = document.getElementById('view-storefront')
+  const telemetryView = document.getElementById('view-telemetry')
+  const backBtn = document.getElementById('btn-back-to-telemetry')
+
+  storefrontView.dataset.userNavigated = 'true'
+  storefrontView.style.display = 'flex'
+  telemetryView.style.display = 'none'
+  if (backBtn)
+    backBtn.style.display = statusData.configured ? 'inline-flex' : 'none'
+}
+
+function showTelemetryView() {
+  const storefrontView = document.getElementById('view-storefront')
+  const telemetryView = document.getElementById('view-telemetry')
+
+  storefrontView.dataset.userNavigated = 'true'
+  storefrontView.style.display = 'none'
+  telemetryView.style.display = 'flex'
+}
+
+// ─────────────────────────────────────────────
+// Storefront Selection Handlers
+// ─────────────────────────────────────────────
+function selectNode(node, btn) {
+  selectedNode = node
+  document.querySelectorAll('.node-selector-pills .pill-btn').forEach((el) => {
+    el.classList.remove('active')
+  })
+  btn.classList.add('active')
+}
+
+function selectPlan(duration, card) {
+  selectedDuration = duration
+  document.querySelectorAll('.plan-cards-grid .plan-card').forEach((el) => {
+    el.classList.remove('active')
+  })
+  card.classList.add('active')
+}
+
+function selectRenewalPlan(duration, card) {
+  selectedRenewalDuration = duration
+  document.querySelectorAll('#renewal-modal .plan-card').forEach((el) => {
+    el.classList.remove('active')
+  })
+  card.classList.add('active')
+}
+
+// ─────────────────────────────────────────────
+// Checkout & Payment Modal Flow
+// ─────────────────────────────────────────────
+async function generateKeys() {
+  try {
+    const res = await fetch('/api/keys/generate', { method: 'POST' })
+    if (res.ok) {
+      const data = await res.json()
+      return { privateKey: data.private_key, publicKey: data.public_key }
+    }
+  } catch (err) {
+    console.warn('Server-side keygen failed, using WebCrypto fallback:', err)
+  }
+
+  // Fallback: WebCrypto X25519 if supported
+  if (window.crypto && window.crypto.subtle) {
+    try {
+      const pair = await window.crypto.subtle.generateKey(
+        { name: 'X25519' },
+        true,
+        ['deriveKey', 'deriveBits'],
+      )
+      const privRaw = await window.crypto.subtle.exportKey(
+        'pkcs8',
+        pair.privateKey,
+      )
+      const pubRaw = await window.crypto.subtle.exportKey('raw', pair.publicKey)
+      const privBytes = new Uint8Array(privRaw).slice(16) // Extract 32-byte raw from PKCS8
+      const pubBytes = new Uint8Array(pubRaw)
+      return {
+        privateKey: btoa(String.fromCharCode(...privBytes)),
+        publicKey: btoa(String.fromCharCode(...pubBytes)),
+      }
+    } catch (e) {
+      console.error('WebCrypto keygen error:', e)
+    }
+  }
+  throw new Error('Unable to generate WireGuard keypair.')
+}
+
+async function startCheckout() {
+  const serverSelect = document.getElementById('select-server')
+  const serverId = serverSelect ? serverSelect.value : 'eu-de'
+
+  openPaymentModal()
+  setPaymentStatus('Generating WireGuard keypair...', 'pulse-amber')
+
+  try {
+    currentKeypair = await generateKeys()
+    setPaymentStatus('Creating Lightning invoice...', 'pulse-amber')
+
+    const orderRes = await fetch(
+      'https://tunnelsats.com/api/public/v1/subscription/create',
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ serverId, duration: selectedDuration }),
+      },
+    )
+
+    if (!orderRes.ok) {
+      throw new Error(`Order creation failed (HTTP ${orderRes.status})`)
+    }
+
+    const order = await orderRes.json()
+    renderPaymentDetails(
+      order.invoice,
+      order.amountSats,
+      `${selectedDuration} Month${selectedDuration > 1 ? 's' : ''} Subscription`,
+    )
+    pollOrderSettlement(order.paymentHash, currentKeypair, serverId)
+  } catch (err) {
+    console.error('Checkout error:', err)
+    setPaymentStatus(`Error: ${err.message}`, 'pulse-amber')
+  }
+}
+
+function renderPaymentDetails(invoice, sats, planDesc) {
+  const amountEl = document.getElementById('payment-sats-amount')
+  const planEl = document.getElementById('payment-plan-desc')
+  const invoiceInput = document.getElementById('invoice-text')
+  const walletBtn = document.getElementById('btn-open-wallet')
+  const qrContainer = document.getElementById('payment-qr-container')
+
+  if (amountEl) amountEl.textContent = sats.toLocaleString()
+  if (planEl) planEl.textContent = planDesc
+  if (invoiceInput) invoiceInput.value = invoice
+  if (walletBtn) walletBtn.href = `lightning:${invoice}`
+
+  // Render QR Code using qrcode.js
+  if (qrContainer) {
+    try {
+      if (typeof qrcode !== 'undefined') {
+        const qr = qrcode(0, 'M')
+        qr.addData(invoice)
+        qr.make()
+        qrContainer.innerHTML = qr.createSvgTag(4, 0)
+      } else {
+        qrContainer.innerHTML =
+          "<div class='qr-loading'>Invoice generated. Copy text below.</div>"
+      }
+    } catch (e) {
+      console.error('QR render error:', e)
+      qrContainer.innerHTML =
+        "<div class='qr-loading'>Scan via wallet or copy invoice below.</div>"
+    }
+  }
+
+  setPaymentStatus('Waiting for payment settlement...', 'pulse-amber')
+}
+
+function pollOrderSettlement(paymentHash, keypair, serverId) {
+  if (activePollingInterval) clearInterval(activePollingInterval)
+  activePaymentHash = paymentHash
+
+  activePollingInterval = setInterval(async () => {
+    try {
+      const res = await fetch(
+        `https://tunnelsats.com/api/public/v1/subscription/${paymentHash}`,
+      )
+      if (res.ok) {
+        const data = await res.json()
+        if (data.status === 'paid') {
+          clearInterval(activePollingInterval)
+          activePollingInterval = null
+          setPaymentStatus(
+            'Payment confirmed! Activating tunnel...',
+            'pulse-green',
+          )
+          await claimAndSaveConfig(paymentHash, keypair)
+        }
+      }
+    } catch (err) {
+      console.warn('Polling status error:', err)
+    }
+  }, 3500)
+}
+
+function assembleWireguardConfig(claimData, privateKey) {
+  const vpnPort =
+    claimData.vpnPort ||
+    parseInt((claimData.server?.endpoint || '').split(':')[1] || '9735', 10)
+  const serverDomain = (claimData.server?.endpoint || '').split(':')[0]
+
+  const lines = [
+    '[Interface]',
+    `PrivateKey = ${privateKey}`,
+    `Address = ${claimData.peer?.address || claimData.vpnIp}`,
+  ]
+
+  if (claimData.subscriptionEnd) {
+    lines.push(`# Valid Until: ${claimData.subscriptionEnd}`)
+  }
+  lines.push(`# VPNPort: ${vpnPort}`)
+  lines.push(`# Server: ${serverDomain}`)
+  lines.push('')
+  lines.push('[Peer]')
+  lines.push(
+    `PublicKey = ${claimData.server?.publicKey || claimData.serverPublicKey}`,
+  )
+  lines.push(`Endpoint = ${claimData.server?.endpoint || claimData.endpoint}`)
+  lines.push(`AllowedIPs = ${claimData.server?.allowedIPs || '0.0.0.0/0'}`)
+
+  if (claimData.peer?.presharedKey) {
+    lines.push(`PresharedKey = ${claimData.peer.presharedKey}`)
+  }
+
+  return lines.join('\n') + '\n'
+}
+
+async function claimAndSaveConfig(paymentHash, keypair) {
+  try {
+    const claimRes = await fetch(
+      'https://tunnelsats.com/api/public/v1/subscription/claim',
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          paymentHash: paymentHash,
+          wgPublicKey: keypair.publicKey,
+        }),
+      },
+    )
+
+    if (!claimRes.ok) {
+      throw new Error(`Failed to claim configuration (HTTP ${claimRes.status})`)
+    }
+
+    const claimData = await claimRes.json()
+    const fullConfig =
+      claimData.fullConfig ||
+      assembleWireguardConfig(claimData, keypair.privateKey)
+
+    // Save to local container bridge
+    const saveRes = await fetch('/api/config/save', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        config: fullConfig,
+        target_node: selectedNode,
+      }),
+    })
+
+    if (!saveRes.ok) {
+      const errJson = await saveRes.json().catch(() => ({}))
+      throw new Error(
+        errJson.error || 'Failed to save configuration to StartOS',
+      )
+    }
+
+    setPaymentStatus('Tunnel activated successfully!', 'pulse-green')
+    setTimeout(() => {
+      closePaymentModal()
+      delete document.getElementById('view-storefront').dataset.userNavigated
+      fetchStatus(true)
+    }, 1600)
+  } catch (err) {
+    console.error('Claim error:', err)
+    setPaymentStatus(`Activation error: ${err.message}`, 'pulse-amber')
+  }
+}
+
+// ─────────────────────────────────────────────
+// Bring Your Own Config (BYOC)
+// ─────────────────────────────────────────────
+async function saveManualConfig() {
+  const textarea = document.getElementById('byoc-conf-input')
+  const conf = textarea ? textarea.value.trim() : ''
+  if (!conf) {
+    alert('Please paste a valid WireGuard configuration file.')
+    return
+  }
+
+  try {
+    const res = await fetch('/api/config/save', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ config: conf, target_node: selectedNode }),
+    })
+
+    if (res.ok) {
+      alert('Configuration activated successfully!')
+      if (textarea) textarea.value = ''
+      delete document.getElementById('view-storefront').dataset.userNavigated
+      fetchStatus(true)
+    } else {
+      const err = await res.json().catch(() => ({ error: 'Validation failed' }))
+      alert(`Failed to save configuration: ${err.error || 'Unknown error'}`)
+    }
+  } catch (e) {
+    alert(`Error saving configuration: ${e.message}`)
+  }
+}
+
+// ─────────────────────────────────────────────
+// Renewal Flow
+// ─────────────────────────────────────────────
+function openRenewalModal() {
+  const modal = document.getElementById('renewal-modal')
+  if (!modal) return
+
+  const serverDomainEl = document.getElementById('renewal-server-domain')
+  const pubkeyEl = document.getElementById('renewal-pubkey')
+  const expiryEl = document.getElementById('renewal-current-expiry')
+
+  if (serverDomainEl)
+    serverDomainEl.textContent =
+      statusData.public_ip || statusData.server || '...'
+  if (pubkeyEl) pubkeyEl.textContent = statusData.pubkey || '...'
+  if (expiryEl) expiryEl.textContent = statusData.expiry_formatted || '...'
+
+  modal.showModal()
+}
+
+function closeRenewalModal() {
+  const modal = document.getElementById('renewal-modal')
+  if (modal) modal.close()
+}
+
+async function startRenewalCheckout() {
+  closeRenewalModal()
+  openPaymentModal()
+  setPaymentStatus('Requesting renewal invoice...', 'pulse-amber')
+
+  const pubkey = statusData.pubkey
+  const serverId = statusData.public_ip || statusData.server
+
+  try {
+    const res = await fetch(
+      'https://tunnelsats.com/api/public/v1/subscription/renew',
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          serverId: serverId,
+          duration: selectedRenewalDuration,
+          wgPublicKey: pubkey,
+        }),
+      },
+    )
+
+    if (!res.ok) {
+      throw new Error(`Renewal request failed (HTTP ${res.status})`)
+    }
+
+    const data = await res.json()
+    renderPaymentDetails(
+      data.invoice,
+      data.amountSats || 25000,
+      `${selectedRenewalDuration} Month${selectedRenewalDuration > 1 ? 's' : ''} Renewal`,
+    )
+    pollRenewalSettlement(data.paymentHash)
+  } catch (err) {
+    console.error('Renewal error:', err)
+    setPaymentStatus(`Renewal error: ${err.message}`, 'pulse-amber')
+  }
+}
+
+function pollRenewalSettlement(paymentHash) {
+  if (activePollingInterval) clearInterval(activePollingInterval)
+  activePaymentHash = paymentHash
+
+  activePollingInterval = setInterval(async () => {
+    try {
+      const res = await fetch(
+        `https://tunnelsats.com/api/public/v1/subscription/${paymentHash}`,
+      )
+      if (res.ok) {
+        const data = await res.json()
+        if (data.status === 'paid') {
+          clearInterval(activePollingInterval)
+          activePollingInterval = null
+          setPaymentStatus(
+            'Renewal settled! Updating subscription...',
+            'pulse-green',
+          )
+          setTimeout(() => {
+            closePaymentModal()
+            fetchStatus(true)
+          }, 1500)
+        }
+      }
+    } catch (err) {
+      console.warn('Polling status error:', err)
+    }
+  }, 3500)
+}
+
+// ─────────────────────────────────────────────
+// Export Configuration
+// ─────────────────────────────────────────────
+function exportConfiguration() {
+  window.location.href = '/api/config/export'
+}
+
+// ─────────────────────────────────────────────
+// Modals Open / Close Helpers
+// ─────────────────────────────────────────────
+function openBandwidthModal() {
+  const modal = document.getElementById('bandwidth-modal')
+  if (modal) modal.showModal()
+}
+
+function closeBandwidthModal() {
+  const modal = document.getElementById('bandwidth-modal')
+  if (modal) modal.close()
+}
+
+function openPaymentModal() {
+  const modal = document.getElementById('payment-modal')
+  if (modal) modal.showModal()
+}
+
+function closePaymentModal() {
+  const modal = document.getElementById('payment-modal')
+  if (modal) {
+    if (activePollingInterval) {
+      clearInterval(activePollingInterval)
+      activePollingInterval = null
+    }
+    modal.close()
+  }
+}
+
+function setPaymentStatus(text, indicatorClass) {
+  const textEl = document.getElementById('payment-status-text')
+  const dotEl = document.getElementById('payment-status-dot')
+  if (textEl) textEl.textContent = text
+  if (dotEl) {
+    dotEl.className = `status-indicator-dot ${indicatorClass}`
+  }
+}
+
+function openFaqModal() {
+  const modal = document.getElementById('faq-modal')
+  if (modal) modal.showModal()
+}
+
+function closeFaqModal() {
+  const modal = document.getElementById('faq-modal')
+  if (modal) modal.close()
+}
+
+// ─────────────────────────────────────────────
+// Copy Utilities
+// ─────────────────────────────────────────────
 function handleCopySuccess(btn, successText) {
   const originalText = btn.textContent
   btn.textContent = successText
@@ -149,18 +696,27 @@ function handleCopySuccess(btn, successText) {
   }, 1500)
 }
 
-function executeCopy(text, btn, successText) {
+function copyText(elementId, btn) {
+  const el = document.getElementById(elementId)
+  const text = el ? el.title || el.textContent : ''
   if (navigator.clipboard && navigator.clipboard.writeText) {
     navigator.clipboard
       .writeText(text)
-      .then(() => {
-        handleCopySuccess(btn, successText)
-      })
-      .catch(() => {
-        fallbackCopy(text, btn, successText)
-      })
+      .then(() => handleCopySuccess(btn, 'Copied!'))
   } else {
-    fallbackCopy(text, btn, successText)
+    fallbackCopy(text, btn, 'Copied!')
+  }
+}
+
+function copyInvoice(btn) {
+  const input = document.getElementById('invoice-text')
+  const text = input ? input.value : ''
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    navigator.clipboard
+      .writeText(text)
+      .then(() => handleCopySuccess(btn, 'Copied!'))
+  } else {
+    fallbackCopy(text, btn, 'Copied!')
   }
 }
 
@@ -180,83 +736,30 @@ function fallbackCopy(text, btn, successText) {
   document.body.removeChild(textarea)
 }
 
-function copyText(elementId, btn) {
-  const text =
-    document.getElementById(elementId).title ||
-    document.getElementById(elementId).textContent
-  executeCopy(text, btn, 'Copied!')
-}
-
-function copyCode(elementId, btn) {
-  const text = document.getElementById(elementId).textContent
-  const originalText = btn ? btn.textContent.trim() : ''
-  const successText = originalText ? originalText.replace(/^Copy\b/, 'Copied') + '!' : 'Copied!'
-  executeCopy(text, btn, successText)
-}
-
-function switchTab(tabId, btn) {
-  // Hide all tab contents
-  document.querySelectorAll('.tab-content').forEach((tab) => {
-    tab.classList.remove('active')
-  })
-  // Remove active class from buttons
-  document.querySelectorAll('.tab-btn').forEach((button) => {
-    button.classList.remove('active')
-  })
-  // Show selected tab content
-  document.getElementById(tabId).classList.add('active')
-  // Set active class on button
-  btn.classList.add('active')
-}
-
-// ─────────────────────────────────────────────
-// FAQ Modal
-// ─────────────────────────────────────────────
-
-const faqModal = document.getElementById('faq-modal')
-
-function openFaqModal() {
-  if (faqModal) {
-    faqModal.showModal()
-    // Trap focus within modal on open
-    faqModal.querySelector('.faq-close-btn').focus()
-  }
-}
-
-function closeFaqModal() {
-  if (faqModal) {
-    // Animate out then close
-    const inner = faqModal.querySelector('.faq-dialog-inner')
-    if (inner) {
-      inner.style.animation =
-        'faq-slide-in 0.18s cubic-bezier(0.4, 0, 1, 1) reverse both'
-      setTimeout(() => {
-        faqModal.close()
-        inner.style.animation = ''
-      }, 160)
-    } else {
-      faqModal.close()
+// Modal Backdrop Click Handlers
+;['bandwidth-modal', 'payment-modal', 'renewal-modal', 'faq-modal'].forEach(
+  (id) => {
+    const modal = document.getElementById(id)
+    if (modal) {
+      modal.addEventListener('click', (e) => {
+        if (e.target === modal) {
+          modal.close()
+          if (id === 'payment-modal' && activePollingInterval) {
+            clearInterval(activePollingInterval)
+            activePollingInterval = null
+          }
+        }
+      })
     }
-  }
-}
+  },
+)
 
-// Close when clicking the backdrop (outside .faq-dialog-inner)
-if (faqModal) {
-  faqModal.addEventListener('click', (e) => {
-    // The dialog element itself is the backdrop area
-    if (e.target === faqModal) {
-      closeFaqModal()
-    }
-  })
-
-  // Native Escape key support is built into <dialog>, but we hook it
-  // to use our animated close instead of the abrupt browser default
-  faqModal.addEventListener('cancel', (e) => {
-    e.preventDefault()
-    closeFaqModal()
-  })
-}
-
-// Initial fetch and set interval
+// Initial Status Fetch
 fetchStatus()
-setInterval(fetchStatus, 15000)
+
+// Sensible gentle polling (every 60s while dashboard open)
+setInterval(() => {
+  if (!document.hidden) {
+    fetchStatus()
+  }
+}, 60000)
