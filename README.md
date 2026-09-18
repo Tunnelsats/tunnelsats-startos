@@ -19,13 +19,13 @@ A privacy-focused companion package and routing guide for Lightning Network node
 
 ## Overview
 
-TunnelSats provides dedicated WireGuard VPN infrastructure specifically designed for Lightning Network nodes (LND, Core Lightning, and Eclair). The package features a native storefront for 1-click subscription purchasing and renewals via the Lightning Network, in-process Curve25519 WireGuard keypair generation, on-demand bandwidth telemetry (100GB monthly allowance), and seamless integration with StartOS in-container clearnet VPN routing.
+TunnelSats provides dedicated WireGuard VPN infrastructure specifically designed for Lightning Network nodes (LND and Core Lightning). The package features a native storefront for 1-click subscription purchasing and renewals via the Lightning Network, in-process Curve25519 WireGuard keypair generation, on-demand bandwidth telemetry (100GB monthly allowance), and seamless integration with StartOS clearnet VPN routing.
 
 > [!NOTE]
-> **Native Storefront & In-Container VPN Architecture**:
+> **Native Storefront & Full Egress Privacy Architecture**:
 > - **In-Process Keygen**: Generates Curve25519 WireGuard keypairs in-process on your device; private keys never leave your node.
 > - **Native Storefront**: Browse plans, generate BOLT11 invoices, and pay directly via WebLN or any Lightning wallet.
-> - **In-Container Privacy**: In-container WireGuard routing encapsulates both inbound peer traffic and outbound egress (gossip, handshakes, ping/pong acks) with zero residential IP leakage.
+> - **Full Egress Privacy**: Outbound Gateway routing encapsulates both inbound peer traffic and outbound egress (gossip, handshakes, ping/pong acks) with zero residential IP leakage.
 > - **Bandwidth Telemetry**: 100GB monthly bandwidth limit per calendar month, fetched on-demand when the UI is opened.
 > - **Sovereign Config Export**: Download or export your raw `.conf` anytime.
 > - **Automated Expiration Alerts**: StartOS notification tasks raised at 7 days, 3 days, and 1 day before expiration.
@@ -35,13 +35,13 @@ TunnelSats provides dedicated WireGuard VPN infrastructure specifically designed
 ```yaml
 package_id: tunnelsats
 title: TunnelSats
-description: A privacy-focused VPN storefront and manager for Lightning Nodes (LND/CLN/Eclair).
+description: A privacy-focused VPN storefront and manager for Lightning Nodes (LND/CLN).
 architecture:
-  model: native-storefront in-container clearnet vpn
+  model: native-storefront companion clearnet vpn
   ui_port: 80
   telemetry_daemon: python3 bridge.py
   external_services:
-    - https://api.tunnelsats.com (server discovery, subscription orders, and status sync)
+    - https://tunnelsats.com (server discovery, subscription orders, and status sync)
 volumes:
   - name: main
     path: /data

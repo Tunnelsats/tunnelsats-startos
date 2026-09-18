@@ -561,22 +561,105 @@ async function saveManualConfig() {
 // ─────────────────────────────────────────────
 // Renewal Flow
 // ─────────────────────────────────────────────
+const SERVER_DOMAIN_TO_ID = {
+  'de2.tunnelsats.com': 'eu-de',
+  'de3.tunnelsats.com': 'eu-de',
+  'ch1.tunnelsats.com': 'eu-ch',
+  'us3.tunnelsats.com': 'us-east',
+  'us1.tunnelsats.com': 'us-east',
+  'us2.tunnelsats.com': 'us-west',
+  'sg1.tunnelsats.com': 'asia-sg',
+  'au1.tunnelsats.com': 'oc-au',
+  'br1.tunnelsats.com': 'sa-br',
+}
+
+function mapDomainToServerId(domainOrId) {
+  if (!domainOrId || domainOrId === 'Unknown') return 'eu-de'
+  const lower = String(domainOrId).toLowerCase().trim()
+  if (SERVER_DOMAIN_TO_ID[lower]) return SERVER_DOMAIN_TO_ID[lower]
+  if (
+    [
+      'eu-de',
+      'eu-ch',
+      'us-east',
+      'us-west',
+      'asia-sg',
+      'sa-br',
+      'oc-au',
+    ].includes(lower)
+  ) {
+    return lower
+  }
+  if (
+    lower.includes('de2') ||
+    lower.includes('de3') ||
+    lower.includes('frankfurt') ||
+    lower.includes('germany')
+  )
+    return 'eu-de'
+  if (
+    lower.includes('ch1') ||
+    lower.includes('zurich') ||
+    lower.includes('switzerland')
+  )
+    return 'eu-ch'
+  if (
+    lower.includes('us3') ||
+    lower.includes('new york') ||
+    lower.includes('us-east')
+  )
+    return 'us-east'
+  if (
+    lower.includes('us2') ||
+    lower.includes('los angeles') ||
+    lower.includes('us-west')
+  )
+    return 'us-west'
+  if (
+    lower.includes('sg1') ||
+    lower.includes('singapore') ||
+    lower.includes('asia-sg')
+  )
+    return 'asia-sg'
+  if (
+    lower.includes('au1') ||
+    lower.includes('sydney') ||
+    lower.includes('australia') ||
+    lower.includes('oc-au')
+  )
+    return 'oc-au'
+  if (
+    lower.includes('br1') ||
+    lower.includes('sao paulo') ||
+    lower.includes('brazil') ||
+    lower.includes('sa-br')
+  )
+    return 'sa-br'
+  return 'eu-de'
+}
+
 function openRenewalModal() {
   const modal = document.getElementById('renewal-modal')
   if (!modal) return
 
-  const serverDomainEl = document.getElementById('renewal-server-domain')
+  const serverSelectEl = document.getElementById('renewal-server-select')
   const pubkeyEl = document.getElementById('renewal-pubkey')
   const expiryEl = document.getElementById('renewal-current-expiry')
 
-  const serverDisplay =
+  const currentServer =
     statusData.server && statusData.server !== 'Unknown'
       ? statusData.server
-      : statusData.public_ip && statusData.public_ip !== 'Unknown'
-        ? statusData.public_ip
-        : '...'
+      : statusData.server_domain && statusData.server_domain !== 'Unknown'
+        ? statusData.server_domain
+        : statusData.public_ip && statusData.public_ip !== 'Unknown'
+          ? statusData.public_ip
+          : ''
 
-  if (serverDomainEl) serverDomainEl.textContent = serverDisplay
+  const canonicalServerId = mapDomainToServerId(currentServer)
+  if (serverSelectEl) {
+    serverSelectEl.value = canonicalServerId
+  }
+
   if (pubkeyEl) pubkeyEl.textContent = statusData.pubkey || '...'
   if (expiryEl) expiryEl.textContent = statusData.expiry_formatted || '...'
 
@@ -595,26 +678,16 @@ async function startRenewalCheckout() {
 
   const pubkey = statusData.pubkey
 
-  // Derive the canonical server identifier for renewal, ensuring we never send a raw IP address or 'Unknown'
-  let serverId = ''
-  if (statusData.server && statusData.server !== 'Unknown') {
-    serverId = statusData.server
-  } else if (
-    statusData.server_domain &&
-    statusData.server_domain !== 'Unknown'
-  ) {
-    serverId = statusData.server_domain
-  } else if (
-    statusData.public_ip &&
-    statusData.public_ip !== 'Unknown' &&
-    !/^\d{1,3}(\.\d{1,3}){3}$/.test(statusData.public_ip)
-  ) {
-    serverId = statusData.public_ip
-  }
-
-  // Fallback to default region if not determinable from status
+  const serverSelectEl = document.getElementById('renewal-server-select')
+  let serverId = serverSelectEl ? serverSelectEl.value : ''
   if (!serverId) {
-    serverId = 'eu-de'
+    const rawServer =
+      statusData.server && statusData.server !== 'Unknown'
+        ? statusData.server
+        : statusData.server_domain && statusData.server_domain !== 'Unknown'
+          ? statusData.server_domain
+          : ''
+    serverId = mapDomainToServerId(rawServer)
   }
 
   try {

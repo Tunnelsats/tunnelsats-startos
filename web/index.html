@@ -689,8 +689,22 @@
         <div class="modal-body">
           <div class="renewal-info-card">
             <div class="renewal-info-row">
-              <span class="r-label">Server Region:</span>
-              <span class="r-val" id="renewal-server-domain">...</span>
+              <label class="r-label" for="renewal-server-select"
+                >Server Region:</label
+              >
+              <select
+                id="renewal-server-select"
+                class="select-input r-val"
+                style="padding: 4px 8px; font-size: 0.85rem"
+              >
+                <option value="eu-de">Frankfurt, Germany 🇩🇪 (eu-de)</option>
+                <option value="eu-ch">Zurich, Switzerland 🇨🇭 (eu-ch)</option>
+                <option value="us-east">New York, USA 🇺🇸 (us-east)</option>
+                <option value="us-west">Los Angeles, USA 🇺🇸 (us-west)</option>
+                <option value="asia-sg">Singapore 🇸🇬 (asia-sg)</option>
+                <option value="sa-br">Sao Paulo, Brazil 🇧🇷 (sa-br)</option>
+                <option value="oc-au">Sydney, Australia 🇦🇺 (oc-au)</option>
+              </select>
             </div>
             <div class="renewal-info-row">
               <span class="r-label">WireGuard PubKey:</span>
@@ -899,8 +913,8 @@
           <!-- Q3 -->
           <details class="faq-item">
             <summary class="faq-question">
-              How does multi-node routing work between LND, Core Lightning, and
-              Eclair?
+              How does multi-node routing work between multiple Lightning nodes
+              (e.g. LND and Core Lightning)?
             </summary>
             <div class="faq-answer">
               <p>
