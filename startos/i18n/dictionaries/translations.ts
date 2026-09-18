@@ -27,6 +27,12 @@ export const es_ES: LangDict = {
   23: 'La suscripción a TunnelSats caduca en <= 7 días. Planifique su renovación para mantener el servicio activo.',
   24: 'Configuración guardada',
   25: 'La configuración de WireGuard de TunnelSats se ha guardado correctamente.',
+  26: 'Exportar configuración de WireGuard',
+  27: 'Vea y exporte el archivo de configuración activo de WireGuard (.conf) de TunnelSats.',
+  28: 'No se encontró ninguna configuración',
+  29: 'No se encontró ninguna configuración activa de WireGuard. Compre una suscripción o configure un túnel primero.',
+  30: 'Configuración activa de WireGuard',
+  31: 'A continuación se muestra su configuración activa de WireGuard (.conf) de TunnelSats. Mantenga su clave privada confidencial.',
 }
 
 export const de_DE: LangDict = {
@@ -56,6 +62,12 @@ export const de_DE: LangDict = {
   23: 'Das TunnelSats-Abonnement läuft in <= 7 Tagen ab. Planen Sie Ihre Erneuerung, um Ausfallzeiten zu vermeiden.',
   24: 'Konfiguration gespeichert',
   25: 'Die TunnelSats WireGuard-Konfiguration wurde erfolgreich gespeichert.',
+  26: 'WireGuard-Konfiguration exportieren',
+  27: 'Anzeigen und Exportieren der aktiven TunnelSats WireGuard-Konfigurationsdatei (.conf).',
+  28: 'Keine Konfiguration gefunden',
+  29: 'Keine aktive WireGuard-Konfiguration gefunden. Bitte erwerben Sie ein Abonnement oder konfigurieren Sie zuerst einen Tunnel.',
+  30: 'Aktive WireGuard-Konfiguration',
+  31: 'Unten finden Sie Ihre aktive TunnelSats WireGuard-Konfiguration (.conf). Halten Sie Ihren privaten Schlüssel vertraulich.',
 }
 
 export const pl_PL: LangDict = {
@@ -85,6 +97,12 @@ export const pl_PL: LangDict = {
   23: 'Subskrypcja TunnelSats wygasa za <= 7 dni. Zaplanuj odnowienie, aby utrzymać ciągłość działania.',
   24: 'Konfiguracja zapisana',
   25: 'Konfiguracja WireGuard TunnelSats została pomyślnie zapisana.',
+  26: 'Eksportuj konfigurację WireGuard',
+  27: 'Wyświetl i wyeksportuj aktywny plik konfiguracyjny WireGuard (.conf) TunnelSats.',
+  28: 'Nie znaleziono konfiguracji',
+  29: 'Nie znaleziono aktywnej konfiguracji WireGuard. Najpierw wykup subskrypcję lub skonfiguruj tunel.',
+  30: 'Aktywna konfiguracja WireGuard',
+  31: 'Poniżej znajduje się aktywna konfiguracja WireGuard (.conf) TunnelSats. Zachowaj swój klucz prywatny w tajemnicy.',
 }
 
 export const fr_FR: LangDict = {
@@ -114,6 +132,12 @@ export const fr_FR: LangDict = {
   23: 'L’abonnement TunnelSats expire dans <= 7 jours. Planifiez votre renouvellement pour maintenir la disponibilité.',
   24: 'Configuration enregistrée',
   25: 'La configuration WireGuard de TunnelSats a été enregistrée avec succès.',
+  26: 'Exporter la configuration WireGuard',
+  27: 'Affichez et exportez le fichier de configuration WireGuard actif (.conf) de TunnelSats.',
+  28: 'Aucune configuration trouvée',
+  29: 'Aucune configuration WireGuard active trouvée. Veuillez souscrire un abonnement ou configurer un tunnel au préalable.',
+  30: 'Configuration WireGuard active',
+  31: 'Ci-dessous se trouve votre configuration WireGuard active (.conf) de TunnelSats. Gardez votre clé privée confidentielle.',
 }
 
 export default {

@@ -27,6 +27,12 @@ const dict = {
   'TunnelSats subscription expires in <= 7 days. Plan your renewal to maintain uptime.': 23,
   'Configuration Saved': 24,
   'TunnelSats WireGuard configuration has been saved successfully.': 25,
+  'Export WireGuard Configuration': 26,
+  'View and export the active TunnelSats WireGuard configuration file (.conf).': 27,
+  'No Configuration Found': 28,
+  'No active WireGuard configuration found. Please purchase a subscription or configure a tunnel first.': 29,
+  'Active WireGuard Configuration': 30,
+  'Below is your active TunnelSats WireGuard configuration (.conf). Keep your private key confidential.': 31,
 } as const
 
 /**
