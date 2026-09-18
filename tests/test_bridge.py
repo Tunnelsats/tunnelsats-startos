@@ -115,3 +115,41 @@ class TestBridgeKeygenAndConfig(unittest.TestCase):
     def test_save_configuration_invalid(self):
         with self.assertRaises(ValueError):
             bridge.save_configuration("invalid content without private key", "lnd")
+
+    def test_save_configuration_unsupported_node_defaults_to_lnd(self):
+        import tempfile
+        with tempfile.TemporaryDirectory() as tmpdir:
+            conf_file = os.path.join(tmpdir, "tunnelsatsv3.conf")
+            app_conf_file = os.path.join(tmpdir, "config.json")
+            meta_file = os.path.join(tmpdir, "tunnelsats-meta.json")
+
+            orig_conf = bridge.CONFIG_PATH
+            orig_app = bridge.APP_CONFIG_PATH
+            orig_meta = bridge.META_FILE_PATH
+            try:
+                bridge.CONFIG_PATH = conf_file
+                bridge.APP_CONFIG_PATH = app_conf_file
+                bridge.META_FILE_PATH = meta_file
+
+                sample_conf = (
+                    "[Interface]\n"
+                    "PrivateKey = aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa=\n"
+                    "Address = 10.9.0.2/32\n"
+                    "# VPNPort: 24556\n"
+                    "# Valid Until: 2026-12-31T23:59:59Z\n"
+                    "\n"
+                    "[Peer]\n"
+                    "PublicKey = bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb=\n"
+                    "Endpoint = de2.tunnelsats.com:51820\n"
+                )
+
+                bridge.save_configuration(sample_conf, "eclair")
+
+                with open(app_conf_file, "r") as f:
+                    import json
+                    app_data = json.load(f)
+                    self.assertEqual(app_data.get("target-node"), "lnd")
+            finally:
+                bridge.CONFIG_PATH = orig_conf
+                bridge.APP_CONFIG_PATH = orig_app
+                bridge.META_FILE_PATH = orig_meta

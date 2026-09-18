@@ -211,5 +211,66 @@ class TestHTTPHandler(unittest.TestCase):
         bridge.DashboardHTTPRequestHandler.do_GET(handler_pub_ip)
         handler_pub_ip.send_error.assert_called_with(403, "Access denied")
 
+    @patch('bridge.get_default_gateway')
+    def test_do_POST_csrf_and_content_type_enforcement(self, mock_get_gw):
+        mock_get_gw.return_value = "172.18.0.1"
+
+        # 1. Reject POST without application/json (e.g. text/plain)
+        handler = bridge.DashboardHTTPRequestHandler.__new__(bridge.DashboardHTTPRequestHandler)
+        handler.command = "POST"
+        handler.client_address = ("127.0.0.1", 12345)
+        handler.path = "/api/config/save"
+        handler.headers = DummyHeaders({
+            "Host": "localhost",
+            "Content-Type": "text/plain",
+            "X-Requested-With": "XMLHttpRequest"
+        })
+        handler.send_error = MagicMock()
+        bridge.DashboardHTTPRequestHandler.do_POST(handler)
+        handler.send_error.assert_called_with(415, "Unsupported Media Type: application/json required")
+
+        # 2. Reject POST without custom CSRF header
+        handler2 = bridge.DashboardHTTPRequestHandler.__new__(bridge.DashboardHTTPRequestHandler)
+        handler2.command = "POST"
+        handler2.client_address = ("127.0.0.1", 12345)
+        handler2.path = "/api/config/save"
+        handler2.headers = DummyHeaders({
+            "Host": "localhost",
+            "Content-Type": "application/json"
+        })
+        handler2.send_error = MagicMock()
+        bridge.DashboardHTTPRequestHandler.do_POST(handler2)
+        handler2.send_error.assert_called_with(403, "Missing required CSRF header")
+
+        # 3. Reject POST with cross-site Origin
+        handler3 = bridge.DashboardHTTPRequestHandler.__new__(bridge.DashboardHTTPRequestHandler)
+        handler3.command = "POST"
+        handler3.client_address = ("127.0.0.1", 12345)
+        handler3.path = "/api/config/save"
+        handler3.headers = DummyHeaders({
+            "Host": "localhost",
+            "Content-Type": "application/json",
+            "X-Requested-With": "XMLHttpRequest",
+            "Origin": "https://evil.com"
+        })
+        handler3.send_error = MagicMock()
+        bridge.DashboardHTTPRequestHandler.do_POST(handler3)
+        handler3.send_error.assert_called_with(403, "Cross-origin request rejected")
+
+        # 4. Reject POST with Sec-Fetch-Site: cross-site
+        handler4 = bridge.DashboardHTTPRequestHandler.__new__(bridge.DashboardHTTPRequestHandler)
+        handler4.command = "POST"
+        handler4.client_address = ("127.0.0.1", 12345)
+        handler4.path = "/api/config/save"
+        handler4.headers = DummyHeaders({
+            "Host": "localhost",
+            "Content-Type": "application/json",
+            "X-Requested-With": "XMLHttpRequest",
+            "Sec-Fetch-Site": "cross-site"
+        })
+        handler4.send_error = MagicMock()
+        bridge.DashboardHTTPRequestHandler.do_POST(handler4)
+        handler4.send_error.assert_called_with(403, "Cross-site request rejected")
+
 if __name__ == '__main__':
     unittest.main()

@@ -14,7 +14,8 @@ let serversList = []
 // ─────────────────────────────────────────────
 async function fetchStatus(force = false) {
   try {
-    const response = await fetch('/api/status')
+    const url = force ? '/api/status?force=1' : '/api/status'
+    const response = await fetch(url)
     if (response.ok) {
       statusData = await response.json()
       updateUI()
@@ -257,7 +258,7 @@ function showTelemetryView() {
 // Storefront Selection Handlers
 // ─────────────────────────────────────────────
 function selectNode(node, btn) {
-  selectedNode = node
+  selectedNode = node === 'cln' ? 'cln' : 'lnd'
   document.querySelectorAll('.node-selector-pills .pill-btn').forEach((el) => {
     el.classList.remove('active')
   })
@@ -285,7 +286,14 @@ function selectRenewalPlan(duration, card) {
 // ─────────────────────────────────────────────
 async function generateKeys() {
   try {
-    const res = await fetch('/api/keys/generate', { method: 'POST' })
+    const res = await fetch('/api/keys/generate', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Requested-With': 'XMLHttpRequest',
+        'X-TunnelSats-CSRF': '1',
+      },
+    })
     if (res.ok) {
       const data = await res.json()
       return { privateKey: data.private_key, publicKey: data.public_key }
@@ -307,7 +315,7 @@ async function generateKeys() {
         pair.privateKey,
       )
       const pubRaw = await window.crypto.subtle.exportKey('raw', pair.publicKey)
-      const privBytes = new Uint8Array(privRaw).slice(16) // Extract 32-byte raw from PKCS8
+      const privBytes = new Uint8Array(privRaw).slice(16)
       const pubBytes = new Uint8Array(pubRaw)
       return {
         privateKey: btoa(String.fromCharCode(...privBytes)),
@@ -406,7 +414,7 @@ function pollOrderSettlement(paymentHash, keypair, serverId) {
           clearInterval(activePollingInterval)
           activePollingInterval = null
           setPaymentStatus(
-            'Payment confirmed! Activating tunnel...',
+            'Payment confirmed! Provisioning tunnel...',
             'pulse-green',
           )
           await claimAndSaveConfig(paymentHash, keypair)
@@ -476,7 +484,11 @@ async function claimAndSaveConfig(paymentHash, keypair) {
     // Save to local container bridge
     const saveRes = await fetch('/api/config/save', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Requested-With': 'XMLHttpRequest',
+        'X-TunnelSats-CSRF': '1',
+      },
       body: JSON.stringify({
         config: fullConfig,
         target_node: selectedNode,
@@ -490,15 +502,21 @@ async function claimAndSaveConfig(paymentHash, keypair) {
       )
     }
 
-    setPaymentStatus('Tunnel activated successfully!', 'pulse-green')
+    setPaymentStatus(
+      'Configuration provisioned! Add to System → Gateways to activate.',
+      'pulse-green',
+    )
     setTimeout(() => {
       closePaymentModal()
       delete document.getElementById('view-storefront').dataset.userNavigated
       fetchStatus(true)
+      alert(
+        'Configuration provisioned successfully! To activate routing:\n\n1. Go to StartOS System → Gateways, delete any old TunnelSats gateway, click Add Gateway, choose WireGuard, and connect.\n2. In your Lightning node Peer Interface, toggle the TunnelSats address ON.\n3. In Actions, Set Outbound Gateway to TunnelSats for full egress privacy.',
+      )
     }, 1600)
   } catch (err) {
     console.error('Claim error:', err)
-    setPaymentStatus(`Activation error: ${err.message}`, 'pulse-amber')
+    setPaymentStatus(`Provisioning error: ${err.message}`, 'pulse-amber')
   }
 }
 
@@ -516,12 +534,18 @@ async function saveManualConfig() {
   try {
     const res = await fetch('/api/config/save', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Requested-With': 'XMLHttpRequest',
+        'X-TunnelSats-CSRF': '1',
+      },
       body: JSON.stringify({ config: conf, target_node: selectedNode }),
     })
 
     if (res.ok) {
-      alert('Configuration activated successfully!')
+      alert(
+        "Configuration saved successfully! To complete activation:\n\n1. Add this tunnel to StartOS System → Gateways and connect.\n2. Toggle your node's Peer Interface ON.\n3. Set Outbound Gateway to TunnelSats.",
+      )
       if (textarea) textarea.value = ''
       delete document.getElementById('view-storefront').dataset.userNavigated
       fetchStatus(true)
@@ -613,12 +637,18 @@ function pollRenewalSettlement(paymentHash) {
           clearInterval(activePollingInterval)
           activePollingInterval = null
           setPaymentStatus(
-            'Renewal settled! Updating subscription...',
+            'Renewal settled! Synchronizing status...',
             'pulse-green',
           )
-          setTimeout(() => {
+
+          if (data.new_expiry || data.newExpiry) {
+            statusData.expires_at = data.new_expiry || data.newExpiry
+            updateUI()
+          }
+
+          setTimeout(async () => {
             closePaymentModal()
-            fetchStatus(true)
+            await fetchStatus(true) // Triggers immediate bridge-side lazy_sync
           }, 1500)
         }
       }

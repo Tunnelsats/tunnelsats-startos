@@ -112,6 +112,8 @@ def generate_wg_keypair():
         raise RuntimeError(f"Unable to generate WireGuard keypair: {e}")
 
 def save_configuration(conf_content, target_node="lnd"):
+    if target_node not in ("lnd", "cln"):
+        target_node = "lnd"
     validate_config(conf_content)
     atomic_write_file(CONFIG_PATH, conf_content)
 
@@ -419,6 +421,46 @@ class DashboardHTTPRequestHandler(BaseHTTPRequestHandler):
             self.send_error(403, "Access denied")
             return False
 
+        # Validate Origin header if present
+        origin = self.headers.get("Origin")
+        if origin:
+            try:
+                origin_host = origin.split("://")[-1].split("/")[0].split(":")[0].lower()
+                is_allowed_origin = (
+                    origin_host in ("localhost", "127.0.0.1", "[::1]") or
+                    any(origin_host.endswith(s) for s in (".local", ".lan", ".onion"))
+                )
+                if not is_allowed_origin:
+                    import ipaddress
+                    try:
+                        is_allowed_origin = ipaddress.ip_address(origin_host).is_private
+                    except ValueError:
+                        is_allowed_origin = False
+
+                if not is_allowed_origin:
+                    self.send_error(403, "Cross-origin request rejected")
+                    return False
+            except Exception:
+                self.send_error(403, "Invalid Origin header")
+                return False
+
+        # CSRF and content-type enforcement for POST
+        if getattr(self, "command", "GET") == "POST":
+            content_type = self.headers.get("Content-Type", "").split(";")[0].strip().lower()
+            if content_type != "application/json":
+                self.send_error(415, "Unsupported Media Type: application/json required")
+                return False
+
+            csrf_token = self.headers.get("X-Requested-With") or self.headers.get("X-TunnelSats-CSRF")
+            if not csrf_token:
+                self.send_error(403, "Missing required CSRF header")
+                return False
+
+            fetch_site = self.headers.get("Sec-Fetch-Site", "").lower()
+            if fetch_site == "cross-site":
+                self.send_error(403, "Cross-site request rejected")
+                return False
+
         return True
 
     def do_GET(self):
@@ -426,6 +468,18 @@ class DashboardHTTPRequestHandler(BaseHTTPRequestHandler):
         if path_only == "/api/status":
             if not self.is_trusted_request():
                 return
+
+            from urllib.parse import urlparse, parse_qs
+            query_params = parse_qs(urlparse(self.path).query)
+            force_sync = query_params.get("force", ["0"])[0] in ("1", "true", "yes")
+
+            if force_sync:
+                pubkey = get_wg_pubkey()
+                if pubkey and pubkey not in ("Unknown", "Not available"):
+                    try:
+                        lazy_sync(pubkey)
+                    except Exception as e:
+                        print(f"Force sync failed: {e}", file=sys.stderr)
 
             self.send_response(200)
             self.send_header("Content-Type", "application/json")
