@@ -1,8 +1,8 @@
 import { sdk } from '../sdk'
 import { configJson } from '../fileModels/config.json'
 import { tunnelsatsConf } from '../fileModels/tunnelsatsConf'
+import { validateWireguardConfig } from '../utils'
 import { i18n } from '../i18n'
-import { validateWireguardConfig, ensureInboundMarker } from '../utils'
 import { rm } from 'node:fs/promises'
 
 const { InputSpec, Value } = sdk
@@ -28,12 +28,10 @@ export const inputSpec = InputSpec.of({
   }),
   'tunnelsats-conf': Value.textarea({
     name: i18n('WireGuard Configuration'),
-    description: i18n(
-      "Paste the content of your TunnelSats .conf file here. Required gateway markers ('# StartTunnel' & '# inbound: yes') will be automatically added for you, and a copyable configuration will be provided on save to paste into System -> Gateways.",
-    ),
+    description: i18n('Paste the content of your TunnelSats .conf file here.'),
     required: false,
     default: null,
-    placeholder: `[Interface]\n# StartTunnel\n# inbound: yes\nPrivateKey = <your_private_key>\nAddress = 10.x.x.x/32\n# VPNPort: 12345\n...`,
+    placeholder: `[Interface]\nPrivateKey = <your_private_key>\nAddress = 10.x.x.x/32\n# VPNPort: 12345\n...`,
   }),
   'allow-ipv6': Value.toggle({
     name: i18n('Allow Home IPv6 Coexistence'),
@@ -77,7 +75,6 @@ export const configure = sdk.Action.withInput(
       if (!validation.valid) {
         throw new Error(validation.error || 'Invalid WireGuard configuration')
       }
-      processedConf = ensureInboundMarker(processedConf)
     }
 
     await configJson.merge(effects, {
@@ -99,7 +96,7 @@ export const configure = sdk.Action.withInput(
         version: '1' as const,
         title: i18n('Configuration Saved'),
         message: i18n(
-          "Add this as a new gateway under System → Gateways (delete any existing TunnelSats gateway first). Then open your node's Peer interface to enable the address and assign the Outbound Gateway (see Instructions).",
+          'TunnelSats WireGuard configuration has been saved successfully.',
         ),
         result: {
           type: 'single' as const,

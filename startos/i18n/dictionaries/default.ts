@@ -7,7 +7,7 @@ const dict = {
   'Target Lightning Node': 3,
   'Select which Lightning service on your StartOS server will receive inbound connections.': 4,
   'WireGuard Configuration': 5,
-  "Paste the content of your TunnelSats .conf file here. Required gateway markers ('# StartTunnel' & '# inbound: yes') will be automatically added for you, and a copyable configuration will be provided on save to paste into System -> Gateways.": 6,
+  'Paste the content of your TunnelSats .conf file here.': 6,
   Configure: 7,
   'Adjust TunnelSats settings and WireGuard configuration': 8,
   'Web Dashboard': 9,
@@ -26,7 +26,7 @@ const dict = {
   'TunnelSats subscription expires in <= 3 days. Renew subscription to avoid connection disruption.': 22,
   'TunnelSats subscription expires in <= 7 days. Plan your renewal to maintain uptime.': 23,
   'Configuration Saved': 24,
-  "Add this as a new gateway under System → Gateways (delete any existing TunnelSats gateway first). Then open your node's Peer interface to enable the address and assign the Outbound Gateway (see Instructions).": 25,
+  'TunnelSats WireGuard configuration has been saved successfully.': 25,
 } as const
 
 /**

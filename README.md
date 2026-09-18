@@ -19,28 +19,29 @@ A privacy-focused companion package and routing guide for Lightning Network node
 
 ## Overview
 
-TunnelSats provides dedicated WireGuard VPN infrastructure specifically designed for Lightning Network nodes. On StartOS, WireGuard encapsulation and outbound policy routing are managed natively at the host OS level (**System > Gateways**). When properly connected and assigned as the outbound gateway on the target Lightning node, it enables clearnet inbound connectivity and encapsulates outbound peer traffic through the VPN to eliminate residential IP leakage.
+TunnelSats provides dedicated WireGuard VPN infrastructure specifically designed for Lightning Network nodes (LND, Core Lightning, and Eclair). The package features a native storefront for 1-click subscription purchasing and renewals via the Lightning Network, in-process Curve25519 WireGuard keypair generation, on-demand bandwidth telemetry (100GB monthly allowance), and seamless integration with StartOS in-container clearnet VPN routing.
 
 > [!NOTE]
-> **Host-Managed Gateway Architecture**: WireGuard network tunnels and policy routes are configured and managed externally by the user at the StartOS host level. This companion package provides:
-> - A responsive Web Dashboard (port 80) displaying connection properties, expiration countdowns, and routing guides.
-> - Automated StartOS tasks for 1-Click Lightning external host advertisement (`custom-external-host`).
-> - Automated expiration alert tasks (7-day and 3-day warnings).
-> - Periodic subscription metadata synchronization with `https://tunnelsats.com/api/public/v1/subscription/status`.
-> - Package health checks validating Web UI availability and subscription validity (host gateway routing status is audited independently via StartOS Gateway settings).
+> **Native Storefront & In-Container VPN Architecture**:
+> - **In-Process Keygen**: Generates Curve25519 WireGuard keypairs in-process on your device; private keys never leave your node.
+> - **Native Storefront**: Browse plans, generate BOLT11 invoices, and pay directly via WebLN or any Lightning wallet.
+> - **In-Container Privacy**: In-container WireGuard routing encapsulates both inbound peer traffic and outbound egress (gossip, handshakes, ping/pong acks) with zero residential IP leakage.
+> - **Bandwidth Telemetry**: 100GB monthly bandwidth limit per calendar month, fetched on-demand when the UI is opened.
+> - **Sovereign Config Export**: Download or export your raw `.conf` anytime.
+> - **Automated Expiration Alerts**: StartOS notification tasks raised at 7 days, 3 days, and 1 day before expiration.
 
 ## Quick Reference for AI Consumers
 
 ```yaml
 package_id: tunnelsats
 title: TunnelSats
-description: A privacy-focused VPN gateway for Lightning Nodes (LND/CLN).
+description: A privacy-focused VPN storefront and manager for Lightning Nodes (LND/CLN/Eclair).
 architecture:
-  model: host-managed gateway companion
+  model: native-storefront in-container clearnet vpn
   ui_port: 80
   telemetry_daemon: python3 bridge.py
   external_services:
-    - https://tunnelsats.com/api/public/v1/subscription/status (subscription metadata sync)
+    - https://api.tunnelsats.com (server discovery, subscription orders, and status sync)
 volumes:
   - name: main
     path: /data
@@ -50,19 +51,18 @@ subcontainers:
 actions:
   - id: configure
     name: Configure
+  - id: export-config
+    name: Export WireGuard Configuration
 tasks:
   - tunnelsats:configure (subscription expiry alert)
-  - lnd:custom-external-host-config (1-Click LND external host announcement)
-  - c-lightning:config (1-Click Core Lightning external host announcement)
 ```
 
 ## Architecture & How It Works
 
-1. **Host-Managed Gateway**: The WireGuard tunnel is configured under StartOS **System > Gateways**. Configs carrying `# StartTunnel` and `# inbound: yes` are automatically classified by StartOS as **Inbound/Outbound** gateways, forwarding incoming connections on your assigned port to port `9735` on your Lightning node.
-2. **Companion Service**: The `tunnelsats` container runs as a companion service, hosting the Web Dashboard and maintaining synchronization with the TunnelSats subscription API.
-3. **External Host Announcement & Firewall Policy**: StartOS presents an automated 1-Click task on the dashboard to announce the TunnelSats public endpoint (`custom-external-host`), with manual configuration available as a fallback. The user enables the public address toggle under **Interfaces > Peer Interface** to open the incoming firewall (clicking "Later" on generic port 9735 test prompts).
-4. **Outbound Policy Routing (Full Egress Privacy)**: Because StartOS defaults outbound service traffic to "Auto", node operators must explicitly assign TunnelSats under `Services → [LND / Core Lightning] → Actions → Set Outbound Gateway`. This encapsulates all outbound peer connections, gossip, and ping/pong packets within the VPN tunnel, ensuring zero residential IP leakage.
-5. **Subscription Lifecycle & Renewal**: The background daemon monitors subscription expiration, updating the local dashboard and raising StartOS tasks when renewal is required.
+1. **Native Storefront**: Users can purchase or renew subscriptions directly from the Web Dashboard. The package generates a fresh Curve25519 WireGuard keypair locally, submits an order to `api.tunnelsats.com`, and displays a BOLT11 invoice. Once settled, the active `.conf` is provisioned automatically.
+2. **Bring Your Own Config**: Users with an existing TunnelSats subscription can paste their `.conf` via the **Configure** action or Web Dashboard.
+3. **In-Container Clearnet VPN**: WireGuard routing operates directly inside the target node's container, encapsulating inbound and outbound clearnet P2P traffic to prevent residential IP leakage.
+4. **Subscription Lifecycle & Renewal**: The background daemon monitors subscription expiration, updating the local dashboard and raising StartOS tasks when renewal is required.
 
 ## Volumes & Mount Points
 
@@ -80,20 +80,19 @@ tasks:
 
 - **`config.json`**: Primary service configuration (`enabled`, `target-node`, `tunnelsats-conf`, `allow-ipv6`).
 - **`tunnelsatsv3.conf`**: WireGuard configuration file written to disk when enabled.
-- **`tunnelsats-meta.json`**: Cached subscription metadata (`expiresAt`, `lastSync`, `syncSuccess`, `serverDomain`, `vpnPort`).
+- **`tunnelsats-meta.json`**: Cached subscription metadata (`expiresAt`, `lastSync`, `syncSuccess`, `serverDomain`, `vpnPort`, `bandwidth_used_gb`).
 
 ## Actions & Tasks
 
-- **Configure (`configure`)**: Allows users to enable/disable TunnelSats, select their target Lightning node (`lnd` or `cln`), paste their WireGuard configuration, and toggle IPv6 coexistence. Automatically ensures inbound gateway markers (`# StartTunnel` & `# inbound: yes`) on save.
+- **Configure (`configure`)**: Allows users to enable/disable TunnelSats, select their target Lightning node (`lnd` or `cln`), paste their WireGuard configuration, and toggle IPv6 coexistence.
+- **Export Configuration (`export-config`)**: Displays the active WireGuard configuration in a masked, copyable modal with download support.
 - **Automated Tasks**:
   - `tunnelsats:configure`: Raised when subscription has `<= 7 days` (Important) or `<= 3 days` / expired (Critical). Automatically cleared upon successful renewal.
-  - `lnd:custom-external-host-config`: Raised for LND when TunnelSats is enabled with a valid WireGuard configuration containing port-forwarding metadata (`# VPNPort` or `# Port Forwarding`). Severity: `important`. Automatically cleared when LND's announced `custom-external-host` matches the TunnelSats endpoint (or when switching target node to Core Lightning or disabling TunnelSats).
-  - `c-lightning:config`: Raised for Core Lightning when TunnelSats is enabled with a valid WireGuard configuration containing port-forwarding metadata (`# VPNPort` or `# Port Forwarding`). Severity: `important`. Automatically cleared when Core Lightning's announced `custom-external-host` matches the TunnelSats endpoint (or when switching target node to LND or disabling TunnelSats).
 
 ## Network & Privacy Disclosure
 
-- **Subscription Synchronization**: This package periodically queries `https://tunnelsats.com/api/public/v1/subscription/status` (via the background `subscription_sync_loop` in `bridge.py`) using your WireGuard public key to verify subscription validity, expiration date, and assigned port.
-- **IPv4-Only Routing**: TunnelSats WireGuard tunnels route IPv4 traffic only. Under StartOS host gateway routing, IPv6 connections to your Lightning node are blackholed by default to prevent leaking residential ISP IP addresses. If you enable **Allow Home IPv6 Coexistence**, raw IPv6 traffic bypasses the VPN.
+- **Subscription API & Status**: This package queries `https://api.tunnelsats.com` for server discovery, order generation, and on-demand subscription status / bandwidth usage using your WireGuard public key.
+- **IPv4 Routing & Full Egress Privacy**: TunnelSats WireGuard tunnels route IPv4 traffic. Outbound clearnet peer traffic is encapsulated within the VPN tunnel. If you enable **Allow Home IPv6 Coexistence**, raw IPv6 traffic bypasses the VPN.
 
 ## Development & Testing
 

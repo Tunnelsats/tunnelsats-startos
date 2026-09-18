@@ -2,53 +2,46 @@
 
 ## Getting Started
 
-1. **Obtain a Subscription**:
-   - Visit [TunnelSats.com](https://tunnelsats.com) and choose a subscription plan for your Lightning node.
-   - Download or copy your WireGuard configuration file (`.conf`).
+TunnelSats provides dedicated, privacy-focused WireGuard VPN infrastructure specifically designed for Lightning Network nodes (LND, Core Lightning, and Eclair).
 
-2. **Configure TunnelSats Companion Service**:
-   - In StartOS, navigate to **Services** &rarr; **TunnelSats** &rarr; **Configure**.
-   - Select your **Target Lightning Node** (`LND` or `Core Lightning`).
-   - Paste your WireGuard configuration into **WireGuard Configuration**.
-   - Set **Enable TunnelSats** to **ON** and click **Save**.
-   - The package validates your configuration, automatically ensures gateway markers (`# StartTunnel` and `# inbound: yes`) under `[Interface]`, and displays the ready-to-copy configuration.
+### Option 1: Native Storefront (Recommended)
+1. In StartOS, open the **TunnelSats Web Dashboard**.
+2. Select your target Lightning node (`LND`, `Core Lightning`, or `Eclair`) and your preferred plan duration (1, 3, 6, or 12 months).
+3. The package generates a fresh Curve25519 WireGuard keypair locally in-process on your device (your private key never leaves your server).
+4. Pay the Lightning invoice directly using WebLN or scan the BOLT11 QR code with any Lightning wallet.
+5. Once settled, TunnelSats automatically activates your subscription and routes clearnet peer traffic through the dedicated tunnel.
 
-3. **Add Gateway in StartOS**:
-   - In StartOS, navigate to **System** &rarr; **Gateways** &rarr; delete any existing TunnelSats gateway and add a new one with the configuration shown (updating an existing gateway cannot change its classification type).
-   - Select **WireGuard** and paste the configuration carrying the inbound markers.
-   - StartOS auto-classifies the gateway as **Inbound/Outbound**, enabling public port forwarding to port 9735 on your node.
-   - Connect the gateway.
+### Option 2: Bring Your Own Configuration
+1. If you already have an active TunnelSats WireGuard configuration, open **Services** &rarr; **TunnelSats** &rarr; **Configure** (or click "Bring Your Own Config" in the Web Dashboard).
+2. Select your **Target Lightning Node** and paste your `.conf` file.
+3. Toggle **Enable TunnelSats** to **ON** and save.
 
-4. **Target Node Host Announcement**:
-   - **Option A: 1-Click Automated Task (Recommended)**: When TunnelSats is enabled with a valid WireGuard configuration, StartOS automatically generates an **important** 1-Click task prompt on your server dashboard. Simply click and accept the prompt to populate your node's external host setting automatically.
-   - **Option B: Manual Configuration (Fallback)**: Alternatively, navigate to your target node (**Services** &rarr; **LND** or **Core Lightning**), open **Config** &rarr; **Custom External Host** (or **General Settings** for Core Lightning), and enter your TunnelSats endpoint (e.g. `ch1.tunnelsats.com:24556`).
+---
 
-5. **Enable Public Address Firewall Toggle**:
-   - In StartOS, open your target node (**LND** or **Core Lightning**).
-   - Go to **Interfaces** &rarr; **Peer Interface** (for LND) or **Peer** (for Core Lightning) &rarr; find your TunnelSats public IP (`<VPN_IP>:9735`).
-   - Toggle the switch to **ON**.
-   - 💡 **StartOS Port Check Prompt ("Address Requirements")**: StartOS will display an "Address Requirements" modal prompting to test port forwarding on port `9735:9735`. Because TunnelSats maps your dedicated external port (e.g. `24556`) rather than generic `9735`, clicking **"Test"** will fail. Simply **click "Later"** to save and proceed. This directs StartOS nftables to open the firewall and forward incoming peer connections from the VPN tunnel to your node.
+## In-Container Routing & Fail-Closed Privacy
 
-6. **Set Outbound Policy Routing (Required for Full Egress Privacy)**:
-   - In StartOS, open your target node (**Services** &rarr; **LND** or **Core Lightning** — *do not configure this on the TunnelSats service page*).
-   - Go to **Actions** &rarr; **Set Outbound Gateway** &rarr; select your **TunnelSats** gateway.
-   - ⚠️ **Full Egress Privacy**: StartOS defaults outbound traffic to "Auto"; importing a gateway does not automatically bind your Lightning node's outbound connections to it. Without setting TunnelSats as the outbound gateway, outbound peer traffic, gossip, and ping/pong acknowledgments continue through your residential ISP clearnet IP while advertising your TunnelSats address. Setting the outbound gateway ensures full-egress encapsulation and zero residential IP leakage.
+- **Full Egress Encapsulation**: Clearnet Lightning P2P traffic is routed directly inside your node's container over the WireGuard interface. Both inbound connections and outbound peer packets (gossip, handshakes, ping/pong acks) traverse the encrypted tunnel.
+- **Zero Residential IP Leakage**: Your home ISP IP address is never exposed to the clearnet Lightning Network.
+- **Tor Hybrid Coexistence**: Onion peer connections continue to route normally over the Tor network, while clearnet peer traffic is routed through TunnelSats.
+- **IPv4 Routing**: TunnelSats routes IPv4 traffic. Residential IPv6 traffic is disabled by default to prevent clearnet ISP address leaks.
 
-7. **Monitor & Manage**:
-   - Open the **Web Dashboard** to monitor subscription expiration, time remaining, and connection properties.
+---
 
-## ⚠️ Important Note on Multiple Lightning Nodes
+## Bandwidth & Renewals
 
-StartOS allocates the external host port per interface binding (the container port is always 9735) and retains it across restarts:
-- The standard Lightning P2P port is **9735**. TunnelSats WireGuard gateways forward incoming peer traffic specifically to host port 9735.
-- If multiple Lightning implementations are installed (e.g. both Core Lightning and LND), StartOS allocates external host port 9735 to the node installed first, while subsequent nodes are assigned arbitrary high host ports (e.g. 63989).
-- **Inbound TunnelSats traffic will only reach the node holding host port 9735.**
-- **Guidance**: Install the Lightning node you intend to use with TunnelSats before installing any other Lightning node. If another node was already installed first and claimed port 9735, uninstall the other node AND reinstall the target node so it rebinds to host port 9735.
+- **Monthly Allowance**: Subscriptions include 100 GB of transfer bandwidth per calendar month. Bandwidth counters reset automatically on the 1st of every month.
+- **On-Demand Telemetry**: Current bandwidth usage and subscription validity are fetched on-demand when opening the Web Dashboard.
+- **Proactive Renewal Alerts**: StartOS generates proactive notification tasks 7 days, 3 days, and 1 day before expiration. You can renew at any time via the Web Dashboard.
 
-## Network & Privacy Notice
+---
 
-- **Outbound Synchronization**: The TunnelSats background daemon periodically checks `https://tunnelsats.com/api/public/v1/subscription/status` using your WireGuard public key to synchronize expiration status and alert you before your subscription expires.
-- **IPv4 vs IPv6**: TunnelSats routes IPv4 traffic. Outbound IPv6 traffic is blackholed by default under StartOS gateway policy routing to prevent home ISP leaks.
+## Sovereign Config Export
+
+You retain full ownership and sovereignty over your cryptographic keys and WireGuard tunnel:
+- Download or copy your active `.conf` anytime via the **Web Dashboard** or the **Export WireGuard Configuration** action.
+- WireGuard configurations and subscription metadata are securely preserved in encrypted StartOS system backups.
+
+---
 
 ## Documentation
 

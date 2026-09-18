@@ -7,7 +7,7 @@ export const es_ES: LangDict = {
   3: 'Nodo Lightning de destino',
   4: 'Selecciona qué servicio Lightning en tu servidor StartOS recibirá las conexiones entrantes.',
   5: 'Configuración de WireGuard',
-  6: "Pega el contenido de tu archivo .conf de TunnelSats aquí. Los marcadores requeridos ('# StartTunnel' & '# inbound: yes') se agregarán automáticamente y se proporcionará una configuración copiable al guardar para pegarla en Sistema -> Puertas de enlace.",
+  6: 'Pega el contenido de tu archivo .conf de TunnelSats aquí.',
   7: 'Configurar',
   8: 'Ajustar la configuración de TunnelSats y WireGuard',
   9: 'Panel Web',
@@ -26,7 +26,7 @@ export const es_ES: LangDict = {
   22: 'La suscripción a TunnelSats caduca en <= 3 días. Renuévela para evitar interrupciones de conexión.',
   23: 'La suscripción a TunnelSats caduca en <= 7 días. Planifique su renovación para mantener el servicio activo.',
   24: 'Configuración guardada',
-  25: 'Agregue esto como una nueva puerta de enlace en Sistema → Puertas de enlace (elimine primero cualquier puerta de enlace de TunnelSats existente). Luego abra la interfaz Peer de su nodo para habilitar la dirección y asignar la puerta de enlace de salida (consulte las Instrucciones).',
+  25: 'La configuración de WireGuard de TunnelSats se ha guardado correctamente.',
 }
 
 export const de_DE: LangDict = {
@@ -36,7 +36,7 @@ export const de_DE: LangDict = {
   3: 'Ziel-Lightning-Knoten',
   4: 'Wählen Sie aus, welcher Lightning-Dienst auf Ihrem StartOS-Server eingehende Verbindungen empfangen soll.',
   5: 'WireGuard-Konfiguration',
-  6: "Fügen Sie hier den Inhalt Ihrer TunnelSats-.conf-Datei ein. Die erforderlichen Gateway-Markierungen ('# StartTunnel' & '# inbound: yes') werden automatisch hinzugefügt und beim Speichern wird eine kopierbare Konfiguration zum Einfügen unter System -> Gateways bereitgestellt.",
+  6: 'Fügen Sie hier den Inhalt Ihrer TunnelSats-.conf-Datei ein.',
   7: 'Konfigurieren',
   8: 'TunnelSats-Einstellungen und WireGuard-Konfiguration anpassen',
   9: 'Web-Dashboard',
@@ -55,7 +55,7 @@ export const de_DE: LangDict = {
   22: 'Das TunnelSats-Abonnement läuft in <= 3 Tagen ab. Bitte erneuern Sie das Abonnement, um Verbindungsunterbrechungen zu vermeiden.',
   23: 'Das TunnelSats-Abonnement läuft in <= 7 Tagen ab. Planen Sie Ihre Erneuerung, um Ausfallzeiten zu vermeiden.',
   24: 'Konfiguration gespeichert',
-  25: 'Fügen Sie dies als neues Gateway unter System → Gateways hinzu (löschen Sie vorher ein eventuell vorhandenes TunnelSats-Gateway). Öffnen Sie anschließend die Peer-Schnittstelle Ihres Knotens, um die Adresse zu aktivieren und das Outbound-Gateway zuzuweisen (siehe Anweisungen).',
+  25: 'Die TunnelSats WireGuard-Konfiguration wurde erfolgreich gespeichert.',
 }
 
 export const pl_PL: LangDict = {
@@ -65,7 +65,7 @@ export const pl_PL: LangDict = {
   3: 'Docelowy węzeł Lightning',
   4: 'Wybierz, która usługa Lightning na Twoim serwerze StartOS będzie odbierać połączenia przychodzące.',
   5: 'Konfiguracja WireGuard',
-  6: "Wklej tutaj zawartość pliku .conf TunnelSats. Wymagane znaczniki bramy ('# StartTunnel' & '# inbound: yes') zostaną dodane automatycznie, a po zapisaniu zostanie udostępniona gotowa konfiguracja do skopiowania do System -> Bramy.",
+  6: 'Wklej tutaj zawartość pliku .conf TunnelSats.',
   7: 'Konfiguruj',
   8: 'Dostosuj ustawienia TunnelSats i konfigurację WireGuard',
   9: 'Pulpit sieciowy',
@@ -84,7 +84,7 @@ export const pl_PL: LangDict = {
   22: 'Subskrypcja TunnelSats wygasa za <= 3 dni. Odnów subskrypcję, aby uniknąć przerw w połączeniu.',
   23: 'Subskrypcja TunnelSats wygasa za <= 7 dni. Zaplanuj odnowienie, aby utrzymać ciągłość działania.',
   24: 'Konfiguracja zapisana',
-  25: 'Dodaj to jako nową bramę w System → Bramy (najpierw usuń istniejącą bramę TunnelSats). Następnie otwórz interfejs Peer swojego węzła, aby włączyć adres i przypisać bramę wychodzącą (patrz Instrukcje).',
+  25: 'Konfiguracja WireGuard TunnelSats została pomyślnie zapisana.',
 }
 
 export const fr_FR: LangDict = {
@@ -94,7 +94,7 @@ export const fr_FR: LangDict = {
   3: 'Nœud Lightning cible',
   4: 'Sélectionnez le service Lightning sur votre serveur StartOS qui recevra les connexions entrantes.',
   5: 'Configuration WireGuard',
-  6: "Collez ici le contenu de votre fichier .conf TunnelSats. Les marqueurs de passerelle requis ('# StartTunnel' & '# inbound: yes') seront automatiquement ajoutés et une configuration copiable sera fournie lors de l'enregistrement pour être collée dans Système -> Passerelles.",
+  6: 'Collez ici le contenu de votre fichier .conf TunnelSats.',
   7: 'Configurer',
   8: 'Ajuster les paramètres de TunnelSats et la configuration WireGuard',
   9: 'Tableau de bord Web',
@@ -113,7 +113,7 @@ export const fr_FR: LangDict = {
   22: 'L’abonnement TunnelSats expire dans <= 3 jours. Renouvelez votre abonnement pour éviter toute interruption de connexion.',
   23: 'L’abonnement TunnelSats expire dans <= 7 jours. Planifiez votre renouvellement pour maintenir la disponibilité.',
   24: 'Configuration enregistrée',
-  25: "Ajoutez ceci en tant que nouvelle passerelle sous Système → Passerelles (supprimez d'abord toute passerelle TunnelSats existante). Ouvrez ensuite l'interface Peer de votre nœud pour activer l'adresse et assigner la passerelle sortante (voir Instructions).",
+  25: 'La configuration WireGuard de TunnelSats a été enregistrée avec succès.',
 }
 
 export default {
