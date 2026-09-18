@@ -32,6 +32,8 @@ def parse_config_comments(config_content):
             meta["expiresAt"] = match.group(1).strip()
         elif match := re.match(r"^#\s*(?:VPNPort|Port Forwarding):\s*(\d+)", line, re.IGNORECASE):
             meta["vpnPort"] = int(match.group(1))
+        elif match := re.match(r"^#\s*Server:\s*(.+)", line, re.IGNORECASE):
+            meta["serverDomain"] = match.group(1).strip()
     return meta
 
 def is_valid_iso_expiry(expiry_str):
@@ -844,13 +846,19 @@ def get_status():
             with open(CONFIG_PATH, "r") as f:
                 content = f.read()
             vpn_port = extract_vpn_port(content)
-            match = re.search(r"^\s*(?!#|;)\s*Endpoint\s*=\s*([^\s#:]+)", content, re.IGNORECASE | re.MULTILINE)
-            if match:
-                server_domain = match.group(1)
+            server_match = re.search(r"^#\s*Server:\s*([^\s#]+)", content, re.IGNORECASE | re.MULTILINE)
+            if server_match:
+                server_domain = server_match.group(1).strip()
+            else:
+                endpoint_match = re.search(r"^\s*(?!#|;)\s*Endpoint\s*=\s*([^\s#:]+)", content, re.IGNORECASE | re.MULTILINE)
+                if endpoint_match:
+                    server_domain = endpoint_match.group(1).strip()
         except Exception:
             pass
 
     sub_info = get_subscription_info()
+    if (server_domain == "Unknown" or not server_domain) and sub_info.get("serverDomain"):
+        server_domain = sub_info["serverDomain"]
 
     if not enabled:
         status = "disabled"

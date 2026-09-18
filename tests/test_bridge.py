@@ -83,6 +83,7 @@ class TestBridgeKeygenAndConfig(unittest.TestCase):
                     "Address = 10.9.0.2/32\n"
                     "# VPNPort: 24556\n"
                     "# Valid Until: 2026-12-31T23:59:59Z\n"
+                    "# Server: ch1.tunnelsats.com\n"
                     "\n"
                     "[Peer]\n"
                     "PublicKey = bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb=\n"
@@ -107,6 +108,7 @@ class TestBridgeKeygenAndConfig(unittest.TestCase):
                     meta_data = json.load(f)
                     self.assertEqual(meta_data.get("vpnPort"), 24556)
                     self.assertEqual(meta_data.get("expiresAt"), "2026-12-31T23:59:59Z")
+                    self.assertEqual(meta_data.get("serverDomain"), "ch1.tunnelsats.com")
 
                 # Verify files have 0600 owner-only permissions
                 self.assertEqual(os.stat(conf_file).st_mode & 0o777, 0o600)
@@ -158,3 +160,29 @@ class TestBridgeKeygenAndConfig(unittest.TestCase):
                 bridge.CONFIG_PATH = orig_conf
                 bridge.APP_CONFIG_PATH = orig_app
                 bridge.META_FILE_PATH = orig_meta
+
+    def test_get_status_server_identifier(self):
+        import tempfile
+        with tempfile.TemporaryDirectory() as tmpdir:
+            conf_file = os.path.join(tmpdir, "tunnelsatsv3.conf")
+            orig_conf = bridge.CONFIG_PATH
+            try:
+                bridge.CONFIG_PATH = conf_file
+                sample_conf = (
+                    "[Interface]\n"
+                    "PrivateKey = aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa=\n"
+                    "Address = 10.9.0.2/32\n"
+                    "# VPNPort: 24556\n"
+                    "# Server: de2.tunnelsats.com\n"
+                    "[Peer]\n"
+                    "PublicKey = bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb=\n"
+                    "Endpoint = 198.51.100.1:51820\n"
+                )
+                with open(conf_file, "w") as f:
+                    f.write(sample_conf)
+
+                status = bridge.get_status()
+                # Ensure server is preferred from # Server: even when Endpoint is a raw IP
+                self.assertEqual(status["server"], "de2.tunnelsats.com")
+            finally:
+                bridge.CONFIG_PATH = orig_conf

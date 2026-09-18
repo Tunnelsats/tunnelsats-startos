@@ -569,9 +569,14 @@ function openRenewalModal() {
   const pubkeyEl = document.getElementById('renewal-pubkey')
   const expiryEl = document.getElementById('renewal-current-expiry')
 
-  if (serverDomainEl)
-    serverDomainEl.textContent =
-      statusData.public_ip || statusData.server || '...'
+  const serverDisplay =
+    statusData.server && statusData.server !== 'Unknown'
+      ? statusData.server
+      : statusData.public_ip && statusData.public_ip !== 'Unknown'
+        ? statusData.public_ip
+        : '...'
+
+  if (serverDomainEl) serverDomainEl.textContent = serverDisplay
   if (pubkeyEl) pubkeyEl.textContent = statusData.pubkey || '...'
   if (expiryEl) expiryEl.textContent = statusData.expiry_formatted || '...'
 
@@ -589,7 +594,28 @@ async function startRenewalCheckout() {
   setPaymentStatus('Requesting renewal invoice...', 'pulse-amber')
 
   const pubkey = statusData.pubkey
-  const serverId = statusData.public_ip || statusData.server
+
+  // Derive the canonical server identifier for renewal, ensuring we never send a raw IP address or 'Unknown'
+  let serverId = ''
+  if (statusData.server && statusData.server !== 'Unknown') {
+    serverId = statusData.server
+  } else if (
+    statusData.server_domain &&
+    statusData.server_domain !== 'Unknown'
+  ) {
+    serverId = statusData.server_domain
+  } else if (
+    statusData.public_ip &&
+    statusData.public_ip !== 'Unknown' &&
+    !/^\d{1,3}(\.\d{1,3}){3}$/.test(statusData.public_ip)
+  ) {
+    serverId = statusData.public_ip
+  }
+
+  // Fallback to default region if not determinable from status
+  if (!serverId) {
+    serverId = 'eu-de'
+  }
 
   try {
     const res = await fetch(
