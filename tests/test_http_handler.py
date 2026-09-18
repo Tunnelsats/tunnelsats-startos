@@ -223,13 +223,13 @@ class TestHTTPHandler(unittest.TestCase):
         handler.headers = DummyHeaders({
             "Host": "localhost",
             "Content-Type": "text/plain",
-            "X-Requested-With": "XMLHttpRequest"
+            "X-CSRF-Token": bridge.get_csrf_token()
         })
         handler.send_error = MagicMock()
         bridge.DashboardHTTPRequestHandler.do_POST(handler)
         handler.send_error.assert_called_with(415, "Unsupported Media Type: application/json required")
 
-        # 2. Reject POST without custom CSRF header
+        # 2. Reject POST without custom CSRF header or with invalid token
         handler2 = bridge.DashboardHTTPRequestHandler.__new__(bridge.DashboardHTTPRequestHandler)
         handler2.command = "POST"
         handler2.client_address = ("127.0.0.1", 12345)
@@ -240,7 +240,20 @@ class TestHTTPHandler(unittest.TestCase):
         })
         handler2.send_error = MagicMock()
         bridge.DashboardHTTPRequestHandler.do_POST(handler2)
-        handler2.send_error.assert_called_with(403, "Missing required CSRF header")
+        handler2.send_error.assert_called_with(403, "Invalid or missing CSRF token")
+
+        handler2_invalid = bridge.DashboardHTTPRequestHandler.__new__(bridge.DashboardHTTPRequestHandler)
+        handler2_invalid.command = "POST"
+        handler2_invalid.client_address = ("127.0.0.1", 12345)
+        handler2_invalid.path = "/api/config/save"
+        handler2_invalid.headers = DummyHeaders({
+            "Host": "localhost",
+            "Content-Type": "application/json",
+            "X-CSRF-Token": "invalid-token-123"
+        })
+        handler2_invalid.send_error = MagicMock()
+        bridge.DashboardHTTPRequestHandler.do_POST(handler2_invalid)
+        handler2_invalid.send_error.assert_called_with(403, "Invalid or missing CSRF token")
 
         # 3. Reject POST with cross-site Origin
         handler3 = bridge.DashboardHTTPRequestHandler.__new__(bridge.DashboardHTTPRequestHandler)
@@ -250,7 +263,7 @@ class TestHTTPHandler(unittest.TestCase):
         handler3.headers = DummyHeaders({
             "Host": "localhost",
             "Content-Type": "application/json",
-            "X-Requested-With": "XMLHttpRequest",
+            "X-CSRF-Token": bridge.get_csrf_token(),
             "Origin": "https://evil.com"
         })
         handler3.send_error = MagicMock()
@@ -265,17 +278,19 @@ class TestHTTPHandler(unittest.TestCase):
         handler4.headers = DummyHeaders({
             "Host": "localhost",
             "Content-Type": "application/json",
-            "X-Requested-With": "XMLHttpRequest",
+            "X-CSRF-Token": bridge.get_csrf_token(),
             "Sec-Fetch-Site": "cross-site"
         })
         handler4.send_error = MagicMock()
         bridge.DashboardHTTPRequestHandler.do_POST(handler4)
         handler4.send_error.assert_called_with(403, "Cross-site request rejected")
 
+    @patch('os.path.exists')
     @patch('bridge.save_configuration')
     @patch('bridge.get_default_gateway')
-    def test_do_POST_save_config_success(self, mock_get_gw, mock_save_config):
+    def test_do_POST_save_config_success(self, mock_get_gw, mock_save_config, mock_path_exists):
         mock_get_gw.return_value = "172.18.0.1"
+        mock_path_exists.return_value = False
 
         req_body = json.dumps({
             "config": "[Interface]\nPrivateKey = abc=\n",
@@ -290,7 +305,7 @@ class TestHTTPHandler(unittest.TestCase):
             "Host": "localhost",
             "Content-Type": "application/json",
             "Content-Length": str(len(req_body)),
-            "X-Requested-With": "XMLHttpRequest"
+            "X-CSRF-Token": bridge.get_csrf_token()
         })
         handler.rfile = BytesIO(req_body)
         wfile = BytesIO()
@@ -308,6 +323,67 @@ class TestHTTPHandler(unittest.TestCase):
         self.assertEqual(res.get("message"), "Configuration saved. Complete activation under StartOS System → Gateways.")
         # Ensure it does NOT claim to have activated the configuration
         self.assertNotIn("activated", res.get("message").lower())
+
+    @patch('bridge.get_subscription_info')
+    @patch('os.path.exists')
+    @patch('bridge.get_default_gateway')
+    def test_do_POST_save_config_active_config_rejected(self, mock_get_gw, mock_path_exists, mock_sub_info):
+        mock_get_gw.return_value = "172.18.0.1"
+        mock_path_exists.return_value = True
+        mock_sub_info.return_value = {
+            "linked": True,
+            "isExpired": False
+        }
+
+        req_body = json.dumps({
+            "config": "[Interface]\nPrivateKey = attacker=\n",
+            "target_node": "lnd"
+        }).encode("utf-8")
+
+        handler = bridge.DashboardHTTPRequestHandler.__new__(bridge.DashboardHTTPRequestHandler)
+        handler.command = "POST"
+        handler.client_address = ("127.0.0.1", 12345)
+        handler.path = "/api/config/save"
+        handler.headers = DummyHeaders({
+            "Host": "localhost",
+            "Content-Type": "application/json",
+            "Content-Length": str(len(req_body)),
+            "X-CSRF-Token": bridge.get_csrf_token()
+        })
+        handler.rfile = BytesIO(req_body)
+        wfile = BytesIO()
+        handler.wfile = wfile
+        handler.send_response = MagicMock()
+        handler.send_header = MagicMock()
+        handler.end_headers = MagicMock()
+
+        bridge.DashboardHTTPRequestHandler.do_POST(handler)
+
+        handler.send_response.assert_called_with(403)
+        res = json.loads(wfile.getvalue().decode("utf-8"))
+        self.assertIn("Active configuration already present", res.get("error", ""))
+
+    @patch('bridge.get_default_gateway')
+    def test_do_GET_api_csrf(self, mock_get_gw):
+        mock_get_gw.return_value = "172.18.0.1"
+
+        handler = bridge.DashboardHTTPRequestHandler.__new__(bridge.DashboardHTTPRequestHandler)
+        handler.client_address = ("127.0.0.1", 12345)
+        handler.path = "/api/csrf"
+        handler.headers = DummyHeaders({
+            "Host": "localhost"
+        })
+        wfile = BytesIO()
+        handler.wfile = wfile
+        handler.send_response = MagicMock()
+        handler.send_header = MagicMock()
+        handler.end_headers = MagicMock()
+
+        bridge.DashboardHTTPRequestHandler.do_GET(handler)
+
+        handler.send_response.assert_called_with(200)
+        res = json.loads(wfile.getvalue().decode("utf-8"))
+        self.assertEqual(res.get("csrf_token"), bridge.get_csrf_token())
 
 if __name__ == '__main__':
     unittest.main()

@@ -23,6 +23,21 @@ os.umask(0o077)
 
 _enabled_cache = None
 _enabled_cache_mtime = 0
+_csrf_token = None
+
+def get_csrf_token():
+    global _csrf_token
+    if _csrf_token is None:
+        import secrets
+        _csrf_token = secrets.token_hex(32)
+    return _csrf_token
+
+def validate_csrf_token(token):
+    if not token or not isinstance(token, str):
+        return False
+    import hmac
+    return hmac.compare_digest(token.strip(), get_csrf_token())
+
 
 def parse_config_comments(config_content):
     meta = {}
@@ -489,9 +504,9 @@ class DashboardHTTPRequestHandler(BaseHTTPRequestHandler):
                 self.send_error(415, "Unsupported Media Type: application/json required")
                 return False
 
-            csrf_token = self.headers.get("X-Requested-With") or self.headers.get("X-TunnelSats-CSRF")
-            if not csrf_token:
-                self.send_error(403, "Missing required CSRF header")
+            csrf_token = self.headers.get("X-CSRF-Token") or self.headers.get("X-TunnelSats-CSRF")
+            if not validate_csrf_token(csrf_token):
+                self.send_error(403, "Invalid or missing CSRF token")
                 return False
 
             fetch_site = self.headers.get("Sec-Fetch-Site", "").lower()
@@ -549,33 +564,19 @@ class DashboardHTTPRequestHandler(BaseHTTPRequestHandler):
                 "last_sync": status_data.get("last_sync"),
                 "bandwidth_used_gb": status_data.get("bandwidth_used_gb", 0.0),
                 "bandwidth_limit_gb": 100,
+                "csrf_token": get_csrf_token(),
             }
             self.wfile.write(json.dumps(response).encode("utf-8"))
             return
 
-        if path_only == "/api/config/export":
+        if path_only == "/api/csrf":
             if not self.is_trusted_request():
                 return
-
-            if os.path.exists(CONFIG_PATH):
-                try:
-                    with open(CONFIG_PATH, "r") as f:
-                        conf_content = f.read()
-                    self.send_response(200)
-                    self.send_header("Content-Type", "text/plain; charset=utf-8")
-                    self.send_header("Content-Disposition", 'attachment; filename="tunnelsats.conf"')
-                    self.end_headers()
-                    self.wfile.write(conf_content.encode("utf-8"))
-                    return
-                except Exception as e:
-                    self.send_error(500, f"Error reading configuration: {e}")
-                    return
-            else:
-                self.send_response(404)
-                self.send_header("Content-Type", "application/json")
-                self.end_headers()
-                self.wfile.write(json.dumps({"error": "No active WireGuard configuration"}).encode("utf-8"))
-                return
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.end_headers()
+            self.wfile.write(json.dumps({"csrf_token": get_csrf_token()}).encode("utf-8"))
+            return
 
         web_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "web"))
         target_path = path_only.lstrip("/")
@@ -588,6 +589,20 @@ class DashboardHTTPRequestHandler(BaseHTTPRequestHandler):
             return
 
         if os.path.exists(safe_path) and os.path.isfile(safe_path):
+            if safe_path.endswith(".html"):
+                try:
+                    with open(safe_path, "r", encoding="utf-8") as f:
+                        html_content = f.read()
+                    csrf_tag = f'<meta name="csrf-token" content="{get_csrf_token()}">\n</head>'
+                    html_content = html_content.replace("</head>", csrf_tag, 1)
+                    self.send_response(200)
+                    self.send_header("Content-Type", "text/html; charset=utf-8")
+                    self.end_headers()
+                    self.wfile.write(html_content.encode("utf-8"))
+                    return
+                except Exception:
+                    pass
+
             self.send_response(200)
             if safe_path.endswith(".html"):
                 self.send_header("Content-Type", "text/html")
@@ -628,6 +643,18 @@ class DashboardHTTPRequestHandler(BaseHTTPRequestHandler):
 
         if path_only == "/api/config/save":
             try:
+                # Protect active configuration from unauthenticated replacement
+                if os.path.exists(CONFIG_PATH):
+                    sub_info = get_subscription_info()
+                    if sub_info.get("linked") and not sub_info.get("isExpired"):
+                        self.send_response(403)
+                        self.send_header("Content-Type", "application/json")
+                        self.end_headers()
+                        self.wfile.write(json.dumps({
+                            "error": "Active configuration already present. Replacing an active configuration requires operator authentication in StartOS (Services → TunnelSats → Configure)."
+                        }).encode("utf-8"))
+                        return
+
                 content_length = int(self.headers.get('Content-Length', 0))
                 body = self.rfile.read(content_length).decode('utf-8')
                 data = json.loads(body)

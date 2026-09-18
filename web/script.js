@@ -25,6 +25,13 @@ async function fetchStatus(force = false) {
   }
 }
 
+function getCsrfToken() {
+  const meta = document.querySelector('meta[name="csrf-token"]')
+  if (meta && meta.content) return meta.content
+  if (statusData && statusData.csrf_token) return statusData.csrf_token
+  return ''
+}
+
 function updateUI() {
   const isConfigured = Boolean(statusData.configured && statusData.enabled)
   const storefrontView = document.getElementById('view-storefront')
@@ -291,7 +298,8 @@ async function generateKeys() {
       headers: {
         'Content-Type': 'application/json',
         'X-Requested-With': 'XMLHttpRequest',
-        'X-TunnelSats-CSRF': '1',
+        'X-TunnelSats-CSRF': getCsrfToken(),
+        'X-CSRF-Token': getCsrfToken(),
       },
     })
     if (res.ok) {
@@ -491,7 +499,8 @@ async function claimAndSaveConfig(paymentHash, keypair) {
       headers: {
         'Content-Type': 'application/json',
         'X-Requested-With': 'XMLHttpRequest',
-        'X-TunnelSats-CSRF': '1',
+        'X-TunnelSats-CSRF': getCsrfToken(),
+        'X-CSRF-Token': getCsrfToken(),
       },
       body: JSON.stringify({
         config: fullConfig,
@@ -541,7 +550,8 @@ async function saveManualConfig() {
       headers: {
         'Content-Type': 'application/json',
         'X-Requested-With': 'XMLHttpRequest',
-        'X-TunnelSats-CSRF': '1',
+        'X-TunnelSats-CSRF': getCsrfToken(),
+        'X-CSRF-Token': getCsrfToken(),
       },
       body: JSON.stringify({ config: conf, target_node: selectedNode }),
     })
@@ -782,7 +792,19 @@ function pollRenewalSettlement(paymentHash) {
 // Export Configuration
 // ─────────────────────────────────────────────
 function exportConfiguration() {
-  window.location.href = '/api/config/export'
+  const modal = document.getElementById('export-modal')
+  if (modal) {
+    modal.showModal()
+  } else {
+    alert(
+      'To export your WireGuard configuration with your private key securely masked, navigate to StartOS Actions → Export WireGuard Configuration.',
+    )
+  }
+}
+
+function closeExportModal() {
+  const modal = document.getElementById('export-modal')
+  if (modal) modal.close()
 }
 
 // ─────────────────────────────────────────────
@@ -887,22 +909,26 @@ function fallbackCopy(text, btn, successText) {
 }
 
 // Modal Backdrop Click Handlers
-;['bandwidth-modal', 'payment-modal', 'renewal-modal', 'faq-modal'].forEach(
-  (id) => {
-    const modal = document.getElementById(id)
-    if (modal) {
-      modal.addEventListener('click', (e) => {
-        if (e.target === modal) {
-          modal.close()
-          if (id === 'payment-modal' && activePollingInterval) {
-            clearInterval(activePollingInterval)
-            activePollingInterval = null
-          }
+;[
+  'bandwidth-modal',
+  'payment-modal',
+  'renewal-modal',
+  'faq-modal',
+  'export-modal',
+].forEach((id) => {
+  const modal = document.getElementById(id)
+  if (modal) {
+    modal.addEventListener('click', (e) => {
+      if (e.target === modal) {
+        modal.close()
+        if (id === 'payment-modal' && activePollingInterval) {
+          clearInterval(activePollingInterval)
+          activePollingInterval = null
         }
-      })
-    }
-  },
-)
+      }
+    })
+  }
+})
 
 // Initial Status Fetch
 fetchStatus()

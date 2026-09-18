@@ -780,6 +780,79 @@
     </dialog>
 
     <!-- ════════════════════════════════════════════ -->
+    <!-- Export Configuration Modal                   -->
+    <!-- ════════════════════════════════════════════ -->
+    <dialog
+      id="export-modal"
+      class="app-modal"
+      aria-labelledby="export-modal-title"
+      aria-modal="true"
+    >
+      <div class="modal-dialog-inner modal-sm">
+        <div class="modal-header">
+          <div class="modal-title-row">
+            <svg
+              class="modal-title-icon"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+            >
+              <rect x="3" y="11" width="18" height="11" rx="2" ry="2" />
+              <path d="M7 11V7a5 5 0 0 1 10 0v4" />
+            </svg>
+            <h2 id="export-modal-title">Export WireGuard Config</h2>
+          </div>
+          <button
+            class="modal-close-btn"
+            onclick="closeExportModal()"
+            aria-label="Close modal"
+          >
+            ✕
+          </button>
+        </div>
+        <div class="modal-body">
+          <div class="info-box" style="margin-bottom: 16px">
+            <p
+              style="
+                margin: 0;
+                line-height: 1.5;
+                font-size: 13.5px;
+                color: var(--text-primary);
+              "
+            >
+              To protect your private WireGuard cryptographic key from
+              unauthenticated disclosure, full configuration export is managed
+              securely through the authenticated StartOS interface.
+            </p>
+          </div>
+          <ol
+            style="
+              margin: 0 0 16px 20px;
+              padding: 0;
+              font-size: 13px;
+              line-height: 1.6;
+              color: var(--text-secondary);
+            "
+          >
+            <li>
+              Go to <strong>Services → TunnelSats → Actions</strong> in StartOS.
+            </li>
+            <li>Select <strong>Export WireGuard Configuration</strong>.</li>
+            <li>Copy or download your complete configuration.</li>
+          </ol>
+          <div class="modal-footer-actions">
+            <button class="btn-primary-glow w-100" onclick="closeExportModal()">
+              Understood
+            </button>
+          </div>
+        </div>
+      </div>
+    </dialog>
+
+    <!-- ════════════════════════════════════════════ -->
     <!-- FAQ Modal                                    -->
     <!-- ════════════════════════════════════════════ -->
     <dialog
@@ -982,14 +1055,12 @@
               </p>
               <ul>
                 <li>
-                  <strong>Web UI:</strong> Click
-                  <strong>Export WireGuard Config</strong> in the action bar
-                  below to download <code>tunnelsats.conf</code>.
-                </li>
-                <li>
-                  <strong>StartOS Actions:</strong> Open TunnelSats → Actions →
+                  <strong>StartOS Actions (Secure & Authenticated):</strong>
+                  Open TunnelSats → Actions →
                   <strong>Export WireGuard Configuration</strong> to view and
-                  copy your configuration.
+                  copy your configuration. Exporting via StartOS Actions
+                  requires operator authentication to protect your private
+                  cryptographic key.
                 </li>
               </ul>
               <p class="faq-note">
