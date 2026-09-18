@@ -49,9 +49,15 @@ test('validateWireguardKey accurately discriminates valid and invalid key string
   assert.equal(validateWireguardKey(undefined), false)
   assert.equal(validateWireguardKey(''), false)
   assert.equal(validateWireguardKey('shortKey=='), false)
-  assert.equal(validateWireguardKey('invalid_characters_in_key_not_base64_12345678='), false)
+  assert.equal(
+    validateWireguardKey('invalid_characters_in_key_not_base64_12345678='),
+    false,
+  )
   // 44 chars but decodes to wrong length
-  assert.equal(validateWireguardKey('AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA'), false)
+  assert.equal(
+    validateWireguardKey('AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA'),
+    false,
+  )
 
   // 32-byte valid base64 key
   const validKey = Buffer.alloc(32, 7).toString('base64')

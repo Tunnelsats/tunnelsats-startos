@@ -3,6 +3,7 @@ import assert from 'node:assert/strict'
 import { exportConfig } from '../startos/actions/exportConfig'
 import { tunnelsatsConf } from '../startos/fileModels/tunnelsatsConf'
 import { configJson } from '../startos/fileModels/config.json'
+import { ensureInboundMarker } from '../startos/utils'
 
 test('exportConfig action is registered with correct metadata', () => {
   assert.equal(exportConfig.id, 'export-config')
@@ -17,15 +18,17 @@ test('exportConfig returns No Configuration Found when no config is present', as
   const origTunnelsatsConfRead = tunnelsatsConf.read
   const origConfigJsonRead = configJson.read
 
-  tunnelsatsConf.read = () => ({
-    once: async () => null,
-    const: async () => null,
-  }) as any
+  tunnelsatsConf.read = () =>
+    ({
+      once: async () => null,
+      const: async () => null,
+    }) as any
 
-  configJson.read = () => ({
-    once: async () => null,
-    const: async () => null,
-  }) as any
+  configJson.read = () =>
+    ({
+      once: async () => null,
+      const: async () => null,
+    }) as any
 
   try {
     const response = await (exportConfig as any).run({ effects: {} })
@@ -50,10 +53,11 @@ PublicKey = DUMMY_SERVER_KEY_FOR_TESTING_123456789012345=
 Endpoint = de2.tunnelsats.com:51820
 `
   const origTunnelsatsConfRead = tunnelsatsConf.read
-  tunnelsatsConf.read = () => ({
-    once: async () => sampleConf,
-    const: async () => sampleConf,
-  }) as any
+  tunnelsatsConf.read = () =>
+    ({
+      once: async () => sampleConf,
+      const: async () => sampleConf,
+    }) as any
 
   try {
     const response = await (exportConfig as any).run({ effects: {} })
@@ -61,7 +65,9 @@ Endpoint = de2.tunnelsats.com:51820
     assert.equal(response.title, 'Active WireGuard Configuration')
     assert.ok(response.result)
     assert.equal(response.result.type, 'single')
-    assert.equal(response.result.value, sampleConf.trim())
+    assert.equal(response.result.value, ensureInboundMarker(sampleConf.trim()))
+    assert.match(response.result.value, /# StartTunnel/)
+    assert.match(response.result.value, /# inbound: yes/)
     assert.equal(response.result.copyable, true)
     assert.equal(response.result.masked, true)
     assert.equal(response.result.qr, false)

@@ -1,7 +1,7 @@
 import { sdk } from '../sdk'
 import { configJson } from '../fileModels/config.json'
 import { tunnelsatsConf } from '../fileModels/tunnelsatsConf'
-import { validateWireguardConfig } from '../utils'
+import { validateWireguardConfig, ensureInboundMarker } from '../utils'
 import { i18n } from '../i18n'
 import { rm } from 'node:fs/promises'
 
@@ -75,6 +75,7 @@ export const configure = sdk.Action.withInput(
       if (!validation.valid) {
         throw new Error(validation.error || 'Invalid WireGuard configuration')
       }
+      processedConf = ensureInboundMarker(processedConf)
     }
 
     await configJson.merge(effects, {
@@ -96,7 +97,7 @@ export const configure = sdk.Action.withInput(
         version: '1' as const,
         title: i18n('Configuration Saved'),
         message: i18n(
-          'TunnelSats WireGuard configuration has been saved successfully.',
+          "Add this as a new gateway under System → Gateways (delete any existing TunnelSats gateway first). Then open your node's Peer interface to enable the address and assign the Outbound Gateway (see Instructions).",
         ),
         result: {
           type: 'single' as const,

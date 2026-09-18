@@ -126,10 +126,33 @@ def generate_wg_keypair():
     except Exception as e:
         raise RuntimeError(f"Unable to generate WireGuard keypair: {e}")
 
+def ensure_inbound_markers(conf_content):
+    if not conf_content or not conf_content.strip():
+        return conf_content
+    lines = conf_content.splitlines()
+    has_start_tunnel = any(line.strip().lower() in ("# starttunnel", "starttunnel") for line in lines)
+    has_inbound_yes = any(line.strip() == "# inbound: yes" for line in lines)
+    if has_start_tunnel and has_inbound_yes:
+        return conf_content
+
+    markers = []
+    if not has_start_tunnel:
+        markers.append("# StartTunnel")
+    if not has_inbound_yes:
+        markers.append("# inbound: yes")
+
+    for i, line in enumerate(lines):
+        if re.match(r"^\s*\[Interface\]\s*$", line, re.IGNORECASE):
+            for m in reversed(markers):
+                lines.insert(i + 1, m)
+            return "\n".join(lines) + ("\n" if conf_content.endswith("\n") else "")
+    return "\n".join(markers) + "\n" + conf_content
+
 def save_configuration(conf_content, target_node="lnd"):
     if target_node not in ("lnd", "cln"):
         target_node = "lnd"
     validate_config(conf_content)
+    conf_content = ensure_inbound_markers(conf_content)
     atomic_write_file(CONFIG_PATH, conf_content)
 
     app_config = {}

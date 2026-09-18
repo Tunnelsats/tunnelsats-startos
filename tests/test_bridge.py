@@ -94,7 +94,10 @@ class TestBridgeKeygenAndConfig(unittest.TestCase):
 
                 self.assertTrue(os.path.exists(conf_file))
                 with open(conf_file, "r") as f:
-                    self.assertEqual(f.read(), sample_conf)
+                    saved_conf = f.read()
+                    self.assertIn("# StartTunnel\n", saved_conf)
+                    self.assertIn("# inbound: yes\n", saved_conf)
+                    self.assertIn("PrivateKey = aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa=\n", saved_conf)
 
                 self.assertTrue(os.path.exists(app_conf_file))
                 with open(app_conf_file, "r") as f:
@@ -186,3 +189,27 @@ class TestBridgeKeygenAndConfig(unittest.TestCase):
                 self.assertEqual(status["server"], "de2.tunnelsats.com")
             finally:
                 bridge.CONFIG_PATH = orig_conf
+
+    def test_ensure_inbound_markers_injection_and_preservation(self):
+        conf_without = (
+            "[Interface]\n"
+            "PrivateKey = key=\n"
+            "Address = 10.9.0.2/32\n"
+        )
+        marked = bridge.ensure_inbound_markers(conf_without)
+        self.assertIn("# StartTunnel\n", marked)
+        self.assertIn("# inbound: yes\n", marked)
+
+        # Idempotent preservation
+        self.assertEqual(bridge.ensure_inbound_markers(marked), marked)
+
+        # Handles non-canonical casing by adding canonical # inbound: yes
+        non_canon = (
+            "[Interface]\n"
+            "# StartTunnel\n"
+            "# Inbound: Yes\n"
+            "PrivateKey = key=\n"
+        )
+        marked_non_canon = bridge.ensure_inbound_markers(non_canon)
+        self.assertIn("# inbound: yes\n", marked_non_canon)
+        self.assertIn("# Inbound: Yes\n", marked_non_canon)

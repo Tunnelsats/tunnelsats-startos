@@ -69,7 +69,12 @@ function startMockApiServer(): Promise<{ server: Server; url: string }> {
             )
           } else {
             res.writeHead(400)
-            res.end(JSON.stringify({ error: 'INVALID_SERVER', message: 'Unknown server' }))
+            res.end(
+              JSON.stringify({
+                error: 'INVALID_SERVER',
+                message: 'Unknown server',
+              }),
+            )
           }
           return
         }

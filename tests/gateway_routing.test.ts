@@ -1,6 +1,9 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { getTargetGatewayConfig } from '../startos/dependencies'
+import {
+  getTargetGatewayConfig,
+  getGatewayTaskDetails,
+} from '../startos/dependencies'
 
 test('getTargetGatewayConfig returns null when disabled or unconfigured', () => {
   assert.equal(getTargetGatewayConfig(null), null)
@@ -57,4 +60,19 @@ Endpoint = ch1.tunnelsats.com:51820
     gatewayName: 'tunnelsats',
     announceEndpoint: 'ch1.tunnelsats.com:24556',
   })
+})
+
+test('getGatewayTaskDetails provides clear reasons and target actions', () => {
+  const lndDetails = getGatewayTaskDetails('lnd', 'ch1.tunnelsats.com:24556')
+  assert.equal(lndDetails.targetPackage, 'lnd')
+  assert.equal(lndDetails.clearTaskKey, 'c-lightning:config')
+  assert.match(lndDetails.reason, /Advertise TunnelSats VPN endpoint/i)
+
+  const clnDetails = getGatewayTaskDetails(
+    'c-lightning',
+    'ch1.tunnelsats.com:24556',
+  )
+  assert.equal(clnDetails.targetPackage, 'c-lightning')
+  assert.equal(clnDetails.clearTaskKey, 'lnd:custom-external-host-config')
+  assert.match(clnDetails.reason, /Advertise TunnelSats VPN endpoint/i)
 })

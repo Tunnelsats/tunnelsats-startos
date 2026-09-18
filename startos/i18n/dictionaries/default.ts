@@ -26,7 +26,7 @@ const dict = {
   'TunnelSats subscription expires in <= 3 days. Renew subscription to avoid connection disruption.': 22,
   'TunnelSats subscription expires in <= 7 days. Plan your renewal to maintain uptime.': 23,
   'Configuration Saved': 24,
-  'TunnelSats WireGuard configuration has been saved successfully.': 25,
+  "Add this as a new gateway under System → Gateways (delete any existing TunnelSats gateway first). Then open your node's Peer interface to enable the address and assign the Outbound Gateway (see Instructions).": 25,
   'Export WireGuard Configuration': 26,
   'View and export the active TunnelSats WireGuard configuration file (.conf).': 27,
   'No Configuration Found': 28,
