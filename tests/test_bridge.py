@@ -107,6 +107,11 @@ class TestBridgeKeygenAndConfig(unittest.TestCase):
                     meta_data = json.load(f)
                     self.assertEqual(meta_data.get("vpnPort"), 24556)
                     self.assertEqual(meta_data.get("expiresAt"), "2026-12-31T23:59:59Z")
+
+                # Verify files have 0600 owner-only permissions
+                self.assertEqual(os.stat(conf_file).st_mode & 0o777, 0o600)
+                self.assertEqual(os.stat(app_conf_file).st_mode & 0o777, 0o600)
+                self.assertEqual(os.stat(meta_file).st_mode & 0o777, 0o600)
             finally:
                 bridge.CONFIG_PATH = orig_conf
                 bridge.APP_CONFIG_PATH = orig_app

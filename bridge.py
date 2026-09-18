@@ -19,6 +19,8 @@ APP_CONFIG_PATH = os.path.join(DATA_DIR, "config.json")
 META_FILE_PATH = os.path.join(DATA_DIR, "tunnelsats-meta.json")
 TUNNELSATS_API_URL = "https://tunnelsats.com/api/public/v1"
 
+os.umask(0o077)
+
 _enabled_cache = None
 _enabled_cache_mtime = 0
 
@@ -42,12 +44,18 @@ def is_valid_iso_expiry(expiry_str):
     except Exception:
         return False
 
-def atomic_write_json(filepath, data):
+def atomic_write_json(filepath, data, mode=0o600):
     tmp_path = filepath + ".tmp"
     try:
-        with open(tmp_path, 'w') as f:
-            json.dump(data, f, indent=2)
+        content = json.dumps(data, indent=2)
+        fd = os.open(tmp_path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, mode)
+        with os.fdopen(fd, 'w') as f:
+            f.write(content)
         os.replace(tmp_path, filepath)
+        try:
+            os.chmod(filepath, mode)
+        except Exception:
+            pass
     except Exception as e:
         if os.path.exists(tmp_path):
             try:
@@ -56,12 +64,17 @@ def atomic_write_json(filepath, data):
                 pass
         raise e
 
-def atomic_write_file(filepath, content):
+def atomic_write_file(filepath, content, mode=0o600):
     tmp_path = filepath + ".tmp"
     try:
-        with open(tmp_path, 'w') as f:
+        fd = os.open(tmp_path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, mode)
+        with os.fdopen(fd, 'w') as f:
             f.write(content)
         os.replace(tmp_path, filepath)
+        try:
+            os.chmod(filepath, mode)
+        except Exception:
+            pass
     except Exception as e:
         if os.path.exists(tmp_path):
             try:
@@ -607,7 +620,7 @@ class DashboardHTTPRequestHandler(BaseHTTPRequestHandler):
                 self.send_response(200)
                 self.send_header("Content-Type", "application/json")
                 self.end_headers()
-                self.wfile.write(json.dumps({"success": True, "message": "Configuration saved and activated"}).encode("utf-8"))
+                self.wfile.write(json.dumps({"success": True, "message": "Configuration saved. Complete activation under StartOS System → Gateways."}).encode("utf-8"))
             except Exception as e:
                 self.send_response(400)
                 self.send_header("Content-Type", "application/json")

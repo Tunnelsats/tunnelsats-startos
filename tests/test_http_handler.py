@@ -272,5 +272,42 @@ class TestHTTPHandler(unittest.TestCase):
         bridge.DashboardHTTPRequestHandler.do_POST(handler4)
         handler4.send_error.assert_called_with(403, "Cross-site request rejected")
 
+    @patch('bridge.save_configuration')
+    @patch('bridge.get_default_gateway')
+    def test_do_POST_save_config_success(self, mock_get_gw, mock_save_config):
+        mock_get_gw.return_value = "172.18.0.1"
+
+        req_body = json.dumps({
+            "config": "[Interface]\nPrivateKey = abc=\n",
+            "target_node": "lnd"
+        }).encode("utf-8")
+
+        handler = bridge.DashboardHTTPRequestHandler.__new__(bridge.DashboardHTTPRequestHandler)
+        handler.command = "POST"
+        handler.client_address = ("127.0.0.1", 12345)
+        handler.path = "/api/config/save"
+        handler.headers = DummyHeaders({
+            "Host": "localhost",
+            "Content-Type": "application/json",
+            "Content-Length": str(len(req_body)),
+            "X-Requested-With": "XMLHttpRequest"
+        })
+        handler.rfile = BytesIO(req_body)
+        wfile = BytesIO()
+        handler.wfile = wfile
+        handler.send_response = MagicMock()
+        handler.send_header = MagicMock()
+        handler.end_headers = MagicMock()
+
+        bridge.DashboardHTTPRequestHandler.do_POST(handler)
+
+        mock_save_config.assert_called_once_with("[Interface]\nPrivateKey = abc=", "lnd")
+        handler.send_response.assert_called_with(200)
+        res = json.loads(wfile.getvalue().decode("utf-8"))
+        self.assertTrue(res.get("success"))
+        self.assertEqual(res.get("message"), "Configuration saved. Complete activation under StartOS System → Gateways.")
+        # Ensure it does NOT claim to have activated the configuration
+        self.assertNotIn("activated", res.get("message").lower())
+
 if __name__ == '__main__':
     unittest.main()
