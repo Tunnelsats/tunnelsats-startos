@@ -320,7 +320,7 @@ class TestHTTPHandler(unittest.TestCase):
         handler.send_response.assert_called_with(200)
         res = json.loads(wfile.getvalue().decode("utf-8"))
         self.assertTrue(res.get("success"))
-        self.assertEqual(res.get("message"), "Configuration saved. Complete activation under StartOS System → Gateways.")
+        self.assertEqual(res.get("message"), "Configuration saved. Accept the routing prompt on your Lightning node.")
         # Ensure it does NOT claim to have activated the configuration
         self.assertNotIn("activated", res.get("message").lower())
 

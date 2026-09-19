@@ -1204,36 +1204,43 @@
             </a>
           </div>
 
-          <!-- Q1: Architecture & Egress Privacy -->
+          <!-- Q1: Architecture & In-Container VPN -->
           <details class="faq-item" open>
             <summary class="faq-question">
               How does TunnelSats ensure zero residential IP leaks?
             </summary>
             <div class="faq-answer">
               <p>
-                TunnelSats combines inbound port forwarding with StartOS native
-                gateway routing to encapsulate peer traffic in both directions:
+                TunnelSats runs directly inside your target Lightning node
+                container (<strong>LND</strong> or
+                <strong>Core Lightning</strong>) via native in-container
+                WireGuard:
               </p>
               <ul>
                 <li>
-                  <strong>Inbound:</strong> WireGuard forwards incoming peer
-                  connections directly to your node's container port 9735.
+                  <strong>In-Container Tunnel (wg0):</strong> WireGuard operates
+                  inside your node's own container. Incoming peer packets arrive
+                  directly at <code>&lt;tunnel-ip&gt;:9735</code> where the
+                  daemon is already listening—eliminating host-level port
+                  forwarding and multi-node port conflicts.
                 </li>
                 <li>
-                  <strong>Outbound (Egress Privacy):</strong> Selecting
-                  TunnelSats in
-                  <strong
-                    >Services → [Node] → Actions → Set Outbound Gateway</strong
-                  >
-                  ensures all outgoing handshakes, channel gossip, and
-                  ping/pongs route through the encrypted tunnel, completely
-                  hiding your residential home IP.
+                  <strong>Fail-Closed Egress Privacy:</strong> Container-level
+                  policy routing (table 51820) directs all clearnet traffic
+                  (handshakes, channel gossip, ping/pong acknowledgments)
+                  through the encrypted tunnel. If the tunnel drops, routing
+                  fails closed rather than leaking your home IP.
+                </li>
+                <li>
+                  <strong>Tor Hybrid Coexistence:</strong> Tor traffic continues
+                  uninterrupted across the container bridge network
+                  (<code>eth0</code>), maintaining seamless hybrid routing.
                 </li>
               </ul>
               <p class="faq-note">
-                <strong>Multi-Node Note:</strong> StartOS binds host port 9735
-                to whichever Lightning node was installed first. If running
-                multiple nodes, install your primary TunnelSats node first.
+                <strong>Zero System Gateways:</strong> You never need to
+                configure anything under StartOS <em>System → Gateways</em>,
+                toggle interface firewalls, or manage outbound gateway rules.
               </p>
             </div>
           </details>
@@ -1262,9 +1269,13 @@
                   Wallet".
                 </li>
                 <li>
-                  Once paid, your tunnel activates automatically. Add the
-                  configuration under <strong>System → Gateways</strong> and
-                  assign your node's Outbound Gateway.
+                  Once paid, TunnelSats automatically passes the configuration
+                  to your selected Lightning node. Accept the 1-click prompt on
+                  your node:
+                  <strong>"Route [Node] through the TunnelSats tunnel"</strong>.
+                  Your node brings up its internal WireGuard interface,
+                  announces its external address, and routes peer traffic
+                  securely.
                 </li>
               </ol>
             </div>
@@ -1284,8 +1295,8 @@
                 <li>
                   <strong>Zero Reconfiguration:</strong> Renewals seamlessly
                   extend your existing cryptographic keys, assigned public IP,
-                  and port bindings. You never need to edit your StartOS gateway
-                  or restart your node.
+                  and port bindings. You never need to reconfigure your node,
+                  change network settings, or restart your Lightning daemon.
                 </li>
                 <li>
                   <strong>If Expired:</strong> Inbound routing pauses safely

@@ -640,7 +640,7 @@ async function claimAndSaveConfig(paymentHash, keypair) {
     }
 
     setPaymentStatus(
-      'Configuration provisioned! Add to System → Gateways to activate.',
+      'Configuration provisioned! Accept the routing prompt on your Lightning node.',
       'pulse-green',
     )
     setTimeout(() => {
@@ -648,7 +648,7 @@ async function claimAndSaveConfig(paymentHash, keypair) {
       delete document.getElementById('view-storefront').dataset.userNavigated
       fetchStatus(true)
       alert(
-        'Configuration provisioned successfully! To activate routing:\n\n1. Go to StartOS System → Gateways, delete any old TunnelSats gateway, click Add Gateway, choose WireGuard, and connect.\n2. In your Lightning node Peer Interface, toggle the TunnelSats address ON.\n3. In Actions, Set Outbound Gateway to TunnelSats for full egress privacy.',
+        'Configuration provisioned successfully!\n\nTo activate routing, accept the 1-click prompt on your Lightning node: "Route [Node] through the TunnelSats tunnel". Your node will start its in-container WireGuard tunnel and announce its public address.',
       )
     }, 1600)
   } catch (err) {
@@ -682,7 +682,7 @@ async function saveManualConfig() {
 
     if (res.ok) {
       alert(
-        "Configuration saved successfully! To complete activation:\n\n1. Add this tunnel to StartOS System → Gateways and connect.\n2. Toggle your node's Peer Interface ON.\n3. Set Outbound Gateway to TunnelSats.",
+        'Configuration saved successfully!\n\nTo complete activation, accept the 1-click prompt on your Lightning node: "Route [Node] through the TunnelSats tunnel".',
       )
       if (textarea) textarea.value = ''
       delete document.getElementById('view-storefront').dataset.userNavigated
