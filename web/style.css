@@ -102,9 +102,11 @@ body {
 }
 
 .brand-text .subtext {
-  font-size: 13px;
-  color: var(--text-secondary);
-  font-weight: 500;
+  font-size: 13.5px;
+  color: var(--text-primary);
+  opacity: 0.95;
+  font-weight: 600;
+  letter-spacing: 0.2px;
 }
 
 /* Status badge */
@@ -528,6 +530,34 @@ code {
   user-select: none;
 }
 
+.footer-meta {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  margin-top: 10px;
+  font-size: 11.5px;
+  color: var(--text-muted, rgba(148, 163, 184, 0.7));
+  font-family: inherit;
+}
+
+.footer-meta span {
+  display: inline-flex;
+  align-items: center;
+}
+
+.github-link {
+  color: var(--text-secondary);
+  text-decoration: none;
+  transition: color 0.2s ease;
+  font-weight: 500;
+}
+
+.github-link:hover {
+  color: var(--accent-bitcoin);
+  text-decoration: underline;
+}
+
 /* FAQ trigger button — reset browser button defaults */
 .footer-btn-faq {
   background: none;
@@ -847,6 +877,34 @@ code {
   gap: 24px;
 }
 
+.storefront-top-nav {
+  display: flex;
+  align-items: center;
+  margin-bottom: -8px;
+}
+
+.btn-back-nav {
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  color: var(--text-secondary);
+  border-radius: 8px;
+  padding: 7px 12px;
+  font-size: 12.5px;
+  font-weight: 600;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  transition: all 0.2s ease;
+  font-family: inherit;
+}
+
+.btn-back-nav:hover {
+  background: rgba(255, 255, 255, 0.09);
+  color: var(--text-primary);
+  border-color: rgba(255, 255, 255, 0.2);
+}
+
 .storefront-hero {
   text-align: center;
   padding: 10px 10px 6px 10px;
@@ -1071,7 +1129,7 @@ code {
 
 .btn-primary-glow {
   background: linear-gradient(135deg, var(--accent-bitcoin) 0%, #d99015 100%);
-  color: #0f1115;
+  color: #0b0d11;
   border: none;
   border-radius: 10px;
   padding: 14px 24px;
@@ -1086,6 +1144,13 @@ code {
   box-shadow: 0 4px 20px var(--accent-bitcoin-glow);
   transition: all 0.2s ease;
   text-decoration: none;
+}
+
+.btn-zap-svg {
+  display: inline-block;
+  vertical-align: middle;
+  flex-shrink: 0;
+  fill: currentColor;
 }
 
 .btn-primary-glow:hover {
@@ -1118,31 +1183,94 @@ code {
   text-align: center;
 }
 
-/* Bring Your Own Config Accordion */
-.byoc-container {
-  border-top: 1px solid rgba(255, 255, 255, 0.06);
-  padding-top: 16px;
-  margin-top: 8px;
+/* Modern Harmonica / Accordion for BYOC */
+.byoc-harmonica {
+  margin-top: 16px;
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.02);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  overflow: hidden;
+  transition:
+    border-color 0.2s ease,
+    background 0.2s ease;
 }
 
-.byoc-summary {
-  font-size: 12.5px;
-  font-weight: 600;
-  color: var(--text-secondary);
+.byoc-harmonica:hover,
+.byoc-harmonica.open {
+  border-color: rgba(250, 204, 21, 0.3);
+  background: rgba(255, 255, 255, 0.035);
+}
+
+.byoc-toggle-btn {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 13px 18px;
+  background: transparent;
+  border: none;
+  color: var(--text-primary);
   cursor: pointer;
-  user-select: none;
+  font-family: inherit;
+  font-size: 13px;
+  font-weight: 600;
   transition: color 0.15s ease;
+  user-select: none;
 }
 
-.byoc-summary:hover {
+.byoc-toggle-left {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.byoc-icon {
+  color: var(--accent-bitcoin);
+  flex-shrink: 0;
+}
+
+.byoc-title {
+  color: var(--text-primary);
+}
+
+.byoc-pill {
+  font-size: 11px;
+  padding: 2px 8px;
+  border-radius: 100px;
+  background: rgba(250, 204, 21, 0.12);
+  color: var(--accent-bitcoin);
+  font-weight: 700;
+  letter-spacing: 0.2px;
+}
+
+.byoc-chevron {
+  color: var(--text-secondary);
+  transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  flex-shrink: 0;
+}
+
+.byoc-harmonica.open .byoc-chevron {
+  transform: rotate(180deg);
   color: var(--accent-bitcoin);
 }
 
-.byoc-content {
-  margin-top: 12px;
+.byoc-panel {
+  display: grid;
+  grid-template-rows: 0fr;
+  transition: grid-template-rows 0.35s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.byoc-harmonica.open .byoc-panel {
+  grid-template-rows: 1fr;
+}
+
+.byoc-panel-inner {
+  overflow: hidden;
+  padding: 0 18px 18px 18px;
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: 12px;
 }
 
 .byoc-desc {
@@ -1190,24 +1318,68 @@ code {
   }
 }
 
-/* Bandwidth Card */
-.bandwidth-numbers {
+/* Symmetrical Metric Cards */
+.metric-card-body {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.metric-label {
+  font-size: 11px;
+  color: var(--text-secondary);
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.6px;
+  height: 14px;
+  line-height: 14px;
+}
+
+.metric-value-row {
   display: flex;
   align-items: baseline;
   gap: 6px;
+  height: 36px;
+  line-height: 36px;
 }
 
-.bandwidth-used {
+.metric-value {
   font-family: 'Outfit', sans-serif;
   font-size: 32px;
   font-weight: 700;
   color: var(--text-primary);
+  line-height: 1;
 }
 
-.bandwidth-limit {
+.metric-value.countdown-timer {
+  background: linear-gradient(
+    135deg,
+    var(--text-primary) 30%,
+    var(--accent-bitcoin) 100%
+  );
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+
+.metric-unit {
   font-size: 14px;
   font-weight: 600;
   color: var(--text-secondary);
+}
+
+.progress-bar-container {
+  width: 100%;
+  height: 8px;
+  background: rgba(255, 255, 255, 0.06);
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.progress-bar {
+  height: 100%;
+  background: linear-gradient(90deg, #d99015 0%, var(--accent-bitcoin) 100%);
+  border-radius: 8px;
+  transition: width 0.6s ease;
 }
 
 .bandwidth-bar {
@@ -1222,13 +1394,16 @@ code {
   background: linear-gradient(90deg, #dc2626 0%, var(--accent-alert) 100%);
 }
 
-.bandwidth-footer {
+.metric-footer {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  font-size: 11px;
-  color: var(--text-secondary);
-  margin-top: 4px;
+  font-size: 11.5px;
+  min-height: 18px;
+}
+
+.metric-footer-text {
+  color: var(--text-muted, rgba(148, 163, 184, 0.7));
 }
 
 .btn-link-action {
@@ -1319,7 +1494,7 @@ code {
 
 .btn-action-renew {
   background: linear-gradient(135deg, var(--accent-bitcoin) 0%, #d99015 100%);
-  color: #0f1115;
+  color: #0b0d11;
   box-shadow: 0 4px 16px var(--accent-bitcoin-glow);
 }
 
@@ -1533,19 +1708,19 @@ code {
 }
 
 .stat-pill .stat-label {
-  font-size: 10px;
+  font-size: 11px;
   color: var(--text-secondary);
   text-transform: uppercase;
 }
 
 .stat-pill .stat-val {
-  font-size: 12px;
+  font-size: 13px;
   font-weight: 700;
   color: var(--text-primary);
 }
 
 .bandwidth-policy-explainer h3 {
-  font-size: 14px;
+  font-size: 14.5px;
   font-family: 'Outfit', sans-serif;
   color: var(--accent-bitcoin);
   margin-bottom: 8px;
@@ -1553,13 +1728,54 @@ code {
 
 .bandwidth-policy-explainer ul {
   padding-left: 18px;
-  font-size: 13px;
+  font-size: 14px;
   color: var(--text-secondary);
   line-height: 1.6;
 }
 
 .bandwidth-policy-explainer li {
   margin-top: 6px;
+}
+
+.bandwidth-action-box {
+  margin-top: 16px;
+  padding: 14px 16px;
+  background: rgba(250, 204, 21, 0.05);
+  border: 1px solid rgba(250, 204, 21, 0.2);
+  border-radius: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.bandwidth-action-box h4 {
+  font-size: 13.5px;
+  font-weight: 700;
+  color: var(--accent-bitcoin);
+  margin: 0;
+}
+
+.bandwidth-action-box p {
+  font-size: 12.5px;
+  color: var(--text-secondary);
+  line-height: 1.5;
+  margin: 0;
+}
+
+.bandwidth-faq-link {
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--accent-bitcoin);
+  text-decoration: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  transition: opacity 0.15s ease;
+}
+
+.bandwidth-faq-link:hover {
+  text-decoration: underline;
+  opacity: 0.9;
 }
 
 /* Payment Modal specifics */
@@ -1592,7 +1808,7 @@ code {
 }
 
 .payment-plan-label {
-  font-size: 12px;
+  font-size: 13px;
   color: var(--text-secondary);
   margin-top: 2px;
 }
@@ -1618,7 +1834,7 @@ code {
 
 .qr-loading {
   color: #0f1115;
-  font-size: 12px;
+  font-size: 13px;
   font-weight: 600;
 }
 
@@ -1666,7 +1882,7 @@ code {
   display: flex;
   align-items: center;
   gap: 8px;
-  font-size: 12.5px;
+  font-size: 13.5px;
   color: var(--text-secondary);
 }
 
@@ -1717,7 +1933,7 @@ code {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  font-size: 12.5px;
+  font-size: 13.5px;
 }
 
 .r-label {
@@ -1732,4 +1948,28 @@ code {
 
 .modal-footer-actions {
   margin-top: 10px;
+}
+
+/* Responsive mobile layout adjustments */
+@media (max-width: 600px) {
+  .dashboard-header {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 12px;
+  }
+  .telemetry-action-bar {
+    flex-direction: column;
+  }
+  .btn-action-renew,
+  .btn-action-export,
+  .btn-action-store {
+    width: 100%;
+    min-width: 0;
+  }
+  .storefront-checkout-bar button {
+    width: 100%;
+  }
+  .bandwidth-stat-row {
+    grid-template-columns: 1fr;
+  }
 }

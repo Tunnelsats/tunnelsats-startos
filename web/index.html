@@ -68,6 +68,30 @@
           class="card glass-card span-2 storefront-card"
           style="display: none"
         >
+          <div class="storefront-top-nav">
+            <button
+              id="btn-back-to-telemetry"
+              class="btn-back-nav"
+              style="display: none"
+              onclick="showTelemetryView()"
+              type="button"
+            >
+              <svg
+                viewBox="0 0 24 24"
+                width="16"
+                height="16"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2.5"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+              >
+                <polyline points="15 18 9 12 15 6"></polyline>
+              </svg>
+              <span>← Back to Active Dashboard</span>
+            </button>
+          </div>
+
           <div class="storefront-hero">
             <div class="hero-tag">
               <img src="Bitcoin.svg" alt="Bitcoin" class="icon-btc" /> Native
@@ -112,10 +136,18 @@
               >2. Choose Server Region</label
             >
             <select id="select-server" class="select-input">
-              <option value="eu-de">Frankfurt, Germany 🇩🇪 (eu-de)</option>
-              <option value="eu-ch">Zurich, Switzerland 🇨🇭 (eu-ch)</option>
-              <option value="us-east">New York, USA 🇺🇸 (us-east)</option>
-              <option value="us-west">Los Angeles, USA 🇺🇸 (us-west)</option>
+              <option value="eu-de">
+                Frankfurt / Nuremberg, Germany 🇩🇪 (eu-de)
+              </option>
+              <option value="eu-ch">
+                Zurich / Geneva, Switzerland 🇨🇭 (eu-ch)
+              </option>
+              <option value="us-east">
+                Ashburn / New York, USA 🇺🇸 (us-east)
+              </option>
+              <option value="us-west">
+                Hillsboro, Oregon, USA 🇺🇸 (us-west)
+              </option>
               <option value="asia-sg">Singapore 🇸🇬 (asia-sg)</option>
               <option value="sa-br">Sao Paulo, Brazil 🇧🇷 (sa-br)</option>
               <option value="oc-au">Sydney, Australia 🇦🇺 (oc-au)</option>
@@ -133,9 +165,10 @@
               >
                 <div class="plan-duration">1 Month</div>
                 <div class="plan-price">
-                  25,000 <span class="price-unit">sats</span>
+                  <span id="plan-price-1">25,000</span>
+                  <span class="price-unit">sats</span>
                 </div>
-                <div class="plan-per-mo">Base rate</div>
+                <div class="plan-per-mo">$3.00/mo</div>
               </div>
 
               <div
@@ -146,9 +179,10 @@
                 <div class="plan-badge">Popular</div>
                 <div class="plan-duration">3 Months</div>
                 <div class="plan-price">
-                  70,000 <span class="price-unit">sats</span>
+                  <span id="plan-price-3">70,000</span>
+                  <span class="price-unit">sats</span>
                 </div>
-                <div class="plan-per-mo">Save ~7%</div>
+                <div class="plan-per-mo">Save ~5%</div>
               </div>
 
               <div
@@ -158,7 +192,8 @@
               >
                 <div class="plan-duration">6 Months</div>
                 <div class="plan-price">
-                  135,000 <span class="price-unit">sats</span>
+                  <span id="plan-price-6">135,000</span>
+                  <span class="price-unit">sats</span>
                 </div>
                 <div class="plan-per-mo">Save ~10%</div>
               </div>
@@ -171,9 +206,10 @@
                 <div class="plan-badge best-value">Best Value</div>
                 <div class="plan-duration">12 Months</div>
                 <div class="plan-price">
-                  250,000 <span class="price-unit">sats</span>
+                  <span id="plan-price-12">250,000</span>
+                  <span class="price-unit">sats</span>
                 </div>
-                <div class="plan-per-mo">Save ~17%</div>
+                <div class="plan-per-mo">Save ~20%</div>
               </div>
             </div>
           </div>
@@ -185,29 +221,68 @@
               class="btn-primary-glow"
               onclick="startCheckout()"
             >
-              <span class="btn-icon">⚡</span>
+              <svg
+                class="btn-zap-svg"
+                viewBox="0 0 24 24"
+                width="18"
+                height="18"
+                fill="currentColor"
+              >
+                <polygon
+                  points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"
+                ></polygon>
+              </svg>
               <span>Order Dedicated Tunnel</span>
-            </button>
-            <button
-              id="btn-back-to-telemetry"
-              class="btn-secondary"
-              style="display: none"
-              onclick="showTelemetryView()"
-            >
-              <span>← Back to Active Dashboard</span>
             </button>
           </div>
 
-          <!-- Alternative: Bring Your Own Config Accordion -->
-          <div class="byoc-container">
-            <details class="byoc-details">
-              <summary class="byoc-summary">
-                <span
-                  >Already have a TunnelSats configuration? Bring Your Own
-                  Config</span
+          <!-- Alternative: Modern Harmonica for Bring Your Own Config -->
+          <div class="byoc-harmonica" id="byoc-harmonica">
+            <button
+              type="button"
+              class="byoc-toggle-btn"
+              id="byoc-toggle-btn"
+              onclick="toggleByoc()"
+              aria-expanded="false"
+              aria-controls="byoc-panel"
+            >
+              <div class="byoc-toggle-left">
+                <svg
+                  class="byoc-icon"
+                  viewBox="0 0 24 24"
+                  width="18"
+                  height="18"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="2"
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
                 >
-              </summary>
-              <div class="byoc-content">
+                  <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+                  <polyline points="17 8 12 3 7 8"></polyline>
+                  <line x1="12" y1="3" x2="12" y2="15"></line>
+                </svg>
+                <span class="byoc-title"
+                  >Have an existing TunnelSats configuration?</span
+                >
+                <span class="byoc-pill">Bring Your Own Config</span>
+              </div>
+              <svg
+                class="byoc-chevron"
+                viewBox="0 0 24 24"
+                width="18"
+                height="18"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2.5"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+              >
+                <polyline points="6 9 12 15 18 9"></polyline>
+              </svg>
+            </button>
+            <div class="byoc-panel" id="byoc-panel">
+              <div class="byoc-panel-inner">
                 <p class="byoc-desc">
                   Paste an existing TunnelSats <code>.conf</code> file directly
                   to activate your tunnel or configure via StartOS
@@ -217,6 +292,7 @@
                   id="byoc-conf-input"
                   class="byoc-textarea"
                   placeholder="[Interface]&#10;PrivateKey = ...&#10;Address = 10.9.0.xxx/32&#10;# VPNPort: 24556&#10;..."
+                  spellcheck="false"
                 ></textarea>
                 <div class="byoc-actions">
                   <button
@@ -228,7 +304,7 @@
                   </button>
                 </div>
               </div>
-            </details>
+            </div>
           </div>
         </section>
 
@@ -242,17 +318,19 @@
         >
           <div class="telemetry-top-cards">
             <!-- Subscription Expiration Card -->
-            <div class="card glass-card subscription-card">
+            <div class="card glass-card metric-card subscription-card">
               <div class="card-header">
                 <h2>Subscription Status</h2>
                 <span class="info-label" id="expiry-date-raw">Loading...</span>
               </div>
-              <div class="subscription-content">
-                <div class="countdown-container">
-                  <span class="countdown-label">Time Remaining</span>
-                  <div class="countdown-timer" id="countdown-timer">
-                    Checking...
-                  </div>
+              <div class="metric-card-body">
+                <span class="metric-label">TIME REMAINING</span>
+                <div class="metric-value-row">
+                  <span
+                    class="metric-value countdown-timer"
+                    id="countdown-timer"
+                    >Checking...</span
+                  >
                 </div>
                 <div class="progress-bar-container">
                   <div
@@ -261,11 +339,19 @@
                     style="width: 0%"
                   ></div>
                 </div>
+                <div class="metric-footer">
+                  <span class="metric-footer-text"
+                    >Expires automatically at end of term</span
+                  >
+                  <button class="btn-link-action" onclick="openRenewalModal()">
+                    Renew
+                  </button>
+                </div>
               </div>
             </div>
 
             <!-- Bandwidth Usage Card -->
-            <div class="card glass-card bandwidth-card">
+            <div class="card glass-card metric-card bandwidth-card">
               <div class="card-header">
                 <h2>Monthly Bandwidth</h2>
                 <button
@@ -277,12 +363,13 @@
                   ℹ
                 </button>
               </div>
-              <div class="bandwidth-content">
-                <div class="bandwidth-numbers">
-                  <span class="bandwidth-used" id="val-bandwidth-used"
+              <div class="metric-card-body">
+                <span class="metric-label">MONTHLY ALLOWANCE</span>
+                <div class="metric-value-row">
+                  <span class="metric-value" id="val-bandwidth-used"
                     >0.00 GB</span
                   >
-                  <span class="bandwidth-limit">/ 100 GB</span>
+                  <span class="metric-unit">/ 100 GB</span>
                 </div>
                 <div class="progress-bar-container">
                   <div
@@ -291,8 +378,8 @@
                     style="width: 0%"
                   ></div>
                 </div>
-                <div class="bandwidth-footer">
-                  <span class="bandwidth-caption"
+                <div class="metric-footer">
+                  <span class="metric-footer-text"
                     >Allowance resets on 1st of every month</span
                   >
                   <button
@@ -385,7 +472,17 @@
           <!-- Telemetry Action Bar -->
           <div class="telemetry-action-bar">
             <button class="btn-action-renew" onclick="openRenewalModal()">
-              <span class="btn-icon">⚡</span>
+              <svg
+                class="btn-zap-svg"
+                viewBox="0 0 24 24"
+                width="18"
+                height="18"
+                fill="currentColor"
+              >
+                <polygon
+                  points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"
+                ></polygon>
+              </svg>
               <span>Renew Subscription</span>
             </button>
             <button class="btn-action-export" onclick="exportConfiguration()">
@@ -577,6 +674,23 @@
               </li>
             </ul>
           </div>
+
+          <div class="bandwidth-action-box">
+            <h4>What happens if I reach the 100 GB limit?</h4>
+            <p>
+              Normal Lightning routing nodes consume approximately 5–25 GB per
+              month. If your node exceeds the 100 GB limit before month-end, the
+              tunnel pauses until the automatic calendar reset.
+            </p>
+            <a
+              href="https://tunnelsats.com/faq#what-happens-if-i-reach-the-100gb-limit"
+              target="_blank"
+              rel="noopener"
+              class="bandwidth-faq-link"
+            >
+              Learn what happens if you reach the 100 GB limit →
+            </a>
+          </div>
         </div>
       </div>
     </dialog>
@@ -700,10 +814,18 @@
                 <option value="" disabled selected>
                   Select server region...
                 </option>
-                <option value="eu-de">Frankfurt, Germany 🇩🇪 (eu-de)</option>
-                <option value="eu-ch">Zurich, Switzerland 🇨🇭 (eu-ch)</option>
-                <option value="us-east">New York, USA 🇺🇸 (us-east)</option>
-                <option value="us-west">Los Angeles, USA 🇺🇸 (us-west)</option>
+                <option value="eu-de">
+                  Frankfurt / Nuremberg, Germany 🇩🇪 (eu-de)
+                </option>
+                <option value="eu-ch">
+                  Zurich / Geneva, Switzerland 🇨🇭 (eu-ch)
+                </option>
+                <option value="us-east">
+                  Ashburn / New York, USA 🇺🇸 (us-east)
+                </option>
+                <option value="us-west">
+                  Hillsboro, Oregon, USA 🇺🇸 (us-west)
+                </option>
                 <option value="asia-sg">Singapore 🇸🇬 (asia-sg)</option>
                 <option value="sa-br">Sao Paulo, Brazil 🇧🇷 (sa-br)</option>
                 <option value="oc-au">Sydney, Australia 🇦🇺 (oc-au)</option>
@@ -729,7 +851,8 @@
               >
                 <div class="plan-duration">1 Month</div>
                 <div class="plan-price">
-                  25,000 <span class="price-unit">sats</span>
+                  <span id="renewal-plan-price-1">25,000</span>
+                  <span class="price-unit">sats</span>
                 </div>
               </div>
               <div
@@ -740,7 +863,8 @@
                 <div class="plan-badge">Popular</div>
                 <div class="plan-duration">3 Months</div>
                 <div class="plan-price">
-                  70,000 <span class="price-unit">sats</span>
+                  <span id="renewal-plan-price-3">70,000</span>
+                  <span class="price-unit">sats</span>
                 </div>
               </div>
               <div
@@ -750,7 +874,8 @@
               >
                 <div class="plan-duration">6 Months</div>
                 <div class="plan-price">
-                  135,000 <span class="price-unit">sats</span>
+                  <span id="renewal-plan-price-6">135,000</span>
+                  <span class="price-unit">sats</span>
                 </div>
               </div>
               <div
@@ -761,7 +886,8 @@
                 <div class="plan-badge best-value">Best Value</div>
                 <div class="plan-duration">12 Months</div>
                 <div class="plan-price">
-                  250,000 <span class="price-unit">sats</span>
+                  <span id="renewal-plan-price-12">250,000</span>
+                  <span class="price-unit">sats</span>
                 </div>
               </div>
             </div>
@@ -772,7 +898,18 @@
               class="btn-primary-glow w-100"
               onclick="startRenewalCheckout()"
             >
-              ⚡ Generate Renewal Invoice
+              <svg
+                class="btn-zap-svg"
+                viewBox="0 0 24 24"
+                width="18"
+                height="18"
+                fill="currentColor"
+              >
+                <polygon
+                  points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"
+                ></polygon>
+              </svg>
+              <span>Generate Renewal Invoice</span>
             </button>
           </div>
         </div>

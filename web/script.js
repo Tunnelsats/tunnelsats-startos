@@ -288,6 +288,91 @@ function selectRenewalPlan(duration, card) {
   card.classList.add('active')
 }
 
+function toggleByoc() {
+  const harmonica = document.getElementById('byoc-harmonica')
+  const btn = document.getElementById('byoc-toggle-btn')
+  if (!harmonica || !btn) return
+  const isOpen = harmonica.classList.toggle('open')
+  btn.setAttribute('aria-expanded', isOpen ? 'true' : 'false')
+}
+
+// ─────────────────────────────────────────────
+// Dynamic Bitcoin & Subscription Pricing Logic
+// ─────────────────────────────────────────────
+const BASE_PRICE_USD = 3
+const PLAN_DISCOUNTS = {
+  1: 0,
+  3: 0.05,
+  6: 0.1,
+  12: 0.2,
+}
+let currentSatsPerDollar = 1200 // Conservative fallback rate (~$83.3k BTC)
+
+function calculatePlanPrice(months, satsPerDollar) {
+  const discount = PLAN_DISCOUNTS[months] || 0
+  const grossUsd = BASE_PRICE_USD * months
+  const discountedUsd = grossUsd * (1 - discount)
+  return Math.floor(discountedUsd * satsPerDollar)
+}
+
+async function fetchSatsPerDollar() {
+  // Try Mempool.space first
+  try {
+    const res = await fetch('https://mempool.space/api/v1/prices')
+    if (res.ok) {
+      const data = await res.json()
+      if (data && data.USD && Number(data.USD) > 0) {
+        return Math.floor(100_000_000 / Number(data.USD))
+      }
+    }
+  } catch (e) {
+    console.warn('mempool.space price API failed, trying fallback:', e)
+  }
+
+  // Fallback: blockchain.info ticker
+  try {
+    const res = await fetch('https://blockchain.info/ticker')
+    if (res.ok) {
+      const data = await res.json()
+      const btcPrice = data && data.USD && (data.USD.buy || data.USD.last)
+      if (btcPrice && Number(btcPrice) > 0) {
+        return Math.floor(100_000_000 / Number(btcPrice))
+      }
+    }
+  } catch (e) {
+    console.warn('blockchain.info price API failed:', e)
+  }
+
+  return currentSatsPerDollar
+}
+
+async function updateDynamicPricing() {
+  try {
+    currentSatsPerDollar = await fetchSatsPerDollar()
+    const durations = [1, 3, 6, 12]
+    durations.forEach((months) => {
+      const sats = calculatePlanPrice(months, currentSatsPerDollar)
+      const formatted = sats.toLocaleString()
+
+      // Update storefront plan cards
+      const storefrontPriceEl = document.getElementById(`plan-price-${months}`)
+      if (storefrontPriceEl) {
+        storefrontPriceEl.textContent = formatted
+      }
+
+      // Update renewal modal plan cards
+      const renewalPriceEl = document.getElementById(
+        `renewal-plan-price-${months}`,
+      )
+      if (renewalPriceEl) {
+        renewalPriceEl.textContent = formatted
+      }
+    })
+  } catch (e) {
+    console.warn('Dynamic pricing update failed:', e)
+  }
+}
+
 // ─────────────────────────────────────────────
 // Checkout & Payment Modal Flow
 // ─────────────────────────────────────────────
@@ -367,7 +452,8 @@ async function startCheckout() {
     const order = await orderRes.json()
     renderPaymentDetails(
       order.invoice,
-      order.amountSats,
+      order.amountSats ||
+        calculatePlanPrice(selectedDuration, currentSatsPerDollar),
       `${selectedDuration} Month${selectedDuration > 1 ? 's' : ''} Subscription`,
     )
     pollOrderSettlement(order.paymentHash, currentKeypair, serverId)
@@ -609,24 +695,29 @@ function mapDomainToServerId(domainOrId) {
     lower.includes('de2') ||
     lower.includes('de3') ||
     lower.includes('frankfurt') ||
+    lower.includes('nuremberg') ||
     lower.includes('germany')
   )
     return 'eu-de'
   if (
     lower.includes('ch1') ||
     lower.includes('zurich') ||
+    lower.includes('geneva') ||
     lower.includes('switzerland')
   )
     return 'eu-ch'
   if (
     lower.includes('us3') ||
     lower.includes('us1') ||
+    lower.includes('ashburn') ||
     lower.includes('new york') ||
     lower.includes('us-east')
   )
     return 'us-east'
   if (
     lower.includes('us2') ||
+    lower.includes('hillsboro') ||
+    lower.includes('oregon') ||
     lower.includes('los angeles') ||
     lower.includes('us-west')
   )
@@ -742,7 +833,8 @@ async function startRenewalCheckout() {
     const data = await res.json()
     renderPaymentDetails(
       data.invoice,
-      data.amountSats || 25000,
+      data.amountSats ||
+        calculatePlanPrice(selectedRenewalDuration, currentSatsPerDollar),
       `${selectedRenewalDuration} Month${selectedRenewalDuration > 1 ? 's' : ''} Renewal`,
     )
     pollRenewalSettlement(data.paymentHash)
@@ -930,8 +1022,9 @@ function fallbackCopy(text, btn, successText) {
   }
 })
 
-// Initial Status Fetch
+// Initial Status & Pricing Fetch
 fetchStatus()
+updateDynamicPricing()
 
 // Sensible gentle polling (every 60s while dashboard open)
 setInterval(() => {
@@ -939,3 +1032,10 @@ setInterval(() => {
     fetchStatus()
   }
 }, 60000)
+
+// Refresh BTC/USD exchange rate every 10 minutes
+setInterval(() => {
+  if (!document.hidden) {
+    updateDynamicPricing()
+  }
+}, 600000)
