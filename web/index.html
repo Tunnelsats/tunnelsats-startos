@@ -20,7 +20,20 @@
     <div class="dashboard-container">
       <!-- Header -->
       <header class="dashboard-header">
-        <div class="brand">
+        <div
+          class="brand"
+          onclick="goToHomepage()"
+          role="button"
+          tabindex="0"
+          title="Return to Dashboard"
+          aria-label="Return to Dashboard"
+          onkeydown="
+            if (event.key === 'Enter' || event.key === ' ') {
+              event.preventDefault()
+              goToHomepage()
+            }
+          "
+        >
           <img
             src="ts_logo_rectangle.svg"
             alt="TunnelSats Logo"
@@ -73,7 +86,7 @@
               id="btn-back-to-telemetry"
               class="btn-back-nav"
               style="display: none"
-              onclick="showTelemetryView()"
+              onclick="goToHomepage()"
               type="button"
             >
               <svg
@@ -86,7 +99,8 @@
                 stroke-linecap="round"
                 stroke-linejoin="round"
               >
-                <polyline points="15 18 9 12 15 6"></polyline>
+                <path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"></path>
+                <polyline points="9 22 9 12 15 12 15 22"></polyline>
               </svg>
               <span>← Back to Active Dashboard</span>
             </button>
@@ -116,7 +130,9 @@
                 onclick="selectNode('lnd', this)"
               >
                 <span class="pill-title">LND</span>
-                <span class="pill-sub">Lightning Network Daemon</span>
+                <span class="pill-sub"
+                  >Lightning Network Daemon by Lightning Labs</span
+                >
               </button>
               <button
                 type="button"
@@ -124,8 +140,8 @@
                 data-node="cln"
                 onclick="selectNode('cln', this)"
               >
-                <span class="pill-title">Core Lightning</span>
-                <span class="pill-sub">CLN (Blockstream)</span>
+                <span class="pill-title">CLN</span>
+                <span class="pill-sub">Core Lightning by Blockstream</span>
               </button>
             </div>
           </div>
@@ -301,6 +317,22 @@
                     onclick="saveManualConfig()"
                   >
                     Activate Configuration
+                  </button>
+                  <button
+                    type="button"
+                    class="btn-byoc-cancel"
+                    onclick="toggleByoc(false)"
+                  >
+                    ← Cancel & Close BYOC
+                  </button>
+                  <button
+                    type="button"
+                    class="btn-byoc-home"
+                    id="btn-byoc-home"
+                    style="display: none"
+                    onclick="goToHomepage()"
+                  >
+                    🏠 Return to Dashboard
                   </button>
                 </div>
               </div>
@@ -597,17 +629,20 @@
       <div class="modal-dialog-inner">
         <div class="modal-header">
           <div class="modal-title-row">
-            <svg
-              class="modal-title-icon"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              stroke-width="2"
-              stroke-linecap="round"
-              stroke-linejoin="round"
+            <button
+              type="button"
+              class="modal-brand-btn"
+              onclick="goToHomepage()"
+              title="Return to Dashboard"
+              aria-label="TunnelSats Dashboard"
             >
-              <path d="M22 12h-4l-3 9L9 3l-3 9H2" />
-            </svg>
+              <img
+                src="ts_logo_rectangle.svg"
+                alt="TunnelSats"
+                class="modal-brand-logo"
+              />
+            </button>
+            <span class="modal-title-sep">/</span>
             <h2 id="bandwidth-modal-title">Monthly Bandwidth Allowance</h2>
           </div>
           <button
@@ -648,39 +683,125 @@
               </div>
             </div>
           </div>
-          <div class="bandwidth-policy-explainer">
-            <h3>How Bandwidth Works</h3>
-            <ul>
-              <li>
-                <strong>Generous 100 GB Monthly Allowance:</strong> Ample
-                capacity designed for high-traffic Lightning Network routing
-                nodes handling millions of sats in daily forwarding and channel
-                gossip.
-              </li>
-              <li>
-                <strong>Automatic Calendar Reset:</strong> Bandwidth counters
-                reset automatically to 0 GB at 00:00 UTC on the 1st of every
-                calendar month.
-              </li>
-              <li>
-                <strong>In-Container Peer Traffic:</strong> Bandwidth measures
-                encrypted WireGuard peer traffic (gossip, payments, ping/pongs)
-                routed through your dedicated tunnel.
-              </li>
-              <li>
-                <strong>Zero Surprise Overage Fees:</strong> Bandwidth is
-                included with your subscription. No hidden overage charges or
-                fees.
-              </li>
-            </ul>
+
+          <div class="bandwidth-feature-grid">
+            <div class="bw-feature-card">
+              <div class="bw-feature-icon-badge">
+                <svg
+                  viewBox="0 0 24 24"
+                  width="18"
+                  height="18"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="2"
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                >
+                  <ellipse cx="12" cy="5" rx="9" ry="3"></ellipse>
+                  <path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3"></path>
+                  <path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"></path>
+                </svg>
+              </div>
+              <div class="bw-feature-text">
+                <span class="bw-feature-title">100 GB Monthly Quota</span>
+                <span class="bw-feature-desc"
+                  >Ample capacity for heavy Lightning routing gossip and peer
+                  traffic.</span
+                >
+              </div>
+            </div>
+
+            <div class="bw-feature-card">
+              <div class="bw-feature-icon-badge">
+                <svg
+                  viewBox="0 0 24 24"
+                  width="18"
+                  height="18"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="2"
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                >
+                  <rect x="3" y="4" width="18" height="18" rx="2" ry="2"></rect>
+                  <line x1="16" y1="2" x2="16" y2="6"></line>
+                  <line x1="8" y1="2" x2="8" y2="6"></line>
+                  <line x1="3" y1="10" x2="21" y2="10"></line>
+                </svg>
+              </div>
+              <div class="bw-feature-text">
+                <span class="bw-feature-title">Automatic Reset</span>
+                <span class="bw-feature-desc"
+                  >Resets automatically to 0 GB at 00:00 UTC on the 1st of every
+                  month.</span
+                >
+              </div>
+            </div>
+
+            <div class="bw-feature-card">
+              <div class="bw-feature-icon-badge">
+                <svg
+                  viewBox="0 0 24 24"
+                  width="18"
+                  height="18"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="2"
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                >
+                  <rect
+                    x="3"
+                    y="11"
+                    width="18"
+                    height="11"
+                    rx="2"
+                    ry="2"
+                  ></rect>
+                  <path d="M7 11V7a5 5 0 0 1 10 0v4"></path>
+                </svg>
+              </div>
+              <div class="bw-feature-text">
+                <span class="bw-feature-title">Encrypted WireGuard</span>
+                <span class="bw-feature-desc"
+                  >Only peer gossip, payments & keepalives routed through your
+                  tunnel count.</span
+                >
+              </div>
+            </div>
+
+            <div class="bw-feature-card">
+              <div class="bw-feature-icon-badge">
+                <svg
+                  viewBox="0 0 24 24"
+                  width="18"
+                  height="18"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="2"
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                >
+                  <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path>
+                  <polyline points="9 12 11 14 15 10"></polyline>
+                </svg>
+              </div>
+              <div class="bw-feature-text">
+                <span class="bw-feature-title">Zero Overage Charges</span>
+                <span class="bw-feature-desc"
+                  >Bandwidth is fully included. No hidden fees or unexpected
+                  bills.</span
+                >
+              </div>
+            </div>
           </div>
 
           <div class="bandwidth-action-box">
             <h4>What happens if I reach the 100 GB limit?</h4>
             <p>
-              Normal Lightning routing nodes consume approximately 5–25 GB per
-              month. If your node exceeds the 100 GB limit before month-end, the
-              tunnel pauses until the automatic calendar reset.
+              Normal routing nodes consume 5–25 GB per month. If 100 GB is
+              reached, your tunnel safely pauses until the calendar reset to
+              protect against surprise overages.
             </p>
             <a
               href="https://tunnelsats.com/faq#what-happens-if-i-reach-the-100gb-limit"
@@ -707,7 +828,20 @@
       <div class="modal-dialog-inner modal-sm">
         <div class="modal-header">
           <div class="modal-title-row">
-            <img src="Bitcoin.svg" alt="Bitcoin" class="modal-icon-btc" />
+            <button
+              type="button"
+              class="modal-brand-btn"
+              onclick="goToHomepage()"
+              title="Return to Dashboard"
+              aria-label="TunnelSats Dashboard"
+            >
+              <img
+                src="ts_logo_rectangle.svg"
+                alt="TunnelSats"
+                class="modal-brand-logo"
+              />
+            </button>
+            <span class="modal-title-sep">/</span>
             <h2 id="payment-modal-title">Pay with Lightning</h2>
           </div>
           <button
@@ -778,18 +912,20 @@
       <div class="modal-dialog-inner">
         <div class="modal-header">
           <div class="modal-title-row">
-            <svg
-              class="modal-title-icon"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              stroke-width="2"
-              stroke-linecap="round"
-              stroke-linejoin="round"
+            <button
+              type="button"
+              class="modal-brand-btn"
+              onclick="goToHomepage()"
+              title="Return to Dashboard"
+              aria-label="TunnelSats Dashboard"
             >
-              <polyline points="23 4 23 10 17 10"></polyline>
-              <path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"></path>
-            </svg>
+              <img
+                src="ts_logo_rectangle.svg"
+                alt="TunnelSats"
+                class="modal-brand-logo"
+              />
+            </button>
+            <span class="modal-title-sep">/</span>
             <h2 id="renewal-modal-title">Renew Tunnel Subscription</h2>
           </div>
           <button
@@ -928,18 +1064,20 @@
       <div class="modal-dialog-inner modal-sm">
         <div class="modal-header">
           <div class="modal-title-row">
-            <svg
-              class="modal-title-icon"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              stroke-width="2"
-              stroke-linecap="round"
-              stroke-linejoin="round"
+            <button
+              type="button"
+              class="modal-brand-btn"
+              onclick="goToHomepage()"
+              title="Return to Dashboard"
+              aria-label="TunnelSats Dashboard"
             >
-              <rect x="3" y="11" width="18" height="11" rx="2" ry="2" />
-              <path d="M7 11V7a5 5 0 0 1 10 0v4" />
-            </svg>
+              <img
+                src="ts_logo_rectangle.svg"
+                alt="TunnelSats"
+                class="modal-brand-logo"
+              />
+            </button>
+            <span class="modal-title-sep">/</span>
             <h2 id="export-modal-title">Export WireGuard Config</h2>
           </div>
           <button
@@ -994,303 +1132,235 @@
     <!-- ════════════════════════════════════════════ -->
     <dialog
       id="faq-modal"
-      class="faq-modal"
+      class="app-modal"
       aria-labelledby="faq-modal-title"
       aria-modal="true"
     >
-      <div class="faq-dialog-inner">
-        <div class="faq-modal-header">
-          <div class="faq-modal-title-row">
-            <svg
-              class="faq-title-icon"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              stroke-width="2"
-              stroke-linecap="round"
-              stroke-linejoin="round"
-              aria-hidden="true"
+      <div class="modal-dialog-inner faq-dialog-inner">
+        <div class="modal-header">
+          <div class="modal-title-row">
+            <button
+              type="button"
+              class="modal-brand-btn"
+              onclick="goToHomepage()"
+              title="Return to Dashboard"
+              aria-label="TunnelSats Dashboard"
             >
-              <circle cx="12" cy="12" r="10"></circle>
-              <path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"></path>
-              <line x1="12" y1="17" x2="12.01" y2="17"></line>
-            </svg>
+              <img
+                src="ts_logo_rectangle.svg"
+                alt="TunnelSats"
+                class="modal-brand-logo"
+              />
+            </button>
+            <span class="modal-title-sep">/</span>
             <h2 id="faq-modal-title">Frequently Asked Questions</h2>
           </div>
           <button
-            class="faq-close-btn"
+            class="modal-close-btn"
             id="btn-close-faq"
             onclick="closeFaqModal()"
             aria-label="Close FAQ"
           >
-            <svg
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              stroke-width="2.5"
-              stroke-linecap="round"
-              stroke-linejoin="round"
-              aria-hidden="true"
-            >
-              <line x1="18" y1="6" x2="6" y2="18"></line>
-              <line x1="6" y1="6" x2="18" y2="18"></line>
-            </svg>
+            ✕
           </button>
         </div>
 
         <div class="faq-body">
-          <!-- Q1 -->
-          <details class="faq-item">
+          <!-- NWC Auto-Renewals Promotion -->
+          <div class="nwc-promo-card">
+            <div class="nwc-promo-header">
+              <div class="nwc-badge">
+                <svg
+                  viewBox="0 0 24 24"
+                  width="13"
+                  height="13"
+                  fill="currentColor"
+                >
+                  <polygon
+                    points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"
+                  ></polygon>
+                </svg>
+                <span>AUTOPILOT RENEWALS</span>
+              </div>
+            </div>
+            <h3>Hands-Free Auto-Renewals with NWC</h3>
+            <p>
+              Prefer your subscription to renew automatically in the background?
+              Sign up on our web dashboard at
+              <a href="https://tunnelsats.com" target="_blank" rel="noopener"
+                ><strong>tunnelsats.com</strong></a
+              >
+              to link your node via
+              <strong>Nostr Wallet Connect (NWC)</strong> for seamless,
+              hands-free auto-renewals.
+            </p>
+            <a
+              href="https://tunnelsats.com"
+              target="_blank"
+              rel="noopener"
+              class="btn-nwc-cta"
+            >
+              <span>Sign Up on TunnelSats.com →</span>
+            </a>
+          </div>
+
+          <!-- Q1: Architecture & Egress Privacy -->
+          <details class="faq-item" open>
             <summary class="faq-question">
-              How do I set up and activate TunnelSats on StartOS?
+              How does TunnelSats ensure zero residential IP leaks?
             </summary>
             <div class="faq-answer">
               <p>
-                Setup consists of simple steps across TunnelSats, StartOS
-                Gateways, and your Lightning node:
+                TunnelSats combines inbound port forwarding with StartOS native
+                gateway routing to encapsulate peer traffic in both directions:
+              </p>
+              <ul>
+                <li>
+                  <strong>Inbound:</strong> WireGuard forwards incoming peer
+                  connections directly to your node's container port 9735.
+                </li>
+                <li>
+                  <strong>Outbound (Egress Privacy):</strong> Selecting
+                  TunnelSats in
+                  <strong
+                    >Services → [Node] → Actions → Set Outbound Gateway</strong
+                  >
+                  ensures all outgoing handshakes, channel gossip, and
+                  ping/pongs route through the encrypted tunnel, completely
+                  hiding your residential home IP.
+                </li>
+              </ul>
+              <p class="faq-note">
+                <strong>Multi-Node Note:</strong> StartOS binds host port 9735
+                to whichever Lightning node was installed first. If running
+                multiple nodes, install your primary TunnelSats node first.
+              </p>
+            </div>
+          </details>
+
+          <!-- Q2: Ordering in Storefront -->
+          <details class="faq-item">
+            <summary class="faq-question">
+              How do I order a new subscription directly on StartOS?
+            </summary>
+            <div class="faq-answer">
+              <p>
+                Our native in-container storefront makes ordering instant,
+                private, and frictionless:
               </p>
               <ol>
                 <li>
-                  <strong>Order or Activate Tunnel:</strong> Select your target
-                  node, server region, and plan on the dashboard to order a
-                  tunnel, or paste an existing config under
-                  <em>Bring Your Own Config</em>.
+                  Select your target Lightning node (<strong>LND</strong> or
+                  <strong>CLN</strong>), server region, and plan duration.
                 </li>
                 <li>
-                  <strong>StartOS Gateway:</strong> Go to
-                  <strong>System → Gateways</strong>, delete any existing
-                  TunnelSats gateway first (updating an existing gateway cannot
-                  change its classification type), click
-                  <strong>Add Gateway</strong>, choose
-                  <strong>WireGuard</strong>, paste the configuration, and
-                  connect.
+                  Your device generates sovereign cryptographic WireGuard keys
+                  locally in-process with zero KYC and zero server key custody.
                 </li>
                 <li>
-                  <strong>Target Node Announcement:</strong> Confirm your node
-                  advertises your TunnelSats external host and port (e.g.
-                  <strong>LND → Config → Custom External Host</strong>).
+                  Pay the Lightning invoice via QR code or WebLN / "Open in
+                  Wallet".
                 </li>
                 <li>
-                  <strong>Firewall Port Toggle:</strong> In your target node
-                  (e.g. <strong>LND → Interfaces → Peer Interface</strong> or
-                  <strong>Core Lightning → Interfaces → Peer</strong>), find
-                  your TunnelSats public IP (<code>&lt;VPN_IP&gt;:9735</code>),
-                  and toggle it <strong>ON</strong>. When StartOS prompts to
-                  test port 9735 in <em>"Address Requirements"</em>, click
-                  <strong>"Later"</strong>.
-                </li>
-                <li>
-                  <strong>Set Outbound Gateway (Full Egress Privacy):</strong>
-                  In your target Lightning node (e.g.
-                  <strong
-                    >Services → LND → Actions → Set Outbound Gateway</strong
-                  >), select <strong>TunnelSats</strong> to encapsulate all
-                  outgoing peer connections, gossip, and ping/pong packets.
+                  Once paid, your tunnel activates automatically. Add the
+                  configuration under <strong>System → Gateways</strong> and
+                  assign your node's Outbound Gateway.
                 </li>
               </ol>
             </div>
           </details>
 
-          <!-- Q2 -->
+          <!-- Q3: Renewals & Expiration -->
           <details class="faq-item">
             <summary class="faq-question">
-              How does In-Container Clearnet VPN routing ensure zero residential
-              IP leaks?
+              How do renewals work? What happens if my subscription expires?
             </summary>
             <div class="faq-answer">
               <p>
-                Standard VPN integrations often only tunnel inbound port
-                forwarding, which leaves outbound peer connections, channel
-                gossip, and keepalive pings routing over clearnet ISP
-                interfaces.
-              </p>
-              <p>
-                TunnelSats works with StartOS native gateway routing to
-                encapsulate both directions:
+                You can click <strong>Renew Subscription</strong> on this
+                dashboard at any time before or after expiration:
               </p>
               <ul>
                 <li>
-                  <strong>Inbound:</strong> WireGuard forwards incoming traffic
-                  to your dedicated port directly into your node container.
+                  <strong>Zero Reconfiguration:</strong> Renewals seamlessly
+                  extend your existing cryptographic keys, assigned public IP,
+                  and port bindings. You never need to edit your StartOS gateway
+                  or restart your node.
                 </li>
                 <li>
-                  <strong>Outbound:</strong> Pinning the Outbound Gateway in
-                  your node directs all egress traffic through the encrypted VPN
-                  tunnel, preventing your home ISP address from ever appearing
-                  in Lightning gossip or peer handshakes.
+                  <strong>If Expired:</strong> Inbound routing pauses safely
+                  until renewed. Your keys are preserved for convenient
+                  reactivation.
                 </li>
               </ul>
             </div>
           </details>
 
-          <!-- Q3 -->
-          <details class="faq-item">
-            <summary class="faq-question">
-              How does multi-node routing work between multiple Lightning nodes
-              (e.g. LND and Core Lightning)?
-            </summary>
-            <div class="faq-answer">
-              <p>
-                <strong
-                  >StartOS allocates host port 9735 to whichever Lightning node
-                  was installed first:</strong
-                >
-              </p>
-              <p>
-                Standard Lightning communication occurs on port 9735. TunnelSats
-                WireGuard gateways forward incoming peer traffic specifically to
-                host port 9735. Any secondary node installed later receives an
-                arbitrary high host port.
-              </p>
-              <p>
-                <strong>Guidance:</strong> Install the Lightning node you intend
-                to use with TunnelSats first. If another node was already
-                installed first and claimed port 9735, uninstall that node and
-                reinstall the target node so it rebinds to host port 9735.
-              </p>
-              <p>
-                Note: Core Lightning's peer interface is named
-                <strong>"Peer"</strong>, while LND's is named
-                <strong>"Peer Interface"</strong>.
-              </p>
-            </div>
-          </details>
-
-          <!-- Q4 -->
+          <!-- Q4: Bandwidth Allowance -->
           <details class="faq-item">
             <summary class="faq-question">
               How does the 100 GB monthly bandwidth allowance work?
             </summary>
             <div class="faq-answer">
               <p>
-                Each TunnelSats subscription includes
-                <strong>100 GB of monthly bandwidth</strong> for Lightning peer
-                gossip and channel routing traffic.
-              </p>
-              <p>
-                <strong>Reset Cycle:</strong> Bandwidth usage resets to 0 GB at
-                00:00 UTC on the 1st day of each calendar month.
-              </p>
-              <p>
-                100 GB is sized generously to cover intense node activity and
-                large channel topologies. Status telemetry is queried on-demand
-                when you open the UI to keep VPN servers responsive and avoid
-                background polling overhead.
-              </p>
-            </div>
-          </details>
-
-          <!-- Q5 -->
-          <details class="faq-item">
-            <summary class="faq-question">
-              How do I backup or export my WireGuard configuration?
-            </summary>
-            <div class="faq-answer">
-              <p>
-                You can export your complete, sovereign WireGuard configuration
-                file at any time:
+                Each subscription includes
+                <strong>100 GB of monthly bandwidth</strong> for WireGuard peer
+                transit (channel gossip, routing packets, and keepalive pings):
               </p>
               <ul>
                 <li>
-                  <strong>StartOS Actions (Secure & Authenticated):</strong>
-                  Open TunnelSats → Actions →
-                  <strong>Export WireGuard Configuration</strong> to view and
-                  copy your configuration. Exporting via StartOS Actions
-                  requires operator authentication to protect your private
-                  cryptographic key.
+                  <strong>Automatic Calendar Reset:</strong> Bandwidth usage
+                  resets to 0 GB at 00:00 UTC on the 1st of every calendar
+                  month.
+                </li>
+                <li>
+                  <strong>Zero Surprise Overages:</strong> Most routing nodes
+                  consume 5–25 GB per month. If 100 GB is reached, the tunnel
+                  safely pauses until month-end—no surprise charges or fees.
                 </li>
               </ul>
-              <p class="faq-note">
-                Keep this file secure! It contains your private cryptographic
-                key and allows restoring your tunnel on any device.
-              </p>
             </div>
           </details>
 
-          <!-- Q6 -->
+          <!-- Q5: IPv6 Warning -->
           <details class="faq-item">
             <summary class="faq-question">
-              What happens if my subscription expires?
-            </summary>
-            <div class="faq-answer">
-              <p>When your subscription expires:</p>
-              <ol>
-                <li>
-                  The WireGuard tunnel drops — your node can no longer receive
-                  inbound connections via the TunnelSats IP.
-                </li>
-                <li>
-                  Your Lightning node's
-                  <strong>Custom External Host</strong> setting in StartOS will
-                  point to an inactive address until renewed or cleared.
-                </li>
-              </ol>
-              <p>
-                <strong>To renew:</strong> Click
-                <strong>Renew Subscription</strong> on this dashboard at any
-                time before expiration. Your existing cryptographic keys and
-                assigned ports will be extended seamlessly without downtime.
-              </p>
-            </div>
-          </details>
-
-          <!-- Q7 -->
-          <details class="faq-item">
-            <summary class="faq-question">
-              Does TunnelSats support IPv6? What happens if I enable IPv6?
+              Does TunnelSats support IPv6? Why is IPv6 disabled by default?
             </summary>
             <div class="faq-answer">
               <p>
                 <strong
-                  >No, TunnelSats is an IPv4-only WireGuard VPN service.</strong
+                  >TunnelSats is strictly an IPv4 WireGuard VPN service.</strong
                 >
               </p>
               <p>
-                Because TunnelSats tunnels IPv4 traffic only, any IPv6 traffic
-                will route directly through your residential ISP connection,
-                exposing your home location.
-              </p>
-              <p>
-                We recommend keeping your node configured with IPv4 / Tor only.
-                If you explicitly need dual-stack and accept revealing your home
-                IP on IPv6, turn ON <em>Allow Home IPv6 Coexistence</em> under ⚙
-                → Configure.
+                Because TunnelSats tunnels IPv4 clearnet only, any direct IPv6
+                traffic bypasses the encrypted tunnel and routes over your home
+                ISP connection, exposing your residential IP. Keep IPv6 disabled
+                unless you accept revealing your home IP for IPv6 traffic.
               </p>
             </div>
           </details>
 
-          <!-- Q8 -->
+          <!-- Q6: Backup & Privacy Audit -->
           <details class="faq-item">
             <summary class="faq-question">
-              How do I independently audit and verify my node endpoints via CLI?
+              How do I backup my configuration and audit egress privacy via CLI?
             </summary>
             <div class="faq-answer">
               <p>
-                You can audit announced endpoints and active egress routes
-                directly from the StartOS host terminal using
-                <code>start-cli</code>:
+                <strong>Config Export:</strong> Use
+                <strong
+                  >Services → TunnelSats → Actions → Export WireGuard
+                  Configuration</strong
+                >
+                in StartOS to securely copy your full configuration.
               </p>
-              <h4
-                style="
-                  color: var(--accent-bitcoin);
-                  font-size: 13.5px;
-                  margin-top: 12px;
-                  margin-bottom: 6px;
-                "
-              >
-                1. Gossip Announcement Audit
-              </h4>
-              <pre><code>start-cli package attach lnd -- lncli --rpcserver=127.0.0.1:10009 getinfo</code></pre>
-              <h4
-                style="
-                  color: var(--accent-bitcoin);
-                  font-size: 13.5px;
-                  margin-top: 12px;
-                  margin-bottom: 6px;
-                "
-              >
-                2. Outbound IPv4 Route Audit
-              </h4>
+              <p>
+                <strong>CLI Route Audit:</strong> Verify that your node's
+                outbound IPv4 traffic is fully encapsulated through TunnelSats
+                from your StartOS terminal:
+              </p>
               <pre><code>start-cli package attach lnd -- curl -s https://api.ipify.org</code></pre>
               <p
                 style="
@@ -1299,8 +1369,8 @@
                   margin-top: 4px;
                 "
               >
-                Expected result: Returns your numeric TunnelSats server IP,
-                confirming outbound traffic is fully encapsulated.
+                Expected output: Your assigned TunnelSats server IP (confirming
+                zero residential ISP leak).
               </p>
             </div>
           </details>

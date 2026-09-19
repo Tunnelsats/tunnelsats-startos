@@ -244,12 +244,15 @@ function showStorefrontView() {
   const storefrontView = document.getElementById('view-storefront')
   const telemetryView = document.getElementById('view-telemetry')
   const backBtn = document.getElementById('btn-back-to-telemetry')
+  const byocHomeBtn = document.getElementById('btn-byoc-home')
 
   storefrontView.dataset.userNavigated = 'true'
   storefrontView.style.display = 'flex'
   telemetryView.style.display = 'none'
-  if (backBtn)
-    backBtn.style.display = statusData.configured ? 'inline-flex' : 'none'
+  const isConfigured = Boolean(statusData && statusData.configured)
+  if (backBtn) backBtn.style.display = isConfigured ? 'inline-flex' : 'none'
+  if (byocHomeBtn)
+    byocHomeBtn.style.display = isConfigured ? 'inline-flex' : 'none'
 }
 
 function showTelemetryView() {
@@ -259,6 +262,36 @@ function showTelemetryView() {
   storefrontView.dataset.userNavigated = 'true'
   storefrontView.style.display = 'none'
   telemetryView.style.display = 'flex'
+}
+
+function goToHomepage() {
+  closeAllModals()
+  toggleByoc(false)
+  if (statusData && statusData.configured) {
+    showTelemetryView()
+  } else {
+    showStorefrontView()
+    window.scrollTo({ top: 0, behavior: 'smooth' })
+  }
+}
+
+function closeAllModals() {
+  ;[
+    'bandwidth-modal',
+    'payment-modal',
+    'renewal-modal',
+    'faq-modal',
+    'export-modal',
+  ].forEach((id) => {
+    const modal = document.getElementById(id)
+    if (modal && modal.open) {
+      modal.close()
+    }
+  })
+  if (activePollingInterval) {
+    clearInterval(activePollingInterval)
+    activePollingInterval = null
+  }
 }
 
 // ─────────────────────────────────────────────
@@ -288,11 +321,16 @@ function selectRenewalPlan(duration, card) {
   card.classList.add('active')
 }
 
-function toggleByoc() {
+function toggleByoc(forceOpen) {
   const harmonica = document.getElementById('byoc-harmonica')
   const btn = document.getElementById('byoc-toggle-btn')
   if (!harmonica || !btn) return
-  const isOpen = harmonica.classList.toggle('open')
+  const isOpen =
+    typeof forceOpen === 'boolean'
+      ? forceOpen
+        ? (harmonica.classList.add('open'), true)
+        : (harmonica.classList.remove('open'), false)
+      : harmonica.classList.toggle('open')
   btn.setAttribute('aria-expanded', isOpen ? 'true' : 'false')
 }
 
@@ -1011,12 +1049,29 @@ function fallbackCopy(text, btn, successText) {
   const modal = document.getElementById(id)
   if (modal) {
     modal.addEventListener('click', (e) => {
-      if (e.target === modal) {
+      const inner = modal.querySelector(
+        '.modal-dialog-inner, .faq-dialog-inner',
+      )
+      if (inner) {
+        if (!inner.contains(e.target)) {
+          modal.close()
+          if (id === 'payment-modal' && activePollingInterval) {
+            clearInterval(activePollingInterval)
+            activePollingInterval = null
+          }
+        }
+      } else if (e.target === modal) {
         modal.close()
         if (id === 'payment-modal' && activePollingInterval) {
           clearInterval(activePollingInterval)
           activePollingInterval = null
         }
+      }
+    })
+    modal.addEventListener('cancel', () => {
+      if (id === 'payment-modal' && activePollingInterval) {
+        clearInterval(activePollingInterval)
+        activePollingInterval = null
       }
     })
   }
