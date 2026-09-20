@@ -1166,44 +1166,6 @@
         </div>
 
         <div class="faq-body">
-          <!-- NWC Auto-Renewals Promotion -->
-          <div class="nwc-promo-card">
-            <div class="nwc-promo-header">
-              <div class="nwc-badge">
-                <svg
-                  viewBox="0 0 24 24"
-                  width="13"
-                  height="13"
-                  fill="currentColor"
-                >
-                  <polygon
-                    points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"
-                  ></polygon>
-                </svg>
-                <span>AUTOPILOT RENEWALS</span>
-              </div>
-            </div>
-            <h3>Hands-Free Auto-Renewals with NWC</h3>
-            <p>
-              Prefer your subscription to renew automatically in the background?
-              Sign up on our web dashboard at
-              <a href="https://tunnelsats.com" target="_blank" rel="noopener"
-                ><strong>tunnelsats.com</strong></a
-              >
-              to link your node via
-              <strong>Nostr Wallet Connect (NWC)</strong> for seamless,
-              hands-free auto-renewals.
-            </p>
-            <a
-              href="https://tunnelsats.com"
-              target="_blank"
-              rel="noopener"
-              class="btn-nwc-cta"
-            >
-              <span>Sign Up on TunnelSats.com →</span>
-            </a>
-          </div>
-
           <!-- Q1: Architecture & In-Container VPN -->
           <details class="faq-item" open>
             <summary class="faq-question">
@@ -1307,7 +1269,51 @@
             </div>
           </details>
 
-          <!-- Q4: Bandwidth Allowance -->
+          <!-- Q4: Hands-Free NWC Auto-Renewals -->
+          <details class="faq-item">
+            <summary class="faq-question">
+              Can I set up automatic, hands-free subscription renewals?
+            </summary>
+            <div class="faq-answer">
+              <p>
+                <strong
+                  >Yes, native on-box Nostr Wallet Connect (NWC) auto-renewals
+                  are supported:</strong
+                >
+              </p>
+              <ul>
+                <li>
+                  <strong>Sovereign On-Box Automation:</strong> You can connect
+                  a <strong>Nostr Wallet Connect (NIP-47)</strong> pairing
+                  string from your local <strong>Alby Hub</strong>,
+                  <strong>LNbits</strong>, or mobile wallet directly within
+                  StartOS. Zero accounts or signups on third-party websites
+                  required.
+                </li>
+                <li>
+                  <strong>Capped Allowance &amp; Budget:</strong> Your wallet
+                  hub enforces a strict monthly sat budget (e.g. 20,000 sats).
+                  TunnelSats never holds your node keys, macaroons, or
+                  passwords.
+                </li>
+                <li>
+                  <strong>Automatic Renewal Flow:</strong> When your
+                  subscription reaches 7 days before expiration, the on-box
+                  companion requests a renewal invoice and pays it unprompted
+                  via your NWC connection.
+                </li>
+                <li>
+                  <strong>Fail-Safe Prompt Fallback:</strong> If your NWC wallet
+                  is disconnected, out of budget, or unconfigured, TunnelSats
+                  raises a 1-click <em>Pay Invoice</em> task on your Lightning
+                  node so you can manually approve the renewal with one click
+                  before the tunnel expires.
+                </li>
+              </ul>
+            </div>
+          </details>
+
+          <!-- Q5: Bandwidth Allowance -->
           <details class="faq-item">
             <summary class="faq-question">
               How does the 100 GB monthly bandwidth allowance work?
@@ -1333,7 +1339,7 @@
             </div>
           </details>
 
-          <!-- Q5: IPv6 Warning -->
+          <!-- Q6: IPv6 Warning -->
           <details class="faq-item">
             <summary class="faq-question">
               Does TunnelSats support IPv6? Why is IPv6 disabled by default?
@@ -1353,7 +1359,7 @@
             </div>
           </details>
 
-          <!-- Q6: Backup & Privacy Audit -->
+          <!-- Q7: Backup & Privacy Audit -->
           <details class="faq-item">
             <summary class="faq-question">
               How do I backup my configuration and audit egress privacy via CLI?
