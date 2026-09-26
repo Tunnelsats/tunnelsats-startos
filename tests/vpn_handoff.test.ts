@@ -496,8 +496,8 @@ test('nextStateAfter keeps a node whose task clear failed queued for a retry', (
     ),
     { activeTarget: 'c-lightning', pendingOff: ['eclair', 'lnd'] },
   )
-  // Raise failures need no bookkeeping: the node is already pending (off)
-  // or the target (on), so the next run raises it again.
+  // A raise failure keeps the plan's state and lists the node in unraised,
+  // so the health check requests the retry.
   assert.deepEqual(
     nextStateAfter(plan, {
       raised: [],
@@ -508,7 +508,7 @@ test('nextStateAfter keeps a node whose task clear failed queued for a retry', (
         { packageId: 'eclair', op: 'off', error: 'y' },
       ],
     }),
-    plan.next,
+    { ...plan.next, unraised: ['c-lightning', 'eclair'] },
   )
 })
 
@@ -519,7 +519,7 @@ test('handoffProgress splits pending nodes into waiting and resolved', () => {
       ['lnd', 'c-lightning', 'eclair'],
       { lnd: 'on', eclair: 'off' },
     ),
-    { waitingFor: ['lnd'], resolved: ['eclair'] },
+    { waitingFor: ['lnd'], resolved: ['eclair'], retrying: [] },
   )
   // Uninstalled and foreign (the operator replaced our tunnel) resolve, the
   // same as in the planner; unknown keeps waiting (fail closed).
@@ -529,12 +529,23 @@ test('handoffProgress splits pending nodes into waiting and resolved', () => {
       ['eclair', 'c-lightning'],
       { eclair: 'foreign' },
     ),
-    { waitingFor: ['c-lightning'], resolved: ['lnd', 'eclair'] },
+    { waitingFor: ['c-lightning'], resolved: ['lnd', 'eclair'], retrying: [] },
   )
   assert.deepEqual(handoffProgress(null, ALL_INSTALLED, {}), {
     waitingFor: [],
     resolved: [],
+    retrying: [],
   })
+  // Only installed nodes are retried: a task cannot be raised on a node that
+  // is gone.
+  assert.deepEqual(
+    handoffProgress(
+      { activeTarget: null, pendingOff: [], unraised: ['lnd', 'eclair'] },
+      ['eclair'],
+      {},
+    ).retrying,
+    ['eclair'],
+  )
 })
 
 test('runHandoffRecheck requests a dependency re-run only when a pending node resolved', async () => {
@@ -565,7 +576,11 @@ test('runHandoffRecheck requests a dependency re-run only when a pending node re
     { lnd: 'off' },
   )
   assert.deepEqual(accepted.calls, ['read:lnd', 'recheck'])
-  assert.deepEqual(accepted.progress, { waitingFor: [], resolved: ['lnd'] })
+  assert.deepEqual(accepted.progress, {
+    waitingFor: [],
+    resolved: ['lnd'],
+    retrying: [],
+  })
 
   const waiting = await run(
     { activeTarget: null, pendingOff: ['lnd'] },
@@ -686,4 +701,63 @@ test('sameHandoffState compares every persisted field; a missing record always d
     ),
     true,
   )
+})
+
+test('nextStateAfter records nodes whose task could not be raised, so they are retried', () => {
+  const plan: ClearnetVpnPlan = {
+    on: { packageId: 'c-lightning', config: CONF, announce: 'h:1' },
+    held: null,
+    off: ['eclair'],
+    retire: ['lnd'],
+    next: {
+      activeTarget: 'c-lightning',
+      pendingOff: ['eclair'],
+      handedOutKeys: [],
+    },
+  }
+  const failed = nextStateAfter(plan, {
+    raised: [],
+    cleared: [],
+    withheldOn: null,
+    failures: [
+      { packageId: 'lnd', op: 'clear', error: 'a' },
+      { packageId: 'eclair', op: 'off', error: 'b' },
+      { packageId: 'c-lightning', op: 'on', error: 'c' },
+    ],
+  })
+  // A failed clear is retried via pendingOff, not unraised.
+  assert.deepEqual(failed.unraised, ['eclair', 'c-lightning'])
+  const ok = nextStateAfter(plan, {
+    raised: ['eclair', 'c-lightning'],
+    cleared: ['lnd'],
+    withheldOn: null,
+    failures: [],
+  })
+  assert.deepEqual(ok.unraised, [])
+  assert.equal(sameHandoffState(ok, failed), false)
+})
+
+test('runHandoffRecheck requests a re-run while a task could not be raised', async () => {
+  const calls: string[] = []
+  const progress = await runHandoffRecheck({
+    readState: async () => ({
+      activeTarget: null,
+      pendingOff: [],
+      unraised: ['c-lightning'],
+    }),
+    readInstalled: async () => ALL_INSTALLED,
+    readNodeVpn: async (nodes) => {
+      calls.push(`read:${nodes.join(',')}`)
+      return {}
+    },
+    requestRecheck: async () => {
+      calls.push('recheck')
+    },
+  })
+  assert.deepEqual(calls, ['recheck'])
+  assert.deepEqual(progress, {
+    waitingFor: [],
+    resolved: [],
+    retrying: ['c-lightning'],
+  })
 })

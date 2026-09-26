@@ -71,6 +71,12 @@ export interface VpnHandoffState {
    * existed.
    */
   handedOutKeys?: string[]
+  /**
+   * Nodes whose on- or off-task could not be raised on the last run. The
+   * handoff health check requests a re-run while any is installed, so a
+   * transient failure never leaves the operator without a task.
+   */
+  unraised?: PackageId[]
 }
 
 export const HANDED_OUT_KEYS_CAP = 32
@@ -79,6 +85,7 @@ export const EMPTY_HANDOFF_STATE: VpnHandoffState = {
   activeTarget: null,
   pendingOff: [],
   handedOutKeys: [],
+  unraised: [],
 }
 
 /** What identifies a tunnel as one TunnelSats handed out. */
@@ -374,24 +381,25 @@ export async function executeClearnetVpnPlan(
  * The state to persist after a plan ran. A node whose task clear failed stays
  * in `pendingOff`, so the next run retries the clear instead of stranding an
  * obsolete prompt. A withheld on-task leaves no active target, so the next
- * run treats the target as new again. Failed raises need nothing extra: the
- * node is already pending (off) or the target (on), so the next run raises
- * it again.
+ * run treats the target as new again. A node whose raise failed is already
+ * pending (off) or the target (on), so the next run raises it again; it is
+ * listed in `unraised` so the handoff health check requests that run.
  */
 export function nextStateAfter(
   plan: ClearnetVpnPlan,
   outcome: ClearnetVpnOutcome,
 ): Required<VpnHandoffState> {
   const pendingOff = [...plan.next.pendingOff]
+  const unraised: PackageId[] = []
   for (const f of outcome.failures) {
-    if (f.op === 'clear' && !pendingOff.includes(f.packageId)) {
-      pendingOff.push(f.packageId)
-    }
+    const list = f.op === 'clear' ? pendingOff : unraised
+    if (!list.includes(f.packageId)) list.push(f.packageId)
   }
   return {
     activeTarget: outcome.withheldOn ? null : plan.next.activeTarget,
     pendingOff,
     handedOutKeys: [...(plan.next.handedOutKeys ?? [])],
+    unraised,
   }
 }
 
@@ -409,7 +417,8 @@ export function sameHandoffState(
   return (
     (prev.activeTarget ?? null) === next.activeTarget &&
     same(prev.pendingOff ?? [], next.pendingOff) &&
-    same(prev.handedOutKeys ?? [], next.handedOutKeys ?? [])
+    same(prev.handedOutKeys ?? [], next.handedOutKeys ?? []) &&
+    same(prev.unraised ?? [], next.unraised ?? [])
   )
 }
 
@@ -428,6 +437,8 @@ export interface HandoffProgress {
    * next run retires them.
    */
   resolved: PackageId[]
+  /** Installed nodes whose task could not be raised; the next run retries. */
+  retrying: PackageId[]
 }
 
 /** Classifies the recorded pending nodes the same way the planner does. */
@@ -436,7 +447,17 @@ export function handoffProgress(
   installed: readonly string[],
   nodeVpn: Partial<Record<PackageId, NodeVpnState>>,
 ): HandoffProgress {
-  const progress: HandoffProgress = { waitingFor: [], resolved: [] }
+  const progress: HandoffProgress = {
+    waitingFor: [],
+    resolved: [],
+    retrying: [
+      ...new Set(
+        (state?.unraised ?? []).filter(
+          (p) => isPackageId(p) && installed.includes(p),
+        ),
+      ),
+    ],
+  }
   for (const p of new Set((state?.pendingOff ?? []).filter(isPackageId))) {
     const vpn = nodeVpn[p]
     if (!installed.includes(p) || vpn === 'off' || vpn === 'foreign') {
@@ -461,23 +482,26 @@ export interface HandoffRecheckOps {
 }
 
 /**
- * Polled by a health check. Reports handoff progress and, when a pending
- * node turned off without a status change (off-task accepted on a stopped
- * node), requests a setupDependencies re-run so the held on-task is
- * released.
+ * Polled by a health check. Reports handoff progress and requests a
+ * setupDependencies re-run when a pending node turned off without a status
+ * change (off-task accepted on a stopped node), so the held on-task is
+ * released, or when a task could not be raised last run, so it is retried
+ * (the poll interval is the backoff).
  */
 export async function runHandoffRecheck(
   ops: HandoffRecheckOps,
 ): Promise<HandoffProgress> {
   const state = await ops.readState()
   const pending = (state?.pendingOff ?? []).filter(isPackageId)
-  if (!state || pending.length === 0) return { waitingFor: [], resolved: [] }
+  if (!state || (pending.length === 0 && (state.unraised ?? []).length === 0)) {
+    return { waitingFor: [], resolved: [], retrying: [] }
+  }
   const installed = await ops.readInstalled()
-  const nodeVpn = await ops.readNodeVpn(
-    pending.filter((p) => installed.includes(p)),
-    state,
-  )
+  const toRead = pending.filter((p) => installed.includes(p))
+  const nodeVpn = toRead.length > 0 ? await ops.readNodeVpn(toRead, state) : {}
   const progress = handoffProgress(state, installed, nodeVpn)
-  if (progress.resolved.length > 0) await ops.requestRecheck()
+  if (progress.resolved.length > 0 || progress.retrying.length > 0) {
+    await ops.requestRecheck()
+  }
   return progress
 }

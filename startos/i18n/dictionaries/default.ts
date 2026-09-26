@@ -73,6 +73,7 @@ const dict = {
   'Waiting for ${nodes} to turn off the TunnelSats tunnel. Accept the task on that node to finish the handoff.': 69,
   'No node handoff pending': 70,
   'Could not check the VPN handoff: ${error}': 71,
+  'Offering the TunnelSats task to ${nodes} failed; retrying automatically.': 72,
 } as const
 
 /**

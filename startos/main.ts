@@ -137,6 +137,19 @@ export const main = sdk.setupMain(async ({ effects }) => {
                 ),
               }
             }
+            if (progress.retrying.length > 0) {
+              return {
+                result: 'waiting',
+                message: i18n(
+                  'Offering the TunnelSats task to ${nodes} failed; retrying automatically.',
+                  {
+                    nodes: progress.retrying
+                      .map((p) => NODE_TITLES[p])
+                      .join(', '),
+                  },
+                ),
+              }
+            }
             return {
               result: 'success',
               message: i18n('No node handoff pending'),
