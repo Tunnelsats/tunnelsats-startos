@@ -420,17 +420,57 @@ test('executeClearnetVpnPlan raises on/off, clears retired, and reports failures
       calls.push(`clear:${pkg}`)
     },
   })
+  // Clears run first, the on-task last.
   assert.deepEqual(calls, [
-    'on:c-lightning',
+    'clear:eclair',
     'off:lnd',
     'off:eclair',
-    'clear:eclair',
+    'on:c-lightning',
   ])
-  assert.deepEqual(outcome.raised, ['c-lightning', 'lnd'])
+  assert.deepEqual(outcome.raised, ['lnd', 'c-lightning'])
   assert.deepEqual(outcome.cleared, ['eclair'])
+  assert.equal(outcome.withheldOn, null)
   assert.equal(outcome.failures.length, 1)
   assert.equal(outcome.failures[0].packageId, 'eclair')
   assert.equal(outcome.failures[0].op, 'off')
+})
+
+test('a failed clear withholds the on-task, so two nodes never hold an on-task at once', async () => {
+  // lnd never accepted its on-task, so it reads off and is retired; if its
+  // task cannot be cleared, the new node must not be offered one too.
+  const calls: string[] = []
+  const plan: ClearnetVpnPlan = {
+    on: { packageId: 'c-lightning', config: CONF, announce: 'h:1' },
+    held: null,
+    off: [],
+    retire: ['lnd'],
+    next: { activeTarget: 'c-lightning', pendingOff: [], handedOutKeys: [] },
+  }
+  const outcome = await executeClearnetVpnPlan(plan, {
+    raiseOn: async (on) => {
+      calls.push(`on:${on.packageId}`)
+    },
+    raiseOff: async () => {},
+    clear: async (pkg) => {
+      calls.push(`clear:${pkg}`)
+      throw new Error('boom')
+    },
+  })
+  assert.deepEqual(calls, ['clear:lnd'])
+  assert.deepEqual(outcome.raised, [])
+  assert.deepEqual(outcome.withheldOn, {
+    packageId: 'c-lightning',
+    until: ['lnd'],
+  })
+  assert.deepEqual(outcome.failures, [
+    { packageId: 'lnd', op: 'clear', error: 'boom' },
+  ])
+  // Nothing was handed over: no active target, the clear stays queued, and
+  // the next run retries the clear before offering the on-task again.
+  assert.deepEqual(core(nextStateAfter(plan, outcome)), {
+    activeTarget: null,
+    pendingOff: ['lnd'],
+  })
 })
 
 test('nextStateAfter keeps a node whose task clear failed queued for a retry', () => {
@@ -450,6 +490,7 @@ test('nextStateAfter keeps a node whose task clear failed queued for a retry', (
       nextStateAfter(plan, {
         raised: ['c-lightning', 'eclair'],
         cleared: [],
+        withheldOn: null,
         failures: [{ packageId: 'lnd', op: 'clear', error: 'boom' }],
       }),
     ),
@@ -461,6 +502,7 @@ test('nextStateAfter keeps a node whose task clear failed queued for a retry', (
     nextStateAfter(plan, {
       raised: [],
       cleared: ['lnd'],
+      withheldOn: null,
       failures: [
         { packageId: 'c-lightning', op: 'on', error: 'x' },
         { packageId: 'eclair', op: 'off', error: 'y' },

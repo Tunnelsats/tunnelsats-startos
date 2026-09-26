@@ -304,6 +304,11 @@ export interface ClearnetVpnOps {
 export interface ClearnetVpnOutcome {
   raised: PackageId[]
   cleared: PackageId[]
+  /**
+   * The on-task this run did not raise because clearing another node's task
+   * failed (not an operational failure of the on-task itself).
+   */
+  withheldOn: { packageId: PackageId; until: PackageId[] } | null
   failures: {
     packageId: PackageId
     op: 'on' | 'off' | 'clear'
@@ -316,12 +321,22 @@ export interface ClearnetVpnOutcome {
  * on the next run because the plan's `next` state keeps it pending. Failures
  * are returned rather than thrown, so one unreachable node cannot block the
  * handoff on the others.
+ *
+ * Retired tasks are cleared first and the on-task is raised last, only when
+ * every clear succeeded. A node that never accepted its on-task reads as off
+ * and is retired; if its task survived, the operator could accept both it
+ * and the new node's on-task and run one WireGuard key on two nodes.
  */
 export async function executeClearnetVpnPlan(
   plan: ClearnetVpnPlan,
   ops: ClearnetVpnOps,
 ): Promise<ClearnetVpnOutcome> {
-  const outcome: ClearnetVpnOutcome = { raised: [], cleared: [], failures: [] }
+  const outcome: ClearnetVpnOutcome = {
+    raised: [],
+    cleared: [],
+    withheldOn: null,
+    failures: [],
+  }
   const attempt = async (
     packageId: PackageId,
     op: 'on' | 'off' | 'clear',
@@ -339,20 +354,29 @@ export async function executeClearnetVpnPlan(
     }
   }
 
+  for (const p of plan.retire) await attempt(p, 'clear', () => ops.clear(p))
+  for (const p of plan.off) await attempt(p, 'off', () => ops.raiseOff(p))
   if (plan.on) {
     const on = plan.on
-    await attempt(on.packageId, 'on', () => ops.raiseOn(on))
+    const uncleared = outcome.failures
+      .filter((f) => f.op === 'clear')
+      .map((f) => f.packageId)
+    if (uncleared.length > 0) {
+      outcome.withheldOn = { packageId: on.packageId, until: uncleared }
+    } else {
+      await attempt(on.packageId, 'on', () => ops.raiseOn(on))
+    }
   }
-  for (const p of plan.off) await attempt(p, 'off', () => ops.raiseOff(p))
-  for (const p of plan.retire) await attempt(p, 'clear', () => ops.clear(p))
   return outcome
 }
 
 /**
  * The state to persist after a plan ran. A node whose task clear failed stays
  * in `pendingOff`, so the next run retries the clear instead of stranding an
- * obsolete prompt. Failed raises need nothing extra: the node is already
- * pending (off) or the target (on), so the next run raises it again.
+ * obsolete prompt. A withheld on-task leaves no active target, so the next
+ * run treats the target as new again. Failed raises need nothing extra: the
+ * node is already pending (off) or the target (on), so the next run raises
+ * it again.
  */
 export function nextStateAfter(
   plan: ClearnetVpnPlan,
@@ -365,7 +389,7 @@ export function nextStateAfter(
     }
   }
   return {
-    activeTarget: plan.next.activeTarget,
+    activeTarget: outcome.withheldOn ? null : plan.next.activeTarget,
     pendingOff,
     handedOutKeys: [...(plan.next.handedOutKeys ?? [])],
   }

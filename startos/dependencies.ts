@@ -410,6 +410,11 @@ async function handOffClearnetVpn(
       `TunnelSats: clearnet-vpn ${f.op} task on ${f.packageId} failed (will retry): ${f.error}`,
     )
   }
+  if (outcome.withheldOn) {
+    console.warn(
+      `TunnelSats: withholding the clearnet-vpn on-task for ${outcome.withheldOn.packageId} until the task on ${outcome.withheldOn.until.join(', ')} is cleared`,
+    )
+  }
 
   const next = nextStateAfter(plan, outcome)
   if (!sameHandoffState(state, next)) {
