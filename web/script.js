@@ -479,7 +479,11 @@ async function startCheckout() {
       {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ serverId, duration: selectedDuration }),
+        body: JSON.stringify({
+          serverId,
+          duration: selectedDuration,
+          wgPublicKey: currentKeypair.publicKey,
+        }),
       },
     )
 
@@ -562,39 +566,57 @@ function pollOrderSettlement(paymentHash, keypair, serverId) {
   }, 3500)
 }
 
-function assembleWireguardConfig(claimData, privateKey) {
-  const vpnPort =
-    claimData.vpnPort ||
-    parseInt((claimData.server?.endpoint || '').split(':')[1] || '9735', 10)
-  const serverDomain = (claimData.server?.endpoint || '').split(':')[0]
+// A claim is only accepted for the key generated here; its config is built
+// from the structured fields and the local private key. fullConfig, config
+// and any private key in the response are never used, and every value is
+// checked so the response cannot add lines (a PostUp) to the config.
+function assembleWireguardConfig(claimData, keypair) {
+  const server = claimData.server || {}
+  const peer = claimData.peer || {}
+  if (peer.publicKey !== keypair.publicKey) {
+    throw new Error(
+      'The claim was provisioned for a different WireGuard key; not saving it.',
+    )
+  }
+  const vpnPort = claimData.vpnPort
+  if (!Number.isInteger(vpnPort) || vpnPort < 1 || vpnPort > 65535) {
+    throw new Error('The claim has no valid VPN port.')
+  }
+  const allowedIPs = server.allowedIPs ?? '0.0.0.0/0, ::/0'
+  const values = [server.endpoint, server.publicKey, peer.address, allowedIPs]
+  if (peer.presharedKey != null) values.push(peer.presharedKey)
+  if (claimData.subscriptionEnd != null) values.push(claimData.subscriptionEnd)
+  if (
+    values.some((v) => typeof v !== 'string' || !v.trim() || /[\r\n]/.test(v))
+  ) {
+    throw new Error('The claim is incomplete or malformed.')
+  }
 
   const lines = [
     '[Interface]',
-    `PrivateKey = ${privateKey}`,
-    `Address = ${claimData.peer?.address || claimData.vpnIp}`,
+    `PrivateKey = ${keypair.privateKey}`,
+    `Address = ${peer.address}`,
   ]
-
   if (claimData.subscriptionEnd) {
     lines.push(`# Valid Until: ${claimData.subscriptionEnd}`)
   }
   lines.push(`# VPNPort: ${vpnPort}`)
-  lines.push(`# Server: ${serverDomain}`)
+  lines.push(`# Server: ${server.endpoint.split(':')[0]}`)
   lines.push('')
   lines.push('[Peer]')
-  lines.push(
-    `PublicKey = ${claimData.server?.publicKey || claimData.serverPublicKey}`,
-  )
-  lines.push(`Endpoint = ${claimData.server?.endpoint || claimData.endpoint}`)
-  lines.push(`AllowedIPs = ${claimData.server?.allowedIPs || '0.0.0.0/0'}`)
-
-  if (claimData.peer?.presharedKey) {
-    lines.push(`PresharedKey = ${claimData.peer.presharedKey}`)
+  lines.push(`PublicKey = ${server.publicKey}`)
+  lines.push(`Endpoint = ${server.endpoint}`)
+  lines.push(`AllowedIPs = ${allowedIPs}`)
+  if (peer.presharedKey != null) {
+    lines.push(`PresharedKey = ${peer.presharedKey}`)
   }
-
   return lines.join('\n') + '\n'
 }
 
-async function claimAndSaveConfig(paymentHash, keypair) {
+// ~2 minutes of provisioning retries at 3.5 s each.
+const MAX_CLAIM_ATTEMPTS = 35
+
+async function claimAndSaveConfig(paymentHash, keypair, attempt = 1) {
   try {
     const claimRes = await fetch(
       'https://tunnelsats.com/api/public/v1/subscription/claim',
@@ -613,9 +635,21 @@ async function claimAndSaveConfig(paymentHash, keypair) {
     }
 
     const claimData = await claimRes.json()
-    const fullConfig =
-      claimData.fullConfig ||
-      assembleWireguardConfig(claimData, keypair.privateKey)
+    if (claimRes.status === 202 || claimData.status === 'processing') {
+      if (attempt >= MAX_CLAIM_ATTEMPTS) {
+        throw new Error('The tunnel is still being provisioned.')
+      }
+      setPaymentStatus(
+        'Payment confirmed! The tunnel is being provisioned...',
+        'pulse-green',
+      )
+      setTimeout(
+        () => claimAndSaveConfig(paymentHash, keypair, attempt + 1),
+        3500,
+      )
+      return
+    }
+    const fullConfig = assembleWireguardConfig(claimData, keypair)
 
     // Save to local container bridge
     const saveRes = await fetch('/api/config/save', {
@@ -653,7 +687,12 @@ async function claimAndSaveConfig(paymentHash, keypair) {
     }, 1600)
   } catch (err) {
     console.error('Claim error:', err)
-    setPaymentStatus(`Provisioning error: ${err.message}`, 'pulse-amber')
+    // Nothing was saved. The payment hash lets support recover the paid
+    // order; keep this page open, the private key only exists here.
+    setPaymentStatus(
+      `Provisioning error: ${err.message} Keep this page open and contact support with payment hash ${paymentHash}.`,
+      'pulse-amber',
+    )
   }
 }
 

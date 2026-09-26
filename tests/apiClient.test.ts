@@ -114,24 +114,42 @@ function startMockApiServer(): Promise<{ server: Server; url: string }> {
           url.pathname === '/api/public/v1/subscription/claim'
         ) {
           const parsed = JSON.parse(body)
-          if (parsed.paymentHash === 'paid-hash') {
-            res.writeHead(200)
-            res.end(
-              JSON.stringify({
-                status: 'success',
-                subscriptionEnd: '2026-10-15T00:00:00.000Z',
-                server: {
-                  endpoint: 'de2.tunnelsats.com:51820',
-                  publicKey: 'serverPubkeyBase6412345678901234567890123456=',
-                  allowedIPs: '0.0.0.0/0',
-                },
-                peer: {
-                  address: '10.9.0.102/32',
-                  presharedKey: 'pskBase64Key12345678901234567890123456789012=',
-                },
-                vpnPort: 24556,
-              }),
-            )
+          const claimed = {
+            status: 'success',
+            subscriptionEnd: '2026-10-15T00:00:00.000Z',
+            server: {
+              endpoint: 'de2.tunnelsats.com:51820',
+              publicKey: 'serverPubkeyBase6412345678901234567890123456=',
+              allowedIPs: '0.0.0.0/0',
+            },
+            peer: {
+              address: '10.9.0.102/32',
+              publicKey: parsed.wgPublicKey,
+              presharedKey: 'pskBase64Key12345678901234567890123456789012=',
+            },
+            vpnPort: 24556,
+          }
+          const variants: Record<string, [number, object]> = {
+            'paid-hash': [200, claimed],
+            'fullconfig-hash': [
+              200,
+              {
+                ...claimed,
+                fullConfig:
+                  '[Interface]\nPrivateKey = SERVER_HELD\nPostUp = evil\n',
+              },
+            ],
+            'noecho-hash': [
+              200,
+              { ...claimed, peer: { address: '10.9.0.102/32' } },
+            ],
+            'noport-hash': [200, { ...claimed, vpnPort: undefined }],
+            'processing-hash': [202, { status: 'processing' }],
+          }
+          const variant = variants[parsed.paymentHash]
+          if (variant) {
+            res.writeHead(variant[0])
+            res.end(JSON.stringify(variant[1]))
           } else {
             res.writeHead(402)
             res.end(
@@ -281,6 +299,51 @@ test('claimWireguardConfig provisions and assembles complete client WireGuard co
   }
 })
 
+test('claimWireguardConfig never uses a server-supplied fullConfig', async () => {
+  const { server, url } = await startMockApiServer()
+  try {
+    const privKey = 'myPrivateKeyBase641234567890123456789012345='
+    const result = await claimWireguardConfig(
+      {
+        paymentHash: 'fullconfig-hash',
+        wgPublicKey: 'myPublicKeyBase6412345678901234567890123456=',
+        wgPrivateKey: privKey,
+      },
+      url,
+    )
+    assert.match(result.fullConfig, /PrivateKey = myPrivateKeyBase64/)
+    assert.doesNotMatch(result.fullConfig, /SERVER_HELD|PostUp/)
+  } finally {
+    server.close()
+  }
+})
+
+for (const [paymentHash, error] of [
+  ['noecho-hash', /different WireGuard key/],
+  ['noport-hash', /VPN port/],
+  ['processing-hash', /still being provisioned/],
+] as const) {
+  test(`claimWireguardConfig fails closed for ${paymentHash}`, async () => {
+    const { server, url } = await startMockApiServer()
+    try {
+      await assert.rejects(
+        () =>
+          claimWireguardConfig(
+            {
+              paymentHash,
+              wgPublicKey: 'myPublicKeyBase6412345678901234567890123456=',
+              wgPrivateKey: 'myPrivateKeyBase641234567890123456789012345=',
+            },
+            url,
+          ),
+        error,
+      )
+    } finally {
+      server.close()
+    }
+  })
+}
+
 test('requestRenewal submits renewal and returns invoice', async () => {
   const { server, url } = await startMockApiServer()
   try {
@@ -352,4 +415,43 @@ test('assembleWireguardConfig builds syntactically valid configuration', () => {
   assert.match(conf, /# Valid Until: 2026-12-31T23:59:59\.000Z/)
   assert.match(conf, /# Server: de2\.tunnelsats\.com/)
   assert.match(conf, /PresharedKey = pskKeyBase64/)
+})
+
+test('assembleWireguardConfig requires an integer VPN port (no endpoint fallback)', () => {
+  const claim = {
+    server: {
+      endpoint: 'de2.tunnelsats.com:51820',
+      publicKey: 'serverPublicKeyBase641234567890123456789012=',
+    },
+    peer: { address: '10.9.0.55/32' },
+  }
+  for (const vpnPort of [undefined, 0, 70000, 1.5, '24556']) {
+    assert.throws(
+      () =>
+        assembleWireguardConfig(
+          { ...claim, vpnPort: vpnPort as number | undefined },
+          'k',
+        ),
+      /VPN port/,
+    )
+  }
+})
+
+test('assembleWireguardConfig rejects values that would add config lines', () => {
+  assert.throws(
+    () =>
+      assembleWireguardConfig(
+        {
+          server: {
+            endpoint: 'de2.tunnelsats.com:51820',
+            publicKey: 'serverPublicKeyBase641234567890123456789012=',
+            allowedIPs: '0.0.0.0/0\nPostUp = evil',
+          },
+          peer: { address: '10.9.0.55/32' },
+          vpnPort: 24556,
+        },
+        'k',
+      ),
+    /malformed/,
+  )
 })

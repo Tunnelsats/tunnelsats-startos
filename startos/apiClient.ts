@@ -136,7 +136,10 @@ export async function pollInvoiceSettlement(
 }
 
 /**
- * Assembles a standard WireGuard .conf file from server claim data and the local private key.
+ * Assembles a standard WireGuard .conf file from server claim data and the
+ * local private key. Throws instead of guessing: vpnPort must be an integer
+ * port (no endpoint fallback), and no value may add lines to the config
+ * (a response must not be able to inject a PostUp).
  */
 export function assembleWireguardConfig(
   claimData: {
@@ -155,15 +158,38 @@ export function assembleWireguardConfig(
   },
   privateKey: string,
 ): string {
-  const vpnPort =
-    claimData.vpnPort ||
-    parseInt(claimData.server.endpoint.split(':')[1] || '9735', 10)
-  const serverDomain = claimData.server.endpoint.split(':')[0]
+  const vpnPort = claimData.vpnPort
+  if (
+    typeof vpnPort !== 'number' ||
+    !Number.isInteger(vpnPort) ||
+    vpnPort < 1 ||
+    vpnPort > 65535
+  ) {
+    throw new Error('The claim has no valid VPN port.')
+  }
+  const server = claimData.server ?? ({} as Partial<typeof claimData.server>)
+  const peer = claimData.peer ?? ({} as Partial<typeof claimData.peer>)
+  const allowedIPs = server.allowedIPs ?? '0.0.0.0/0'
+  const values: unknown[] = [
+    server.endpoint,
+    server.publicKey,
+    peer.address,
+    allowedIPs,
+  ]
+  if (peer.presharedKey != null) values.push(peer.presharedKey)
+  if (claimData.subscriptionEnd != null) values.push(claimData.subscriptionEnd)
+  if (
+    values.some((v) => typeof v !== 'string' || !v.trim() || /[\r\n]/.test(v))
+  ) {
+    throw new Error('The claim is incomplete or malformed.')
+  }
+  const endpoint = server.endpoint as string
+  const serverDomain = endpoint.split(':')[0]
 
   const lines: string[] = [
     '[Interface]',
     `PrivateKey = ${privateKey}`,
-    `Address = ${claimData.peer.address}`,
+    `Address = ${peer.address}`,
   ]
 
   if (claimData.subscriptionEnd) {
@@ -174,12 +200,12 @@ export function assembleWireguardConfig(
 
   lines.push('')
   lines.push('[Peer]')
-  lines.push(`PublicKey = ${claimData.server.publicKey}`)
-  lines.push(`Endpoint = ${claimData.server.endpoint}`)
-  lines.push(`AllowedIPs = ${claimData.server.allowedIPs || '0.0.0.0/0'}`)
+  lines.push(`PublicKey = ${server.publicKey}`)
+  lines.push(`Endpoint = ${endpoint}`)
+  lines.push(`AllowedIPs = ${allowedIPs}`)
 
-  if (claimData.peer.presharedKey) {
-    lines.push(`PresharedKey = ${claimData.peer.presharedKey}`)
+  if (peer.presharedKey != null) {
+    lines.push(`PresharedKey = ${peer.presharedKey}`)
   }
 
   return lines.join('\n') + '\n'
@@ -187,6 +213,9 @@ export function assembleWireguardConfig(
 
 /**
  * Claims the provisioned WireGuard configuration once payment is settled.
+ * Only a claim provisioned for `wgPublicKey` is accepted; the config is
+ * built from its structured fields and `wgPrivateKey`. A server-supplied
+ * `fullConfig` is never used.
  */
 export async function claimWireguardConfig(
   params: {
@@ -209,9 +238,9 @@ export async function claimWireguardConfig(
     }
     peer: {
       address: string
+      publicKey?: string
       presharedKey?: string
     }
-    fullConfig?: string | null
     vpnPort?: number
   }>(url, {
     method: 'POST',
@@ -222,17 +251,25 @@ export async function claimWireguardConfig(
     }),
   })
 
-  const fullConfig =
-    data.fullConfig ||
-    assembleWireguardConfig(
-      {
-        server: data.server,
-        peer: data.peer,
-        subscriptionEnd: data.subscriptionEnd,
-        vpnPort: data.vpnPort,
-      },
-      params.wgPrivateKey,
+  // fetchJson passes 202 through; its body carries no configuration.
+  if (data.status === 'processing') {
+    throw new Error('The tunnel is still being provisioned; retry the claim.')
+  }
+  if (data.peer?.publicKey !== params.wgPublicKey) {
+    throw new Error(
+      'The claim was provisioned for a different WireGuard key; not using it.',
     )
+  }
+
+  const fullConfig = assembleWireguardConfig(
+    {
+      server: data.server,
+      peer: data.peer,
+      subscriptionEnd: data.subscriptionEnd,
+      vpnPort: data.vpnPort,
+    },
+    params.wgPrivateKey,
+  )
 
   return {
     fullConfig,
