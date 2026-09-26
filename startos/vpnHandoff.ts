@@ -312,6 +312,12 @@ export function readNodeVpnState(
 export interface ClearnetVpnOps {
   raiseOn: (on: NonNullable<ClearnetVpnPlan['on']>) => Promise<unknown>
   raiseOff: (packageId: PackageId) => Promise<unknown>
+  /**
+   * Clears the task TunnelSats raised on this node, if any. StartOS keeps
+   * tasks in the raising package's task map and clear_tasks only mutates the
+   * caller's own map, so retiring a node (including one running a foreign
+   * VPN) never removes a prompt another package raised there.
+   */
   clear: (packageId: PackageId) => Promise<unknown>
 }
 
