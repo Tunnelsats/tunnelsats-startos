@@ -505,3 +505,27 @@ export async function runHandoffRecheck(
   }
   return progress
 }
+
+/**
+ * setupDependencies re-runs whenever a watched file changes, and runs can
+ * overlap. The handoff reads its previous state and writes the next one, so
+ * runs are serialized; otherwise a quick lnd->cln->eclair switch could lose
+ * the off-task for lnd. The configuration is read only once a run holds the
+ * queue: a run that read it before queueing could, after a newer target
+ * change completed, redo the handoff for the old target.
+ */
+export function createHandoffQueue() {
+  let tail: Promise<unknown> = Promise.resolve()
+  return function enqueue<C, T>(
+    readConfig: () => Promise<C>,
+    run: (config: C) => Promise<T>,
+  ): Promise<{ config: C; result: T }> {
+    const job = async () => {
+      const config = await readConfig()
+      return { config, result: await run(config) }
+    }
+    const p = tail.then(job, job)
+    tail = p.catch(() => undefined)
+    return p
+  }
+}

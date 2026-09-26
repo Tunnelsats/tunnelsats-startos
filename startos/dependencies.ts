@@ -15,6 +15,7 @@ import {
   executeClearnetVpnPlan,
   nextStateAfter,
   sameHandoffState,
+  createHandoffQueue,
   previousNodes,
   handedOverTarget,
   buildOnTaskInput,
@@ -308,18 +309,8 @@ export function getDependenciesForConfig(
   return deps
 }
 
-/**
- * setupDependencies re-runs whenever a watched file changes. Runs can
- * overlap, and the handoff reads its previous state and writes the next one,
- * so runs are serialized. Otherwise a quick lnd→cln→eclair switch could lose
- * the off-task for lnd.
- */
-let handoffQueue: Promise<unknown> = Promise.resolve()
-function serializeHandoff<T>(fn: () => Promise<T>): Promise<T> {
-  const run = handoffQueue.then(fn, fn)
-  handoffQueue = run.catch(() => undefined)
-  return run
-}
+/** Serializes handoff runs; see createHandoffQueue. */
+const enqueueHandoff = createHandoffQueue()
 
 /**
  * Registers a status watch on nodes that may still run the tunnel, so a
@@ -427,38 +418,54 @@ async function handOffClearnetVpn(
 }
 
 export const setDependencies = sdk.setupDependencies(async ({ effects }) => {
-  const config = await configJson.read().const(effects)
-  const meta = await tunnelsatsMeta
+  // These reads only register the watches that re-run this hook. The run
+  // itself acts on what is read inside the queue (see createHandoffQueue):
+  // a run that waited behind a newer change must not act on older state.
+  await configJson.read().const(effects)
+  await tunnelsatsMeta
     .read()
     .const(effects)
     .catch(() => null)
-
-  // 1. Expiry task, driven only by the API-confirmed expiry
-  const expiryTask = getSubscriptionExpiryTask(config, meta)
-  if (expiryTask.shouldCreateTask && expiryTask.severity && expiryTask.reason) {
-    await sdk.action.createOwnTask(
-      effects,
-      renewSubscription,
-      expiryTask.severity,
-      {
-        reason: expiryTask.reason,
-      },
-    )
-  } else {
-    await sdk.action.clearTask(effects, expiryTask.clearTaskKey)
-  }
-  await sdk.action.clearTask(effects, ...RETIRED_TASK_KEYS)
-
-  // 2. Clearnet-VPN handoff: on-task for the target, off-task for the rest.
   // The handoff health check writes handoffRecheck when a pending node turned
-  // off without a status change; watching it re-runs this hook.
+  // off without a status change, or a task could not be raised.
   await handoffRecheck
     .read()
     .const(effects)
     .catch(() => null)
-  const pendingOff = await serializeHandoff(() =>
-    handOffClearnetVpn(effects, config),
+
+  const { config, result: pendingOff } = await enqueueHandoff(
+    async () => ({
+      config: await configJson.read().once(),
+      meta: await tunnelsatsMeta
+        .read()
+        .once()
+        .catch(() => null),
+    }),
+    async ({ config, meta }) => {
+      // 1. Expiry task, driven only by the API-confirmed expiry
+      const expiryTask = getSubscriptionExpiryTask(config, meta)
+      if (
+        expiryTask.shouldCreateTask &&
+        expiryTask.severity &&
+        expiryTask.reason
+      ) {
+        await sdk.action.createOwnTask(
+          effects,
+          renewSubscription,
+          expiryTask.severity,
+          {
+            reason: expiryTask.reason,
+          },
+        )
+      } else {
+        await sdk.action.clearTask(effects, expiryTask.clearTaskKey)
+      }
+      await sdk.action.clearTask(effects, ...RETIRED_TASK_KEYS)
+
+      // 2. Clearnet-VPN handoff: on-task for the target, off-task for the rest.
+      return handOffClearnetVpn(effects, config)
+    },
   )
 
-  return getDependenciesForConfig(config, pendingOff)
+  return getDependenciesForConfig(config.config, pendingOff)
 })

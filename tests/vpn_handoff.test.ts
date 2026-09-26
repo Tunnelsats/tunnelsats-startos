@@ -11,6 +11,7 @@ import {
   buildOffTaskInput,
   tunnelFingerprint,
   sameHandoffState,
+  createHandoffQueue,
   type ClearnetVpnPlan,
   type VpnHandoffState,
 } from '../startos/vpnHandoff'
@@ -760,4 +761,65 @@ test('runHandoffRecheck requests a re-run while a task could not be raised', asy
     resolved: [],
     retrying: ['c-lightning'],
   })
+})
+
+test('the handoff queue reads the configuration only once a run holds the queue', async () => {
+  const enqueue = createHandoffQueue()
+  let config = 'lnd'
+  const seen: string[] = []
+  let release!: () => void
+  const blocker = new Promise<void>((r) => (release = r))
+  let started!: () => void
+  const firstStarted = new Promise<void>((r) => (started = r))
+
+  const first = enqueue(
+    async () => config,
+    async (c) => {
+      seen.push(c)
+      started()
+      await blocker
+      return c
+    },
+  )
+  await firstStarted
+  // Queued while the first run is still in progress...
+  const second = enqueue(
+    async () => config,
+    async (c) => {
+      seen.push(c)
+      return c
+    },
+  )
+  // ...then the operator switches the target before it starts.
+  config = 'c-lightning'
+  release()
+
+  assert.deepEqual(await first, { config: 'lnd', result: 'lnd' })
+  assert.deepEqual(await second, {
+    config: 'c-lightning',
+    result: 'c-lightning',
+  })
+  assert.deepEqual(seen, ['lnd', 'c-lightning'])
+})
+
+test('a failed handoff run does not block the queue', async () => {
+  const enqueue = createHandoffQueue()
+  await assert.rejects(
+    enqueue(
+      async () => 1,
+      async () => {
+        throw new Error('boom')
+      },
+    ),
+  )
+  assert.deepEqual(
+    await enqueue(
+      async () => 2,
+      async (c) => c * 2,
+    ),
+    {
+      config: 2,
+      result: 4,
+    },
+  )
 })
