@@ -85,7 +85,8 @@ class TestBridgeLifecycle(unittest.TestCase):
                 mock_response.__exit__ = MagicMock(return_value=False)
                 mock_urlopen.return_value = mock_response
 
-                bridge.lazy_sync("mock_pubkey_123")
+                with patch('bridge.get_wg_pubkey', return_value="mock_pubkey_123"):
+                    self.assertEqual(bridge.lazy_sync("mock_pubkey_123"), "confirmed")
 
                 self.assertTrue(os.path.exists(meta_file))
                 with open(meta_file, "r") as f:

@@ -47,8 +47,14 @@ class ProvenanceTestBase(unittest.TestCase):
         bridge.APP_CONFIG_PATH = self.app_path
         with open(self.conf_path, "w") as f:
             f.write(CONF_WITH_COMMENT)
+        # The key the saved configuration currently holds (lazy_sync re-checks
+        # it before committing a result).
+        self.configured_key = "pk_current"
+        self._key_patch = patch('bridge.get_wg_pubkey', side_effect=lambda: self.configured_key)
+        self._key_patch.start()
 
     def tearDown(self):
+        self._key_patch.stop()
         bridge.META_FILE_PATH, bridge.CONFIG_PATH, bridge.APP_CONFIG_PATH = self._orig
         self._tmp.cleanup()
 
@@ -101,6 +107,7 @@ class TestLazySyncProvenance(ProvenanceTestBase):
     @patch('bridge.time.sleep')
     @patch('urllib.request.urlopen', side_effect=urllib.error.URLError("unreachable"))
     def test_key_change_drops_previous_confirmation(self, _urlopen, _sleep):
+        self.configured_key = "pk_new"
         self.write_meta({
             "expiresAt": "2026-10-01T00:00:00Z", "expirySource": "api",
             "publicKey": "pk_old", "lastSync": "2026-09-01T00:00:00Z",
@@ -121,6 +128,68 @@ class TestLazySyncProvenance(ProvenanceTestBase):
         self.assertNotIn("expiresAt", meta)
         self.assertFalse(meta["syncSuccess"])
         self.assertTrue(meta["syncError"])
+
+
+class TestSupersededSync(ProvenanceTestBase):
+    @patch('urllib.request.urlopen')
+    def test_result_for_a_replaced_key_is_discarded(self, mock_urlopen):
+        # A new configuration is saved while the sync for the old key is in
+        # flight: its confirmation must not overwrite the save's reset.
+        def save_during_request(*_a, **_k):
+            self.configured_key = "pk_new"
+            self.write_meta({"publicKey": "pk_new", "syncSuccess": False, "lastSync": None})
+            return api_response({"expiry": "2026-12-31T23:59:59Z"})
+        mock_urlopen.side_effect = save_during_request
+        self.assertEqual(bridge.lazy_sync("pk_current"), "superseded")
+        meta = self.read_meta()
+        self.assertEqual(meta["publicKey"], "pk_new")
+        self.assertNotIn("expiresAt", meta)
+        self.assertFalse(meta["syncSuccess"])
+
+    @patch('bridge.time.sleep')
+    @patch('urllib.request.urlopen')
+    def test_failure_for_a_replaced_key_is_discarded(self, mock_urlopen, _sleep):
+        def save_then_fail(*_a, **_k):
+            self.configured_key = "pk_new"
+            self.write_meta({"publicKey": "pk_new", "syncSuccess": False})
+            raise urllib.error.HTTPError("u", 404, "Not Found", {}, None)
+        mock_urlopen.side_effect = save_then_fail
+        self.assertEqual(bridge.lazy_sync("pk_current"), "superseded")
+        self.assertNotIn("syncError", self.read_meta())
+
+    @patch('bridge.time.sleep')
+    @patch('urllib.request.urlopen')
+    def test_outcomes_are_explicit(self, mock_urlopen, _sleep):
+        mock_urlopen.return_value = api_response({"expiry": "2026-12-31T23:59:59Z"})
+        self.assertEqual(bridge.lazy_sync("pk_current"), "confirmed")
+        mock_urlopen.side_effect = urllib.error.URLError("down")
+        self.assertEqual(bridge.lazy_sync("pk_current"), "failed")
+        self.assertEqual(bridge.lazy_sync("Unknown"), "skipped")
+
+
+class TestSyncLoopWait(unittest.TestCase):
+    def test_long_wait_only_after_confirmation(self):
+        self.assertEqual(bridge.next_sync_delay("confirmed"), 86400)
+        self.assertEqual(bridge.next_sync_delay("failed"), 300)
+        self.assertEqual(bridge.next_sync_delay("skipped"), 300)
+        self.assertLess(bridge.next_sync_delay("superseded"), 60)
+
+    def test_wait_ends_early_when_the_configured_key_changes(self):
+        slept = []
+        keys = iter(["pk_a", "pk_a", "pk_b"])
+        result = bridge.wait_for_next_sync(
+            "confirmed", "pk_a", sleep=slept.append, current_key=lambda: next(keys)
+        )
+        self.assertEqual(result, "key-changed")
+        self.assertEqual(slept, [bridge.SYNC_POLL_STEP] * 3)
+
+    def test_wait_runs_to_the_deadline_while_the_key_is_unchanged(self):
+        slept = []
+        result = bridge.wait_for_next_sync(
+            "failed", "pk_a", sleep=slept.append, current_key=lambda: "pk_a"
+        )
+        self.assertEqual(result, "elapsed")
+        self.assertEqual(sum(slept), bridge.next_sync_delay("failed"))
 
 
 class TestSaveConfigurationProvenance(ProvenanceTestBase):

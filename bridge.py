@@ -223,9 +223,25 @@ def get_wg_pubkey():
             pass
     return "Unknown"
 
+def _superseded(wg_pubkey):
+    """True when the saved configuration no longer holds the key a sync ran
+    for. Its result must then be dropped: save_configuration has reset the
+    metadata for the new key, and writing the old key's answer would restore
+    a confirmation (or error) that belongs to a key no longer in use. A save
+    landing between this check and the write still self-heals: the stale
+    entry is bound to the old key (readers ignore it) and the sync loop wakes
+    on the key change and re-syncs."""
+    return get_wg_pubkey() != wg_pubkey
+
 def lazy_sync(wg_pubkey):
+    """Refreshes the confirmed subscription state for wg_pubkey.
+
+    Returns an explicit outcome: "confirmed" (API answered with a valid
+    expiry), "failed" (no confirmation; the last confirmed value for this key
+    is kept), "superseded" (the configured key changed while the request was
+    in flight; nothing written) or "skipped" (no usable key)."""
     if not wg_pubkey or wg_pubkey == "Unknown" or wg_pubkey == "Not available":
-        return
+        return "skipped"
 
     import urllib.request
     import urllib.error
@@ -303,13 +319,19 @@ def lazy_sync(wg_pubkey):
         meta["lastSync"] = datetime.now(timezone.utc).isoformat()
         meta["syncSuccess"] = True
         meta["syncError"] = None
+        if _superseded(wg_pubkey):
+            print("Subscription sync result dropped: the configured key changed", file=sys.stderr)
+            return "superseded"
         atomic_write_json(META_FILE_PATH, meta)
+        return "confirmed"
 
     except Exception as e:
         # Keep the last confirmed value for this key; never extend it and
         # never substitute the comment.
         err_msg = str(e)
         print(f"Error during lazy subscription sync: {err_msg}", file=sys.stderr)
+        if _superseded(wg_pubkey):
+            return "superseded"
         meta["syncSuccess"] = False
         meta["syncError"] = err_msg
         meta["lastSyncAttempt"] = datetime.now(timezone.utc).isoformat()
@@ -317,6 +339,33 @@ def lazy_sync(wg_pubkey):
             atomic_write_json(META_FILE_PATH, meta)
         except Exception:
             pass
+        return "failed"
+
+SYNC_POLL_STEP = 30
+
+def next_sync_delay(outcome):
+    """Seconds until the next background sync. Only a confirmation earns
+    the long wait; a superseded sync re-runs almost at once for the new key."""
+    if outcome == "confirmed":
+        return 86400
+    if outcome == "superseded":
+        return 5
+    return 300
+
+def wait_for_next_sync(outcome, synced_key, sleep=time.sleep, current_key=None):
+    """Waits next_sync_delay(outcome) in SYNC_POLL_STEP slices and ends
+    early when the configured key changes, so a newly saved configuration is
+    confirmed within a poll step instead of after the long wait. Returns
+    "key-changed" or "elapsed"."""
+    current_key = current_key or get_wg_pubkey
+    remaining = next_sync_delay(outcome)
+    while remaining > 0:
+        step = min(SYNC_POLL_STEP, remaining)
+        sleep(step)
+        remaining -= step
+        if current_key() != synced_key:
+            return "key-changed"
+    return "elapsed"
 
 def subscription_sync_loop():
     try:
@@ -324,25 +373,17 @@ def subscription_sync_loop():
     except KeyboardInterrupt:
         return
     while True:
-        sync_success = False
+        outcome = "skipped"
+        pubkey = None
         try:
             pubkey = get_wg_pubkey()
-            if pubkey and pubkey != "Unknown":
-                lazy_sync(pubkey)
-                if os.path.exists(META_FILE_PATH):
-                    try:
-                        with open(META_FILE_PATH, 'r') as f:
-                            meta = json.load(f)
-                        if meta.get("syncSuccess") and meta.get("expiresAt"):
-                            sync_success = True
-                    except Exception:
-                        pass
+            outcome = lazy_sync(pubkey)
         except Exception as e:
             print(f"Error in subscription sync loop: {e}", file=sys.stderr)
+            outcome = "failed"
 
         try:
-            sleep_time = 86400 if sync_success else 300
-            time.sleep(sleep_time)
+            wait_for_next_sync(outcome, pubkey)
         except KeyboardInterrupt:
             break
 
