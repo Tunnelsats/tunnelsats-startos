@@ -363,6 +363,57 @@ class TestHTTPHandler(unittest.TestCase):
         res = json.loads(wfile.getvalue().decode("utf-8"))
         self.assertIn("Active configuration already present", res.get("error", ""))
 
+    def _post_save_over_existing_config(self, sub_info):
+        req_body = json.dumps({
+            "config": "[Interface]\nPrivateKey = replacement=\n",
+            "target_node": "lnd"
+        }).encode("utf-8")
+
+        handler = bridge.DashboardHTTPRequestHandler.__new__(bridge.DashboardHTTPRequestHandler)
+        handler.command = "POST"
+        handler.client_address = ("127.0.0.1", 12345)
+        handler.path = "/api/config/save"
+        handler.headers = DummyHeaders({
+            "Host": "localhost",
+            "Content-Type": "application/json",
+            "Content-Length": str(len(req_body)),
+            "X-CSRF-Token": bridge.get_csrf_token()
+        })
+        handler.rfile = BytesIO(req_body)
+        handler.wfile = BytesIO()
+        handler.send_response = MagicMock()
+        handler.send_header = MagicMock()
+        handler.end_headers = MagicMock()
+
+        with patch('bridge.get_default_gateway', return_value="172.18.0.1"), \
+             patch('os.path.exists', return_value=True), \
+             patch('bridge.get_wg_pubkey', return_value="CURRENT_KEY") as mock_pubkey, \
+             patch('bridge.get_subscription_info', return_value=sub_info) as mock_sub_info, \
+             patch('bridge.save_configuration') as mock_save:
+            bridge.DashboardHTTPRequestHandler.do_POST(handler)
+        mock_pubkey.assert_called()
+        mock_sub_info.assert_called_with("CURRENT_KEY")
+        return handler, mock_save
+
+    def test_do_POST_save_config_unconfirmed_subscription_rejected(self):
+        # Fail closed: an unsynced / sync-failed subscription is not known to be
+        # expired, so the unauthenticated web UI must not replace it.
+        handler, mock_save = self._post_save_over_existing_config({
+            "linked": False,
+            "isExpired": False,
+            "syncError": "unreachable",
+        })
+        handler.send_response.assert_called_with(403)
+        mock_save.assert_not_called()
+
+    def test_do_POST_save_config_expired_subscription_allowed(self):
+        handler, mock_save = self._post_save_over_existing_config({
+            "linked": True,
+            "isExpired": True,
+        })
+        handler.send_response.assert_called_with(200)
+        mock_save.assert_called_once_with("[Interface]\nPrivateKey = replacement=", "lnd")
+
     @patch('bridge.get_default_gateway')
     def test_do_GET_api_csrf(self, mock_get_gw):
         mock_get_gw.return_value = "172.18.0.1"

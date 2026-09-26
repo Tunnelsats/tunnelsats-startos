@@ -1,33 +1,43 @@
 import { sdk } from './sdk'
 import { configJson } from './fileModels/config.json'
 import { tunnelsatsMeta } from './fileModels/tunnelsatsMeta'
+import { vpnHandoff } from './fileModels/vpnHandoff'
 import { i18n } from './i18n'
-import { getAnnounceEndpoint } from './utils'
+import { getAnnounceEndpoint, parseWireguardTunnelInfo } from './utils'
 export { getAnnounceEndpoint } from './utils'
-import { importSubscription } from './actions/importSubscription'
+import { derivePublicKey } from './keygen'
+import { renewSubscription } from './actions/renewSubscription'
+import {
+  type PackageId,
+  type OffTaskState,
+  planClearnetVpnTasks,
+  executeClearnetVpnPlan,
+  readOffTaskState,
+  buildOnTaskInput,
+  buildOffTaskInput,
+  clearnetVpnReplayId,
+} from './vpnHandoff'
 import { clearnetVpn as lndClearnetVpn } from 'lnd-startos/startos/actions/clearnetVpn'
 import { clearnetVpn as clnClearnetVpn } from 'cln-startos/startos/actions/clearnetVpn'
 import { clearnetVpn as eclairClearnetVpn } from 'eclair-startos/startos/actions/clearnetVpn'
 
+export type { PackageId } from './vpnHandoff'
 export type TargetNode = 'lnd' | 'cln' | 'eclair'
-export type PackageId = 'lnd' | 'c-lightning' | 'eclair'
 
 /** All three clearnet-vpn actions share the same input shape */
 const clearnetVpnActions = {
-  lnd: { packageId: 'lnd' as PackageId, action: lndClearnetVpn },
-  'c-lightning': {
-    packageId: 'c-lightning' as PackageId,
-    action: clnClearnetVpn,
-  },
-  eclair: { packageId: 'eclair' as PackageId, action: eclairClearnetVpn },
-}
+  lnd: lndClearnetVpn,
+  'c-lightning': clnClearnetVpn,
+  eclair: eclairClearnetVpn,
+} as const
 
-/** All possible clearnet-vpn task keys that we might create, used for cleanup */
-const ALL_CLEARNET_VPN_TASK_KEYS = [
-  'lnd:clearnet-vpn',
-  'c-lightning:clearnet-vpn',
-  'eclair:clearnet-vpn',
-]
+/** Replay key of the expiry task. */
+export const EXPIRY_TASK_KEY = 'tunnelsats:renew-subscription'
+/**
+ * Expiry tasks used to point at Import Subscription. StartOS never reaps a
+ * replay key that is no longer written, so the retired key is cleared here.
+ */
+export const RETIRED_EXPIRY_TASK_KEY = 'tunnelsats:import-subscription'
 
 export interface TargetVpnConfig {
   targetPackage: PackageId
@@ -38,6 +48,8 @@ export interface TargetVpnConfig {
 
 export interface SubscriptionMeta {
   expiresAt?: string
+  expirySource?: 'api'
+  publicKey?: string
   lastSync?: string
   syncSuccess?: boolean
   syncError?: string | null
@@ -48,7 +60,7 @@ export interface SubscriptionMeta {
 
 export interface SubscriptionExpiryTask {
   shouldCreateTask: boolean
-  severity?: 'critical' | 'important'
+  severity?: 'important'
   reason?: string
   clearTaskKey: string
 }
@@ -137,6 +149,38 @@ export function getGatewayTaskDetails(
   }
 }
 
+/**
+ * The subscription expiry this package may act on: the value the TunnelSats
+ * API returned for the key in the stored config. The `# Valid Until` comment
+ * is a hint only and never counts, and neither does an expiry that was
+ * confirmed for a different key (e.g. before a new config was imported).
+ */
+export function getConfirmedExpiry(
+  wgConf: string | null | undefined,
+  meta: SubscriptionMeta | null | undefined,
+): Date | null {
+  if (!meta?.expiresAt || meta.expirySource !== 'api' || !meta.publicKey) {
+    return null
+  }
+  const privateKey = parseWireguardTunnelInfo(wgConf).privateKey
+  if (!privateKey) return null
+  let currentPublicKey: string
+  try {
+    currentPublicKey = derivePublicKey(privateKey)
+  } catch {
+    return null
+  }
+  if (currentPublicKey !== meta.publicKey) return null
+  const expiry = new Date(meta.expiresAt.trim())
+  return isNaN(expiry.getTime()) ? null : expiry
+}
+
+/**
+ * Every expiry task is 'important'. An expiry task is an own task, and
+ * StartOS stops the owning service while an own task is active and critical.
+ * That would halt the subscription sync that confirms a renewal and clears
+ * the task, which is a deadlock.
+ */
 export function getSubscriptionExpiryTask(
   config:
     | {
@@ -148,40 +192,16 @@ export function getSubscriptionExpiryTask(
   meta?: SubscriptionMeta | null,
   currentDate = new Date(),
 ): SubscriptionExpiryTask {
-  const clearTaskKey = 'tunnelsats:import-subscription'
+  const clearTaskKey = EXPIRY_TASK_KEY
 
   if (!config?.enabled || !config['tunnelsats-conf']) {
     return { shouldCreateTask: false, clearTaskKey }
   }
 
-  const candidateDates: Date[] = []
-
-  if (meta?.expiresAt) {
-    const metaDate = new Date(meta.expiresAt.trim())
-    if (!isNaN(metaDate.getTime())) {
-      candidateDates.push(metaDate)
-    }
-  }
-
-  const wgConf = config['tunnelsats-conf']
-  const validUntilMatch = wgConf.match(
-    /#\s*(?:Valid Until|Expires At|Expiry):\s*(.+)/i,
-  )
-  if (validUntilMatch) {
-    const commentDate = new Date(validUntilMatch[1].trim())
-    if (!isNaN(commentDate.getTime())) {
-      candidateDates.push(commentDate)
-    }
-  }
-
-  if (candidateDates.length === 0) {
+  const expiryDate = getConfirmedExpiry(config['tunnelsats-conf'], meta)
+  if (!expiryDate) {
     return { shouldCreateTask: false, clearTaskKey }
   }
-
-  // Use the latest known valid expiration date between live synchronization and user configuration
-  const expiryDate = new Date(
-    Math.max(...candidateDates.map((d) => d.getTime())),
-  )
 
   const timeDiffMs = expiryDate.getTime() - currentDate.getTime()
   const daysRemaining = Math.floor(timeDiffMs / (1000 * 60 * 60 * 24))
@@ -189,9 +209,9 @@ export function getSubscriptionExpiryTask(
   if (timeDiffMs <= 0) {
     return {
       shouldCreateTask: true,
-      severity: 'critical',
+      severity: 'important',
       reason: i18n(
-        'TunnelSats WireGuard subscription has expired. Paste a renewed configuration in settings to restore inbound connectivity.',
+        'Your TunnelSats subscription has expired, and your node holds its clearnet traffic until it is renewed. Run Renew Subscription to restore it.',
       ),
       clearTaskKey,
     }
@@ -200,9 +220,9 @@ export function getSubscriptionExpiryTask(
   if (daysRemaining <= 3) {
     return {
       shouldCreateTask: true,
-      severity: 'critical',
+      severity: 'important',
       reason: i18n(
-        'TunnelSats subscription expires in <= 3 days. Renew subscription to avoid connection disruption.',
+        'Your TunnelSats subscription expires in 3 days or less. Run Renew Subscription to keep your node reachable over clearnet.',
       ),
       clearTaskKey,
     }
@@ -213,7 +233,7 @@ export function getSubscriptionExpiryTask(
       shouldCreateTask: true,
       severity: 'important',
       reason: i18n(
-        'TunnelSats subscription expires in <= 7 days. Plan your renewal to maintain uptime.',
+        'Your TunnelSats subscription expires in 7 days or less. Run Renew Subscription to keep your node reachable over clearnet.',
       ),
       clearTaskKey,
     }
@@ -222,42 +242,174 @@ export function getSubscriptionExpiryTask(
   return { shouldCreateTask: false, clearTaskKey }
 }
 
+const NODE_VERSION_RANGES = {
+  lnd: '>=0.15.5:0',
+  'c-lightning': '>=23.2.2:0',
+  eclair: '>=0.10.0:0',
+} as const
+
+const NODE_HEALTH_CHECKS = {
+  lnd: 'lnd',
+  'c-lightning': 'lightningd',
+  eclair: 'eclair',
+} as const
+
+/**
+ * The target node is a running dependency. Nodes that still owe us a
+ * confirmed "off" stay declared (as `exists`), because StartOS hides tasks on
+ * packages that are not current dependencies.
+ */
 export function getDependenciesForConfig(
   config: { enabled?: boolean; 'target-node'?: TargetNode } | null | undefined,
+  pendingOff: readonly PackageId[] = [],
 ) {
-  if (!config?.enabled) {
-    return {}
-  }
+  const deps: Partial<
+    Record<
+      PackageId,
+      | {
+          kind: 'running'
+          versionRange: (typeof NODE_VERSION_RANGES)[PackageId]
+          healthChecks: string[]
+        }
+      | {
+          kind: 'exists'
+          versionRange: (typeof NODE_VERSION_RANGES)[PackageId]
+        }
+    >
+  > = {}
 
-  const targetNode = config['target-node'] ?? 'lnd'
-
-  if (targetNode === 'cln') {
-    return {
-      'c-lightning': {
-        kind: 'running' as const,
-        versionRange: '>=23.2.2:0',
-        healthChecks: ['lightningd'],
-      },
+  if (config?.enabled) {
+    const target = resolvePackageId(config['target-node'] ?? 'lnd')
+    deps[target] = {
+      kind: 'running',
+      versionRange: NODE_VERSION_RANGES[target],
+      healthChecks: [NODE_HEALTH_CHECKS[target]],
     }
   }
 
-  if (targetNode === 'eclair') {
-    return {
-      eclair: {
-        kind: 'running' as const,
-        versionRange: '>=0.10.0:0',
-        healthChecks: ['eclair'],
-      },
+  for (const p of pendingOff) {
+    if (!deps[p]) {
+      deps[p] = { kind: 'exists', versionRange: NODE_VERSION_RANGES[p] }
     }
   }
 
-  return {
-    lnd: {
-      kind: 'running' as const,
-      versionRange: '>=0.15.5:0',
-      healthChecks: ['lnd'],
-    },
+  return deps
+}
+
+/**
+ * setupDependencies re-runs whenever a watched file changes. Runs can
+ * overlap, and the handoff reads its previous state and writes the next one,
+ * so runs are serialized. Otherwise a quick lnd→cln→eclair switch could lose
+ * the off-task for lnd.
+ */
+let handoffQueue: Promise<unknown> = Promise.resolve()
+function serializeHandoff<T>(fn: () => Promise<T>): Promise<T> {
+  const run = handoffQueue.then(fn, fn)
+  handoffQueue = run.catch(() => undefined)
+  return run
+}
+
+async function readOffTaskStates(
+  effects: Parameters<typeof sdk.checkDependencies>[0],
+  pending: readonly PackageId[],
+): Promise<Partial<Record<PackageId, OffTaskState>>> {
+  const states: Partial<Record<PackageId, OffTaskState>> = {}
+  if (pending.length === 0) return states
+  try {
+    const check = await sdk.checkDependencies(effects, [...pending])
+    for (const p of pending) {
+      try {
+        states[p] = readOffTaskState(
+          check.infoFor(p).result.tasks[clearnetVpnReplayId(p)],
+        )
+      } catch {
+        states[p] = 'unknown'
+      }
+    }
+  } catch (e) {
+    console.warn(
+      'TunnelSats: could not read clearnet-vpn task state; keeping off-tasks raised:',
+      e,
+    )
   }
+  return states
+}
+
+async function handOffClearnetVpn(
+  effects: Parameters<typeof sdk.checkDependencies>[0],
+  config: Parameters<typeof getTargetVpnConfig>[0],
+): Promise<PackageId[]> {
+  const state = await vpnHandoff
+    .read()
+    .once()
+    .catch((e) => {
+      console.error(
+        'TunnelSats: could not read vpn-handoff.json; previous off-task targets are unknown:',
+        e,
+      )
+      return null
+    })
+  const installed = await effects.getInstalledPackages()
+  const offTaskStates = await readOffTaskStates(
+    effects,
+    state?.pendingOff ?? [],
+  )
+
+  const plan = planClearnetVpnTasks({
+    desired: getTargetVpnConfig(config),
+    state,
+    installed,
+    offTaskStates,
+  })
+
+  const outcome = await executeClearnetVpnPlan(plan, {
+    raiseOn: (on) =>
+      sdk.action.createTask(
+        effects,
+        on.packageId,
+        clearnetVpnActions[on.packageId],
+        'important',
+        {
+          input: buildOnTaskInput(on.config, on.announce),
+          when: { condition: 'input-not-matches', once: false },
+          reason: i18n(
+            'Activate TunnelSats VPN tunnel and advertise clearnet endpoint to the Lightning Network',
+          ),
+        },
+      ),
+    raiseOff: (packageId) =>
+      sdk.action.createTask(
+        effects,
+        packageId,
+        clearnetVpnActions[packageId],
+        'important',
+        {
+          input: buildOffTaskInput(),
+          when: { condition: 'input-not-matches', once: false },
+          reason: i18n(
+            'Turn off the TunnelSats tunnel on this node. TunnelSats now routes a different node or has been switched off.',
+          ),
+        },
+      ),
+    clear: (packageId) =>
+      sdk.action.clearTask(effects, clearnetVpnReplayId(packageId)),
+  })
+  for (const f of outcome.failures) {
+    console.error(
+      `TunnelSats: clearnet-vpn ${f.op} task on ${f.packageId} failed (will retry): ${f.error}`,
+    )
+  }
+
+  const prevPending = state?.pendingOff ?? []
+  if (
+    (state?.activeTarget ?? null) !== plan.next.activeTarget ||
+    prevPending.length !== plan.next.pendingOff.length ||
+    prevPending.some((p, i) => p !== plan.next.pendingOff[i])
+  ) {
+    await vpnHandoff.write(effects, plan.next)
+  }
+
+  return plan.next.pendingOff
 }
 
 export const setDependencies = sdk.setupDependencies(async ({ effects }) => {
@@ -267,12 +419,12 @@ export const setDependencies = sdk.setupDependencies(async ({ effects }) => {
     .const(effects)
     .catch(() => null)
 
-  // 1. Proactive Subscription Expiry Alert Task
+  // 1. Expiry task, driven only by the API-confirmed expiry
   const expiryTask = getSubscriptionExpiryTask(config, meta)
   if (expiryTask.shouldCreateTask && expiryTask.severity && expiryTask.reason) {
     await sdk.action.createOwnTask(
       effects,
-      importSubscription,
+      renewSubscription,
       expiryTask.severity,
       {
         reason: expiryTask.reason,
@@ -281,49 +433,12 @@ export const setDependencies = sdk.setupDependencies(async ({ effects }) => {
   } else {
     await sdk.action.clearTask(effects, expiryTask.clearTaskKey)
   }
+  await sdk.action.clearTask(effects, RETIRED_EXPIRY_TASK_KEY)
 
-  // 2. In-Container Clearnet VPN Task on Target Lightning Node
-  const vpnConfig = getTargetVpnConfig(config)
-  if (vpnConfig && vpnConfig.announceEndpoint) {
-    const target = clearnetVpnActions[vpnConfig.targetPackage]
+  // 2. Clearnet-VPN handoff: on-task for the target, off-task for the rest
+  const pendingOff = await serializeHandoff(() =>
+    handOffClearnetVpn(effects, config),
+  )
 
-    // Raise clearnet-vpn task on the active target node
-    await sdk.action.createTask(
-      effects,
-      target.packageId,
-      target.action,
-      'important',
-      {
-        input: {
-          kind: 'partial',
-          accept: [
-            {
-              config: vpnConfig.wgConf,
-              announce: vpnConfig.announceEndpoint,
-            },
-          ],
-          set: {
-            config: vpnConfig.wgConf,
-            announce: vpnConfig.announceEndpoint,
-          },
-        },
-        when: { condition: 'input-not-matches', once: false },
-        reason: i18n(
-          'Activate TunnelSats VPN tunnel and advertise clearnet endpoint to the Lightning Network',
-        ),
-      },
-    )
-
-    // Clear stale clearnet-vpn tasks on inactive nodes
-    for (const pkg of vpnConfig.clearPackages) {
-      await sdk.action.clearTask(effects, `${pkg}:clearnet-vpn`)
-    }
-  } else {
-    // No active VPN config — clear all clearnet-vpn tasks
-    for (const key of ALL_CLEARNET_VPN_TASK_KEYS) {
-      await sdk.action.clearTask(effects, key)
-    }
-  }
-
-  return getDependenciesForConfig(config)
+  return getDependenciesForConfig(config, pendingOff)
 })

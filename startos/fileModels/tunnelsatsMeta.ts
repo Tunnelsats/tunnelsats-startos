@@ -3,6 +3,12 @@ import { sdk } from '../sdk'
 
 export const metaShape = z.object({
   expiresAt: z.string().optional(),
+  /**
+   * 'api' only when `expiresAt` came from `subscription/status` for
+   * `publicKey`. Anything else (legacy or comment-derived) is unconfirmed.
+   */
+  expirySource: z.literal('api').optional().catch(undefined),
+  publicKey: z.string().optional().catch(undefined),
   lastSync: z.string().optional(),
   syncSuccess: z.boolean().optional(),
   syncError: z.string().optional().nullable(),

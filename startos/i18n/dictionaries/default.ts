@@ -22,9 +22,9 @@ const dict = {
   'Web Dashboard is not accessible': 18,
   'Subscription Status': 19,
   'Subscription is active': 20,
-  'TunnelSats WireGuard subscription has expired. Paste a renewed configuration in settings to restore inbound connectivity.': 21,
-  'TunnelSats subscription expires in <= 3 days. Renew subscription to avoid connection disruption.': 22,
-  'TunnelSats subscription expires in <= 7 days. Plan your renewal to maintain uptime.': 23,
+  'Your TunnelSats subscription has expired, and your node holds its clearnet traffic until it is renewed. Run Renew Subscription to restore it.': 21,
+  'Your TunnelSats subscription expires in 3 days or less. Run Renew Subscription to keep your node reachable over clearnet.': 22,
+  'Your TunnelSats subscription expires in 7 days or less. Run Renew Subscription to keep your node reachable over clearnet.': 23,
   'Configuration Saved': 24,
   "Add this as a new gateway under System → Gateways (delete any existing TunnelSats gateway first). Then open your node's Peer interface to enable the address and assign the Outbound Gateway (see Instructions).": 25,
   'Export WireGuard Configuration': 26,
@@ -67,6 +67,8 @@ const dict = {
   'Renewal Invoice Created': 63,
   'A payment task has been raised on your Lightning node. Once paid, your subscription will be extended. Current expiry: ${oldExpiry}. New expiry after payment: ${newExpiry}.': 64,
   'Pay TunnelSats VPN subscription renewal invoice': 65,
+  'Turn off the TunnelSats tunnel on this node. TunnelSats now routes a different node or has been switched off.': 66,
+  'This configuration has no endpoint that can be announced to the Lightning Network (an IPv6 endpoint needs Allow Home IPv6 Coexistence).': 67,
 } as const
 
 /**

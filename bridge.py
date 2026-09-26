@@ -18,6 +18,8 @@ CONFIG_PATH = os.path.join(DATA_DIR, "tunnelsatsv3.conf")
 APP_CONFIG_PATH = os.path.join(DATA_DIR, "config.json")
 META_FILE_PATH = os.path.join(DATA_DIR, "tunnelsats-meta.json")
 TUNNELSATS_API_URL = "https://tunnelsats.com/api/public/v1"
+# Fields that only hold for the key they were confirmed for (see lazy_sync).
+CONFIRMED_META_FIELDS = ("expiresAt", "expirySource", "lastSync", "syncSuccess", "bandwidth_used_gb")
 
 os.umask(0o077)
 
@@ -182,7 +184,10 @@ def save_configuration(conf_content, target_node="lnd"):
     app_config["tunnelsats-conf"] = conf_content
     atomic_write_json(APP_CONFIG_PATH, app_config)
 
+    # The comment's expiry is a hint only; the confirmed expiry comes from
+    # lazy_sync. Port and server stay as display hints.
     meta = parse_config_comments(conf_content)
+    meta.pop("expiresAt", None)
     meta["lastSync"] = None
     meta["syncSuccess"] = False
     atomic_write_json(META_FILE_PATH, meta)
@@ -237,25 +242,27 @@ def lazy_sync(wg_pubkey):
     )
 
     meta = {}
-    loaded_existing = False
     try:
         # Load existing metadata if it exists
         if os.path.exists(META_FILE_PATH):
             try:
                 with open(META_FILE_PATH, 'r') as f:
                     meta = json.load(f)
-                    loaded_existing = True
             except Exception:
                 pass
 
+        # A confirmation belongs to the key it was confirmed for. A new key
+        # (e.g. a freshly imported config) starts unconfirmed.
+        if meta.get("publicKey") != wg_pubkey:
+            for stale in CONFIRMED_META_FIELDS:
+                meta.pop(stale, None)
+            meta["publicKey"] = wg_pubkey
+
         response_data = None
-        api_success = False
-        import urllib.error
         for attempt in range(5):
             try:
                 with urllib.request.urlopen(req, timeout=10) as response:
                     response_data = json.loads(response.read().decode("utf-8"))
-                    api_success = True
                     break
             except urllib.error.HTTPError as e:
                 if 400 <= e.code < 500:
@@ -268,102 +275,48 @@ def lazy_sync(wg_pubkey):
                     raise e
                 time.sleep(5)
 
-        if api_success and response_data and isinstance(response_data, dict):
-            expiry = response_data.get("expiry")
-            if expiry and is_valid_iso_expiry(expiry):
-                meta["expiresAt"] = expiry
+        if not isinstance(response_data, dict):
+            raise ValueError("TunnelSats API returned an unexpected response")
 
-            server_domain = response_data.get("server_domain")
-            if server_domain:
-                meta["serverDomain"] = server_domain
+        expiry = response_data.get("expiry")
+        if not (expiry and is_valid_iso_expiry(expiry)):
+            raise ValueError("TunnelSats API returned no valid expiry for this key")
 
-            vpn_port = response_data.get("vpn_port")
-            if vpn_port:
-                meta["vpnPort"] = vpn_port
+        # The only writer of a confirmed expiry. Never the # Valid Until comment.
+        meta["expiresAt"] = expiry
+        meta["expirySource"] = "api"
 
-            if "bandwidth_used_gb" in response_data:
-                try:
-                    meta["bandwidth_used_gb"] = float(response_data["bandwidth_used_gb"])
-                except (ValueError, TypeError):
-                    pass
+        server_domain = response_data.get("server_domain")
+        if server_domain:
+            meta["serverDomain"] = server_domain
 
-            meta["lastSync"] = datetime.now(timezone.utc).isoformat()
-            meta["syncSuccess"] = True
+        vpn_port = response_data.get("vpn_port")
+        if vpn_port:
+            meta["vpnPort"] = vpn_port
 
-        # Fallback to comments parsing if config file exists and we don't have expiresAt
-        if not meta.get("expiresAt") and os.path.exists(CONFIG_PATH):
+        if "bandwidth_used_gb" in response_data:
             try:
-                with open(CONFIG_PATH, 'r') as f:
-                    config_content = f.read()
-                parsed = parse_config_comments(config_content)
-                expiry = parsed.get("expiresAt")
-                if expiry and is_valid_iso_expiry(expiry):
-                    meta["expiresAt"] = expiry
-            except Exception:
+                meta["bandwidth_used_gb"] = float(response_data["bandwidth_used_gb"])
+            except (ValueError, TypeError):
                 pass
 
-        # Write metadata back atomically if we successfully loaded/updated something
-        if meta or not loaded_existing:
-            meta["syncError"] = None
-            atomic_write_json(META_FILE_PATH, meta)
+        meta["lastSync"] = datetime.now(timezone.utc).isoformat()
+        meta["syncSuccess"] = True
+        meta["syncError"] = None
+        atomic_write_json(META_FILE_PATH, meta)
 
     except Exception as e:
+        # Keep the last confirmed value for this key; never extend it and
+        # never substitute the comment.
         err_msg = str(e)
         print(f"Error during lazy subscription sync: {err_msg}", file=sys.stderr)
         meta["syncSuccess"] = False
         meta["syncError"] = err_msg
         meta["lastSyncAttempt"] = datetime.now(timezone.utc).isoformat()
-
-        # Fallback to comments parsing on error if file does not have expiry
-        if not meta.get("expiresAt") and os.path.exists(CONFIG_PATH):
-            try:
-                with open(CONFIG_PATH, 'r') as f:
-                    config_content = f.read()
-                parsed = parse_config_comments(config_content)
-                expiry = parsed.get("expiresAt")
-                if expiry and is_valid_iso_expiry(expiry):
-                    meta["expiresAt"] = expiry
-            except Exception:
-                pass
         try:
             atomic_write_json(META_FILE_PATH, meta)
         except Exception:
             pass
-
-def format_subscription_expiry():
-    if not os.path.exists(META_FILE_PATH):
-        return "Unknown"
-
-    try:
-        with open(META_FILE_PATH, 'r') as f:
-            meta = json.load(f)
-        expires_at = meta.get("expiresAt")
-        if not expires_at:
-            return "Unknown"
-
-        try:
-            expiry_dt = datetime.fromisoformat(expires_at.replace("Z", "+00:00"))
-            if expiry_dt.tzinfo is None:
-                expiry_dt = expiry_dt.replace(tzinfo=timezone.utc)
-
-            now = datetime.now(timezone.utc)
-            if expiry_dt < now:
-                return f"Expired (on {expiry_dt.strftime('%Y-%m-%d')})"
-
-            delta = expiry_dt - now
-            days = delta.days
-            hours = delta.seconds // 3600
-
-            if days > 0:
-                return f"Active (Expires in {days}d {hours}h)"
-            else:
-                minutes = (delta.seconds % 3600) // 60
-                return f"Active (Expires in {hours}h {minutes}m)"
-        except Exception:
-            return f"Expires: {expires_at}"
-    except Exception:
-        pass
-    return "Unknown"
 
 def subscription_sync_loop():
     try:
@@ -645,8 +598,10 @@ class DashboardHTTPRequestHandler(BaseHTTPRequestHandler):
             try:
                 # Protect active configuration from unauthenticated replacement
                 if os.path.exists(CONFIG_PATH):
-                    sub_info = get_subscription_info()
-                    if sub_info.get("linked") and not sub_info.get("isExpired"):
+                    # Fail closed: from the unauthenticated web UI, only a
+                    # subscription positively known to be expired may be replaced.
+                    sub_info = get_subscription_info(get_wg_pubkey())
+                    if not sub_info.get("isExpired"):
                         self.send_response(403)
                         self.send_header("Content-Type", "application/json")
                         self.end_headers()
@@ -782,7 +737,14 @@ def shutdown_handler(signum, frame):
     print("Received shutdown signal. Stopping TunnelSats companion services...")
     sys.exit(0)
 
-def get_subscription_info():
+def get_subscription_info(current_pubkey=None):
+    """Subscription state for display and health.
+
+    Only an expiry the API confirmed (expirySource == "api") counts, and when
+    current_pubkey is given, only one confirmed for that key. Without meta,
+    the # Valid Until comment is shown as a pending hint; it can mark the
+    subscription expired (fail closed) but never active.
+    """
     if not os.path.exists(META_FILE_PATH):
         if os.path.exists(CONFIG_PATH):
             try:
@@ -825,8 +787,11 @@ def get_subscription_info():
     try:
         with open(META_FILE_PATH, 'r') as f:
             meta = json.load(f)
-        expires_at = meta.get("expiresAt")
-        last_sync = meta.get("lastSync")
+        confirmed = meta.get("expirySource") == "api" and (
+            current_pubkey is None or meta.get("publicKey") == current_pubkey
+        )
+        expires_at = meta.get("expiresAt") if confirmed else None
+        last_sync = meta.get("lastSync") if confirmed else None
         sync_error = meta.get("syncError")
         sync_success = meta.get("syncSuccess", False)
 
@@ -906,7 +871,8 @@ def get_status():
         except Exception:
             pass
 
-    sub_info = get_subscription_info()
+    current_pubkey = get_wg_pubkey() if has_config else None
+    sub_info = get_subscription_info(current_pubkey)
     if (server_domain == "Unknown" or not server_domain) and sub_info.get("serverDomain"):
         server_domain = sub_info["serverDomain"]
 
@@ -940,7 +906,7 @@ def get_status():
         "public_ip": server_domain,
         "server": server_domain,
         "internal_octet": internal_octet,
-        "pubkey": get_wg_pubkey() if has_config else "None",
+        "pubkey": current_pubkey if has_config else "None",
         "last_sync": sub_info["lastSync"],
         "sync_error": sub_info.get("syncError"),
         "bandwidth_used_gb": sub_info.get("bandwidthUsedGb", 0.0),
@@ -994,16 +960,16 @@ def main():
             print(json.dumps({"result": "ok", "message": "Unconfigured: Add WireGuard configuration in settings"}))
             sys.exit(0)
 
-        sub_info = get_subscription_info()
-        has_synced = bool(sub_info.get("syncSuccess") is True or sub_info.get("lastSync") is not None)
+        pubkey = get_wg_pubkey()
+        sub_info = get_subscription_info(pubkey)
+        confirmed = bool(sub_info.get("linked"))
 
-        if not has_synced and not sub_info.get("syncError"):
-            pubkey = get_wg_pubkey()
+        if not confirmed and not sub_info.get("syncError"):
             if pubkey and pubkey not in ("Unknown", "Not available"):
                 try:
                     lazy_sync(pubkey)
-                    sub_info = get_subscription_info()
-                    has_synced = bool(sub_info.get("syncSuccess") is True or sub_info.get("lastSync") is not None)
+                    sub_info = get_subscription_info(pubkey)
+                    confirmed = bool(sub_info.get("linked"))
                 except Exception as e:
                     print(json.dumps({"result": "failure", "message": f"Subscription synchronization failed: {e}"}))
                     sys.exit(1)
@@ -1014,7 +980,7 @@ def main():
         elif sub_info.get("isExpired"):
             print(json.dumps({"result": "failure", "message": f"Subscription expired on {sub_info['expiresAt']}"}))
             sys.exit(1)
-        elif has_synced:
+        elif confirmed:
             print(json.dumps({"result": "ok", "message": sub_info["formatted"]}))
             sys.exit(0)
         else:

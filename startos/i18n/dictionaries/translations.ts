@@ -22,9 +22,9 @@ export const es_ES: LangDict = {
   18: 'El panel web no es accesible',
   19: 'Estado de la suscripción',
   20: 'La suscripción está activa',
-  21: 'La suscripción de WireGuard a TunnelSats ha caducado. Pegue una configuración renovada en los ajustes para restaurar la conectividad entrante.',
-  22: 'La suscripción a TunnelSats caduca en <= 3 días. Renuévela para evitar interrupciones de conexión.',
-  23: 'La suscripción a TunnelSats caduca en <= 7 días. Planifique su renovación para mantener el servicio activo.',
+  21: 'Tu suscripción a TunnelSats ha caducado y tu nodo retiene su tráfico clearnet hasta que se renueve. Ejecuta Renovar Suscripción para restablecerlo.',
+  22: 'Tu suscripción a TunnelSats caduca en 3 días o menos. Ejecuta Renovar Suscripción para que tu nodo siga accesible por clearnet.',
+  23: 'Tu suscripción a TunnelSats caduca en 7 días o menos. Ejecuta Renovar Suscripción para que tu nodo siga accesible por clearnet.',
   24: 'Configuración guardada',
   25: 'Agregue esto como una nueva puerta de enlace en Sistema → Puertas de enlace (elimine primero cualquier puerta de enlace de TunnelSats existente). Luego abra la interfaz Peer de su nodo para habilitar la dirección y asignar la puerta de enlace de salida (consulte las Instrucciones).',
   26: 'Exportar configuración de WireGuard',
@@ -67,6 +67,8 @@ export const es_ES: LangDict = {
   63: 'Factura de Renovación Creada',
   64: 'Se ha creado una tarea de pago en tu nodo Lightning. Una vez pagada, tu suscripción será extendida. Caducidad actual: ${oldExpiry}. Nueva caducidad después del pago: ${newExpiry}.',
   65: 'Pagar factura de renovación de suscripción a la VPN de TunnelSats',
+  66: 'Desactiva el túnel de TunnelSats en este nodo. TunnelSats ahora enruta otro nodo o ha sido desactivado.',
+  67: 'Esta configuración no tiene ningún endpoint que se pueda anunciar a la Lightning Network (un endpoint IPv6 requiere «Permitir coexistencia con IPv6 local»).',
 }
 
 export const de_DE: LangDict = {
@@ -91,9 +93,9 @@ export const de_DE: LangDict = {
   18: 'Web-Dashboard ist nicht erreichbar',
   19: 'Abonnementstatus',
   20: 'Abonnement ist aktiv',
-  21: 'Das TunnelSats WireGuard-Abonnement ist abgelaufen. Fügen Sie in den Einstellungen eine erneuerte Konfiguration ein, um eingehende Verbindungen wiederherzustellen.',
-  22: 'Das TunnelSats-Abonnement läuft in <= 3 Tagen ab. Bitte erneuern Sie das Abonnement, um Verbindungsunterbrechungen zu vermeiden.',
-  23: 'Das TunnelSats-Abonnement läuft in <= 7 Tagen ab. Planen Sie Ihre Erneuerung, um Ausfallzeiten zu vermeiden.',
+  21: 'Ihr TunnelSats-Abonnement ist abgelaufen, und Ihr Knoten hält seinen Clearnet-Verkehr zurück, bis es erneuert wird. Führen Sie „Abonnement erneuern“ aus, um ihn wiederherzustellen.',
+  22: 'Ihr TunnelSats-Abonnement läuft in 3 Tagen oder weniger ab. Führen Sie „Abonnement erneuern“ aus, damit Ihr Knoten über Clearnet erreichbar bleibt.',
+  23: 'Ihr TunnelSats-Abonnement läuft in 7 Tagen oder weniger ab. Führen Sie „Abonnement erneuern“ aus, damit Ihr Knoten über Clearnet erreichbar bleibt.',
   24: 'Konfiguration gespeichert',
   25: 'Fügen Sie dies als neues Gateway unter System → Gateways hinzu (löschen Sie vorher ein eventuell vorhandenes TunnelSats-Gateway). Öffnen Sie anschließend die Peer-Schnittstelle Ihres Knotens, um die Adresse zu aktivieren und das Outbound-Gateway zuzuweisen (siehe Anweisungen).',
   26: 'WireGuard-Konfiguration exportieren',
@@ -136,6 +138,8 @@ export const de_DE: LangDict = {
   63: 'Erneuerungsrechnung erstellt',
   64: 'Es wurde eine Zahlungsaufgabe auf Ihrem Lightning-Knoten erstellt. Sobald bezahlt, wird Ihr Abonnement verlängert. Aktueller Ablauf: ${oldExpiry}. Neuer Ablauf nach Zahlung: ${newExpiry}.',
   65: 'TunnelSats VPN-Abonnement-Erneuerungsrechnung bezahlen',
+  66: 'Schalten Sie den TunnelSats-Tunnel auf diesem Knoten ab. TunnelSats leitet jetzt einen anderen Knoten oder wurde ausgeschaltet.',
+  67: 'Diese Konfiguration enthält keinen Endpunkt, der im Lightning-Netzwerk angekündigt werden kann (ein IPv6-Endpunkt erfordert „Heim-IPv6-Koexistenz zulassen“).',
 }
 
 export const pl_PL: LangDict = {
@@ -160,9 +164,9 @@ export const pl_PL: LangDict = {
   18: 'Pulpit sieciowy jest niedostępny',
   19: 'Status subskrypcji',
   20: 'Subskrypcja jest aktywna',
-  21: 'Subskrypcja WireGuard TunnelSats wygasła. Wklej odnowioną konfigurację w ustawieniach, aby przywrócić łączność przychodzącą.',
-  22: 'Subskrypcja TunnelSats wygasa za <= 3 dni. Odnów subskrypcję, aby uniknąć przerw w połączeniu.',
-  23: 'Subskrypcja TunnelSats wygasa za <= 7 dni. Zaplanuj odnowienie, aby utrzymać ciągłość działania.',
+  21: 'Twoja subskrypcja TunnelSats wygasła, a węzeł wstrzymuje ruch clearnet do czasu jej odnowienia. Uruchom Odnów subskrypcję, aby go przywrócić.',
+  22: 'Twoja subskrypcja TunnelSats wygasa za 3 dni lub mniej. Uruchom Odnów subskrypcję, aby węzeł pozostał dostępny przez clearnet.',
+  23: 'Twoja subskrypcja TunnelSats wygasa za 7 dni lub mniej. Uruchom Odnów subskrypcję, aby węzeł pozostał dostępny przez clearnet.',
   24: 'Konfiguracja zapisana',
   25: 'Dodaj to jako nową bramę w System → Bramy (najpierw usuń istniejącą bramę TunnelSats). Następnie otwórz interfejs Peer swojego węzła, aby włączyć adres i przypisać bramę wychodzącą (patrz Instrukcje).',
   26: 'Eksportuj konfigurację WireGuard',
@@ -205,6 +209,8 @@ export const pl_PL: LangDict = {
   63: 'Faktura odnowienia utworzona',
   64: 'W Twoim węźle Lightning utworzono zadanie płatności. Po opłaceniu Twoja subskrypcja zostanie przedłużona. Obecne wygaśnięcie: ${oldExpiry}. Nowe wygaśnięcie po opłaceniu: ${newExpiry}.',
   65: 'Opłać fakturę za odnowienie subskrypcji VPN TunnelSats',
+  66: 'Wyłącz tunel TunnelSats na tym węźle. TunnelSats obsługuje teraz inny węzeł lub został wyłączony.',
+  67: 'Ta konfiguracja nie zawiera punktu końcowego, który można ogłosić w sieci Lightning (punkt końcowy IPv6 wymaga opcji „Zezwól na współistnienie domowego IPv6”).',
 }
 
 export const fr_FR: LangDict = {
@@ -229,9 +235,9 @@ export const fr_FR: LangDict = {
   18: 'Le tableau de bord Web n’est pas accessible',
   19: 'État de l’abonnement',
   20: 'L’abonnement est actif',
-  21: 'L’abonnement WireGuard TunnelSats a expiré. Collez une configuration renouvelée dans les paramètres pour rétablir la connectivité entrante.',
-  22: 'L’abonnement TunnelSats expire dans <= 3 jours. Renouvelez votre abonnement pour éviter toute interruption de connexion.',
-  23: 'L’abonnement TunnelSats expire dans <= 7 jours. Planifiez votre renouvellement pour maintenir la disponibilité.',
+  21: "Votre abonnement TunnelSats a expiré et votre nœud retient son trafic clearnet jusqu’à son renouvellement. Lancez « Renouveler l'abonnement » pour le rétablir.",
+  22: "Votre abonnement TunnelSats expire dans 3 jours ou moins. Lancez « Renouveler l'abonnement » pour que votre nœud reste joignable en clearnet.",
+  23: "Votre abonnement TunnelSats expire dans 7 jours ou moins. Lancez « Renouveler l'abonnement » pour que votre nœud reste joignable en clearnet.",
   24: 'Configuration enregistrée',
   25: "Ajoutez ceci en tant que nouvelle passerelle sous Système → Passerelles (supprimez d'abord toute passerelle TunnelSats existante). Ouvrez ensuite l'interface Peer de votre nœud pour activer l'adresse et assigner la passerelle sortante (voir Instructions).",
   26: 'Exporter la configuration WireGuard',
@@ -274,6 +280,8 @@ export const fr_FR: LangDict = {
   63: 'Facture de renouvellement créée',
   64: 'Une tâche de paiement a été créée sur votre nœud Lightning. Une fois payé, votre abonnement sera prolongé. Expiration actuelle : ${oldExpiry}. Nouvelle expiration après paiement : ${newExpiry}.',
   65: "Payer la facture de renouvellement de l'abonnement VPN TunnelSats",
+  66: 'Désactivez le tunnel TunnelSats sur ce nœud. TunnelSats achemine désormais un autre nœud ou a été désactivé.',
+  67: 'Cette configuration ne contient aucun point de terminaison annonçable sur le Lightning Network (un point de terminaison IPv6 nécessite « Autoriser la coexistence IPv6 domestique »).',
 }
 
 export default {

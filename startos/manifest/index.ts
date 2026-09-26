@@ -44,5 +44,14 @@ export const manifest = setupManifest({
         icon: 'https://raw.githubusercontent.com/Start9Labs/cln-startos/refs/heads/master/icon.svg',
       },
     },
+    eclair: {
+      description:
+        'Eclair. Required if you choose Eclair as your Target Lightning Node for inbound connections.',
+      optional: true,
+      metadata: {
+        title: 'Eclair',
+        icon: 'https://raw.githubusercontent.com/Start9Labs/eclair-startos/refs/heads/master/icon.png',
+      },
+    },
   },
 })

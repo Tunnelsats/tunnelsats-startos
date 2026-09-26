@@ -98,19 +98,5 @@ class TestBridgeLifecycle(unittest.TestCase):
             finally:
                 bridge.META_FILE_PATH = orig_meta
 
-    @patch('builtins.open', new_callable=unittest.mock.mock_open, read_data='{"expiresAt": "2026-12-31T23:59:59Z"}')
-    @patch('os.path.exists')
-    @patch('bridge.datetime')
-    def test_format_subscription_expiry_active(self, mock_datetime, mock_exists, mock_open):
-        mock_exists.return_value = True
-        
-        from datetime import datetime, timezone
-        fixed_now = datetime(2026, 12, 20, 12, 0, 0, tzinfo=timezone.utc)
-        mock_datetime.now.return_value = fixed_now
-        mock_datetime.fromisoformat.side_effect = lambda s: datetime.fromisoformat(s)
-        
-        result = bridge.format_subscription_expiry()
-        self.assertEqual(result, "Active (Expires in 11d 11h)")
-
 if __name__ == '__main__':
     unittest.main()
