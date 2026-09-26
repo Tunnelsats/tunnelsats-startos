@@ -11,6 +11,11 @@ on:
   pull_request:
     branches:
       - main
+      # Integration branches (e.g. feat/storefront-clearnet-vpn) collect
+      # stacked PRs before they reach main; each PR must pass CI first.
+      # PR-only on purpose: a push trigger would run the suite twice when
+      # the integration branch itself has an open PR to main.
+      - 'feat/**'
     paths-ignore:
       - '**.md'
       - 'LICENSE'
