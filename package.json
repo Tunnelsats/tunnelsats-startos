@@ -7,6 +7,7 @@
     "prettier": "prettier --write startos",
     "check": "tsc --noEmit",
     "test:bats": "npx -y bats tests/*.bats",
+    "lint": "node node_modules/@start9labs/start-sdk/lint.mjs",
     "test:all": "tsx --test tests/*.test.ts && python3 -m unittest discover -s tests -p 'test_*.py' && npx -y bats tests/*.bats"
   },
   "dependencies": {
