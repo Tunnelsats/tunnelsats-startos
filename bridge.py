@@ -787,13 +787,15 @@ def get_subscription_info(current_pubkey=None):
     try:
         with open(META_FILE_PATH, 'r') as f:
             meta = json.load(f)
-        confirmed = meta.get("expirySource") == "api" and (
-            current_pubkey is None or meta.get("publicKey") == current_pubkey
-        )
+        # Everything recorded by a sync belongs to the key it ran for. A new
+        # key inherits neither the old expiry nor the old sync error (which
+        # would stop health from syncing the new key right away).
+        same_key = current_pubkey is None or meta.get("publicKey") == current_pubkey
+        confirmed = meta.get("expirySource") == "api" and same_key
         expires_at = meta.get("expiresAt") if confirmed else None
         last_sync = meta.get("lastSync") if confirmed else None
-        sync_error = meta.get("syncError")
-        sync_success = meta.get("syncSuccess", False)
+        sync_error = meta.get("syncError") if same_key else None
+        sync_success = meta.get("syncSuccess", False) if same_key else False
 
         has_synced = bool(sync_success or (last_sync is not None and not sync_error))
 

@@ -9,10 +9,13 @@ import { derivePublicKey } from './keygen'
 import { renewSubscription } from './actions/renewSubscription'
 import {
   type PackageId,
-  type OffTaskState,
+  type NodeVpnState,
   planClearnetVpnTasks,
   executeClearnetVpnPlan,
-  readOffTaskState,
+  readNodeVpnState,
+  previousNodes,
+  handedOverTarget,
+  CLEARNET_VPN_ACTION_ID,
   buildOnTaskInput,
   buildOffTaskInput,
   clearnetVpnReplayId,
@@ -317,28 +320,31 @@ function serializeHandoff<T>(fn: () => Promise<T>): Promise<T> {
   return run
 }
 
-async function readOffTaskStates(
+/**
+ * Reads each node's current clearnet-vpn input, the same value StartOS checks
+ * a task against. Works whether or not the node is a declared dependency. A
+ * node that cannot answer (stopped container, still initializing) is
+ * unknown, which the planner treats as on.
+ */
+async function readNodeVpnStates(
   effects: Parameters<typeof sdk.checkDependencies>[0],
-  pending: readonly PackageId[],
-): Promise<Partial<Record<PackageId, OffTaskState>>> {
-  const states: Partial<Record<PackageId, OffTaskState>> = {}
-  if (pending.length === 0) return states
-  try {
-    const check = await sdk.checkDependencies(effects, [...pending])
-    for (const p of pending) {
-      try {
-        states[p] = readOffTaskState(
-          check.infoFor(p).result.tasks[clearnetVpnReplayId(p)],
-        )
-      } catch {
-        states[p] = 'unknown'
-      }
+  nodes: readonly PackageId[],
+): Promise<Partial<Record<PackageId, NodeVpnState>>> {
+  const states: Partial<Record<PackageId, NodeVpnState>> = {}
+  for (const p of nodes) {
+    try {
+      const input = await effects.action.getInput({
+        packageId: p,
+        actionId: CLEARNET_VPN_ACTION_ID,
+      })
+      states[p] = readNodeVpnState(input?.value)
+    } catch (e) {
+      console.warn(
+        `TunnelSats: could not read the clearnet-vpn state of ${p}; treating it as on:`,
+        e,
+      )
+      states[p] = 'unknown'
     }
-  } catch (e) {
-    console.warn(
-      'TunnelSats: could not read clearnet-vpn task state; keeping off-tasks raised:',
-      e,
-    )
   }
   return states
 }
@@ -374,31 +380,18 @@ async function handOffClearnetVpn(
     .once()
     .catch((e) => {
       console.error(
-        'TunnelSats: could not read vpn-handoff.json; previous off-task targets are unknown:',
+        'TunnelSats: could not read vpn-handoff.json; checking every installed node instead:',
         e,
       )
       return null
     })
   const installed = await effects.getInstalledPackages()
-  const offTaskStates = await readOffTaskStates(
-    effects,
-    state?.pendingOff ?? [],
-  )
   const desired = getTargetVpnConfig(config)
-  const previousNodes = [
-    ...new Set([...(state?.pendingOff ?? []), state?.activeTarget]),
-  ].filter(
-    (p): p is PackageId =>
-      !!p && p !== desired?.targetPackage && installed.includes(p),
-  )
-  await watchPreviousNodes(effects, previousNodes)
+  const nodes = previousNodes(state, installed, handedOverTarget(desired))
+  await watchPreviousNodes(effects, nodes)
+  const nodeVpn = await readNodeVpnStates(effects, nodes)
 
-  const plan = planClearnetVpnTasks({
-    desired,
-    state,
-    installed,
-    offTaskStates,
-  })
+  const plan = planClearnetVpnTasks({ desired, state, installed, nodeVpn })
   if (plan.held) {
     console.info(
       `TunnelSats: holding the clearnet-vpn on-task for ${plan.held.packageId} until ${plan.held.waitingFor.join(', ')} confirm off`,
@@ -445,6 +438,7 @@ async function handOffClearnetVpn(
 
   const prevPending = state?.pendingOff ?? []
   if (
+    state === null ||
     (state?.activeTarget ?? null) !== plan.next.activeTarget ||
     prevPending.length !== plan.next.pendingOff.length ||
     prevPending.some((p, i) => p !== plan.next.pendingOff[i])

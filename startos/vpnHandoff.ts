@@ -9,21 +9,27 @@
  * the two would fight over one tunnel (handshake flapping, inbound delivered
  * to whichever node handshook last).
  *
+ * Whether a node is off is read from the node itself: the current input of
+ * its clearnet-vpn action (effects.action.getInput), the same value StartOS
+ * compares a task against. Anything unreadable counts as on (fail closed).
+ *
  * StartOS does not reap tasks that are not re-raised, and it hides tasks on
- * packages that are not current dependencies, so the planner keeps every node
- * with an outstanding off-task in `pendingOff` (declared as an `exists`
- * dependency by the caller) until the node reports the off-task satisfied or
- * the node is uninstalled.
+ * packages that are not current dependencies, so every node that still owes
+ * an off stays in `pendingOff` (declared as an `exists` dependency by the
+ * caller) until it is off or uninstalled.
  *
  * StartOS cannot order tasks across packages either, so the new node's
- * on-task is withheld until every previous node has confirmed off (off-task
- * satisfied) or is uninstalled. The caller watches those nodes' status, so
- * accepting the off-task on a running node (which restarts it) re-runs the
- * planner and releases the on-task. Known limitation: StartOS offers no
- * change notification for task state, so an off-task accepted on a node that
- * stays stopped is only noticed on the next re-run (node started, TunnelSats
- * restarted, or subscription metadata synced). The delay is safe, never a
- * dual activation.
+ * on-task is withheld until every previous node is off or uninstalled. The
+ * caller watches those nodes' status, so accepting the off-task on a running
+ * node (which restarts it) re-runs the planner and releases the on-task.
+ * Known limitation: StartOS offers no change notification for action input,
+ * so an off-task accepted on a node that stays stopped is only noticed on the
+ * next re-run (node started, TunnelSats restarted, or subscription metadata
+ * synced). The delay is safe, never a dual activation.
+ *
+ * Without a handoff record (fresh install, upgrade from a build that had
+ * none, unreadable file) every installed node other than the target is
+ * checked, so a tunnel handed out before the record existed is found too.
  */
 
 export type PackageId = 'lnd' | 'c-lightning' | 'eclair'
@@ -43,7 +49,7 @@ export function clearnetVpnReplayId(packageId: PackageId): string {
 export interface VpnHandoffState {
   /** The node we last raised an on-task for. */
   activeTarget: PackageId | null
-  /** Nodes that still owe us a confirmed off. */
+  /** Nodes that still owe us an off. */
   pendingOff: PackageId[]
 }
 
@@ -58,15 +64,16 @@ export interface DesiredVpn {
   wgConf: string
 }
 
-export type OffTaskState = 'active' | 'satisfied' | 'unknown'
+/** A node's clearnet-vpn state as read from its action input. */
+export type NodeVpnState = 'on' | 'off' | 'unknown'
 
 export interface ClearnetVpnPlan {
   on: { packageId: PackageId; config: string; announce: string } | null
-  /** The target's on-task, withheld until these nodes are positively off. */
+  /** The target's on-task, withheld until these nodes are off. */
   held: { packageId: PackageId; waitingFor: PackageId[] } | null
   /** Nodes to raise (or keep raising) the off-task on. */
   off: PackageId[]
-  /** Nodes whose off-task is done or moot; their task gets cleared. */
+  /** Nodes that are off or gone; their task gets cleared. */
   retire: PackageId[]
   next: VpnHandoffState
 }
@@ -75,47 +82,54 @@ function isPackageId(v: unknown): v is PackageId {
   return typeof v === 'string' && (ALL_PACKAGE_IDS as string[]).includes(v)
 }
 
+/**
+ * The nodes that may still run a tunnel we handed out: those in the record,
+ * or, without a record, every installed node. The target is never one.
+ */
+export function previousNodes(
+  state: VpnHandoffState | null | undefined,
+  installed: readonly string[],
+  target: PackageId | null,
+): PackageId[] {
+  const from = state
+    ? [...(state.pendingOff ?? []), state.activeTarget]
+    : ALL_PACKAGE_IDS.filter((p) => installed.includes(p))
+  const out: PackageId[] = []
+  for (const p of from) {
+    if (isPackageId(p) && p !== target && !out.includes(p)) out.push(p)
+  }
+  return out
+}
+
+/** Only a config we can announce is handed over; never a half-configured tunnel. */
+export function handedOverTarget(desired: DesiredVpn | null): PackageId | null {
+  return desired && desired.announceEndpoint ? desired.targetPackage : null
+}
+
 export function planClearnetVpnTasks(params: {
   desired: DesiredVpn | null
+  /** null: no handoff record (see module doc). */
   state: VpnHandoffState | null | undefined
   installed: readonly string[]
-  offTaskStates: Partial<Record<PackageId, OffTaskState>>
+  nodeVpn: Partial<Record<PackageId, NodeVpnState>>
 }): ClearnetVpnPlan {
-  const { desired, installed, offTaskStates } = params
+  const { desired, installed, nodeVpn } = params
   const prev = params.state ?? EMPTY_HANDOFF_STATE
 
-  // Only a config we can announce is handed over; the node gets no
-  // half-configured tunnel.
+  const target = handedOverTarget(desired)
   const onCandidate =
-    desired && desired.announceEndpoint
+    desired && target
       ? {
-          packageId: desired.targetPackage,
+          packageId: target,
           config: desired.wgConf,
-          announce: desired.announceEndpoint,
+          announce: desired.announceEndpoint as string,
         }
       : null
-  const target = onCandidate?.packageId ?? null
-
-  const previouslyPending = new Set((prev.pendingOff ?? []).filter(isPackageId))
-  const candidates: PackageId[] = []
-  for (const p of [...previouslyPending, prev.activeTarget]) {
-    if (isPackageId(p) && p !== target && !candidates.includes(p)) {
-      candidates.push(p)
-    }
-  }
 
   const off: PackageId[] = []
   const retire: PackageId[] = []
-  for (const p of candidates) {
-    if (!installed.includes(p)) {
-      retire.push(p)
-    } else if (
-      // A satisfied entry only proves "off" for a node whose off-task we
-      // raised on an earlier run. On a fresh transition the entry is still
-      // our old, satisfied on-task.
-      previouslyPending.has(p) &&
-      offTaskStates[p] === 'satisfied'
-    ) {
+  for (const p of previousNodes(params.state, installed, target)) {
+    if (!installed.includes(p) || nodeVpn[p] === 'off') {
       retire.push(p)
     } else {
       off.push(p)
@@ -125,9 +139,7 @@ export function planClearnetVpnTasks(params: {
   // StartOS cannot order tasks across packages. If the new node's on-task
   // were raised while a previous node may still run the tunnel, accepting it
   // first would put one WireGuard key on two nodes. So it is withheld until
-  // every previous node has confirmed off or is uninstalled. A stopped node
-  // still holds it (fail closed): started again before accepting its
-  // off-task, it would bring the tunnel back up. A target that already holds
+  // every previous node is off or uninstalled. A target that already holds
   // the tunnel is never withheld.
   const hold =
     onCandidate !== null && prev.activeTarget !== target && off.length > 0
@@ -159,23 +171,17 @@ export function buildOffTaskInput() {
 }
 
 /**
- * Reads a node's task entry for `clearnet-vpn` and tells whether it is our
- * off-task and whether the node has satisfied it. Anything else is unknown.
+ * A node's clearnet-vpn state from its current action input
+ * (`{ config, announce }`). Unreadable or unexpected input is unknown.
  */
-export function readOffTaskState(
-  entry:
-    | {
-        active: boolean
-        task: { input?: { set?: Record<string, unknown> } | null }
-      }
-    | undefined
-    | null,
-): OffTaskState {
-  const set = entry?.task?.input?.set
-  if (!entry || !set || !('config' in set) || set.config !== null) {
-    return 'unknown'
-  }
-  return entry.active ? 'active' : 'satisfied'
+export function readNodeVpnState(
+  value: Record<string, unknown> | null | undefined,
+): NodeVpnState {
+  if (!value) return 'unknown'
+  const config = value.config
+  if (config === null || config === undefined) return 'off'
+  if (typeof config !== 'string') return 'unknown'
+  return config.trim() ? 'on' : 'off'
 }
 
 export interface ClearnetVpnOps {

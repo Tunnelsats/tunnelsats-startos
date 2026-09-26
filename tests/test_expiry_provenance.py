@@ -157,6 +157,20 @@ class TestSubscriptionInfoProvenance(ProvenanceTestBase):
         self.assertTrue(info["linked"])
         self.assertFalse(info["isExpired"])
 
+    def test_sync_error_of_another_key_is_ignored(self):
+        self.write_meta({"publicKey": "pk_old", "syncSuccess": False,
+                         "syncError": "HTTP Error 404: Not Found"})
+        info = bridge.get_subscription_info("pk_new")
+        self.assertIsNone(info["syncError"])
+        self.assertFalse(info["syncSuccess"])
+        self.assertFalse(info["linked"])
+
+    def test_sync_error_of_the_current_key_is_reported(self):
+        self.write_meta({"publicKey": "pk_current", "syncSuccess": False,
+                         "syncError": "unreachable"})
+        info = bridge.get_subscription_info("pk_current")
+        self.assertEqual(info["syncError"], "unreachable")
+
 
 class TestHealthProvenance(ProvenanceTestBase):
     @patch('bridge.is_enabled', return_value=True)
@@ -175,6 +189,24 @@ class TestHealthProvenance(ProvenanceTestBase):
         mock_lazy_sync.assert_called_once_with("pk_new")
         out = json.loads(mock_stdout.getvalue())
         # Still unconfirmed after the (mocked, no-op) sync: never "ok".
+        self.assertEqual(out["result"], "loading")
+        self.assertEqual(cm.exception.code, 0)
+
+    @patch('bridge.is_enabled', return_value=True)
+    @patch('bridge.get_wg_pubkey', return_value="pk_new")
+    @patch('bridge.lazy_sync')
+    @patch('sys.stdout', new_callable=io.StringIO)
+    def test_health_resyncs_when_sync_error_belongs_to_another_key(
+        self, mock_stdout, mock_lazy_sync, _pubkey, _enabled
+    ):
+        # A freshly imported key must not inherit the previous key's failure.
+        self.write_meta({"publicKey": "pk_old", "syncSuccess": False,
+                         "syncError": "HTTP Error 404: Not Found"})
+        with patch('sys.argv', ['bridge.py', 'health', 'subscription']):
+            with self.assertRaises(SystemExit) as cm:
+                bridge.main()
+        mock_lazy_sync.assert_called_once_with("pk_new")
+        out = json.loads(mock_stdout.getvalue())
         self.assertEqual(out["result"], "loading")
         self.assertEqual(cm.exception.code, 0)
 

@@ -2,17 +2,17 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import {
   planClearnetVpnTasks,
-  readOffTaskState,
+  readNodeVpnState,
   executeClearnetVpnPlan,
   buildOnTaskInput,
   buildOffTaskInput,
-  EMPTY_HANDOFF_STATE,
   type ClearnetVpnPlan,
 } from '../startos/vpnHandoff'
 
 const CONF =
   '[Interface]\nPrivateKey = x\n[Peer]\nEndpoint = de2.tunnelsats.com:51820\n'
 const ALL_INSTALLED = ['lnd', 'c-lightning', 'eclair']
+const ALL_OFF = { lnd: 'off', 'c-lightning': 'off', eclair: 'off' } as const
 
 function desired(
   targetPackage: 'lnd' | 'c-lightning' | 'eclair',
@@ -21,32 +21,80 @@ function desired(
   return { targetPackage, announceEndpoint, wgConf: CONF }
 }
 
-test('no subscription and no prior handoff: nothing to raise', () => {
-  const plan = planClearnetVpnTasks({
-    desired: null,
-    state: null,
-    installed: ALL_INSTALLED,
-    offTaskStates: {},
-  })
-  assert.equal(plan.on, null)
-  assert.deepEqual(plan.off, [])
-  assert.deepEqual(plan.retire, [])
-  assert.deepEqual(plan.next, EMPTY_HANDOFF_STATE)
-})
+// --- bootstrap (no handoff record: fresh install, upgrade, unreadable file)
 
-test('first activation raises the on-task on the target only', () => {
+test('bootstrap: nodes without a tunnel are retired and the target gets its on-task at once', () => {
   const plan = planClearnetVpnTasks({
     desired: desired('lnd'),
     state: null,
     installed: ALL_INSTALLED,
-    offTaskStates: {},
+    nodeVpn: ALL_OFF,
   })
   assert.deepEqual(plan.on, {
     packageId: 'lnd',
     config: CONF,
     announce: 'de2.tunnelsats.com:24556',
   })
+  assert.equal(plan.held, null)
   assert.deepEqual(plan.off, [])
+  assert.deepEqual(plan.retire, ['c-lightning', 'eclair'])
+  assert.deepEqual(plan.next, { activeTarget: 'lnd', pendingOff: [] })
+})
+
+test('bootstrap: a node that already runs a tunnel is asked to turn off first', () => {
+  // e.g. a box upgraded from a build that handed out clearnet-vpn tasks
+  // before the handoff record existed.
+  const plan = planClearnetVpnTasks({
+    desired: desired('c-lightning'),
+    state: null,
+    installed: ALL_INSTALLED,
+    nodeVpn: { lnd: 'on', eclair: 'off' },
+  })
+  assert.equal(plan.on, null)
+  assert.deepEqual(plan.held, {
+    packageId: 'c-lightning',
+    waitingFor: ['lnd'],
+  })
+  assert.deepEqual(plan.off, ['lnd'])
+  assert.deepEqual(plan.retire, ['eclair'])
+  assert.deepEqual(plan.next, { activeTarget: null, pendingOff: ['lnd'] })
+})
+
+test('bootstrap: a node whose state cannot be read holds the on-task (fail closed)', () => {
+  const plan = planClearnetVpnTasks({
+    desired: desired('lnd'),
+    state: null,
+    installed: ['lnd', 'eclair'],
+    nodeVpn: {},
+  })
+  assert.equal(plan.on, null)
+  assert.deepEqual(plan.off, ['eclair'])
+})
+
+test('bootstrap with TunnelSats off and no node tunnels leaves nothing behind', () => {
+  const plan = planClearnetVpnTasks({
+    desired: null,
+    state: null,
+    installed: ALL_INSTALLED,
+    nodeVpn: ALL_OFF,
+  })
+  assert.equal(plan.on, null)
+  assert.deepEqual(plan.off, [])
+  assert.deepEqual(plan.next, { activeTarget: null, pendingOff: [] })
+})
+
+// --- tracked transitions
+
+test('first activation with an empty record raises the on-task on the target only', () => {
+  const plan = planClearnetVpnTasks({
+    desired: desired('lnd'),
+    state: { activeTarget: null, pendingOff: [] },
+    installed: ALL_INSTALLED,
+    nodeVpn: {},
+  })
+  assert.equal(plan.on?.packageId, 'lnd')
+  assert.deepEqual(plan.off, [])
+  assert.deepEqual(plan.retire, [])
   assert.deepEqual(plan.next, { activeTarget: 'lnd', pendingOff: [] })
 })
 
@@ -55,9 +103,7 @@ test('switching nodes raises the off-task on the previous node and holds the new
     desired: desired('c-lightning'),
     state: { activeTarget: 'lnd', pendingOff: [] },
     installed: ALL_INSTALLED,
-    // The previous node still carries our satisfied ON-task; that must not
-    // be mistaken for a satisfied off-task on a fresh transition.
-    offTaskStates: { lnd: 'satisfied' },
+    nodeVpn: { lnd: 'on' },
   })
   // lnd still runs the tunnel: raising c-lightning's on-task now would let
   // both nodes run the same WireGuard key.
@@ -71,12 +117,12 @@ test('switching nodes raises the off-task on the previous node and holds the new
   assert.deepEqual(plan.next, { activeTarget: null, pendingOff: ['lnd'] })
 })
 
-test('the held on-task is raised once the previous node confirms off', () => {
+test('the held on-task is raised once the previous node is off', () => {
   const plan = planClearnetVpnTasks({
     desired: desired('c-lightning'),
     state: { activeTarget: null, pendingOff: ['lnd'] },
     installed: ALL_INSTALLED,
-    offTaskStates: { lnd: 'satisfied' },
+    nodeVpn: { lnd: 'off' },
   })
   assert.equal(plan.on?.packageId, 'c-lightning')
   assert.equal(plan.held, null)
@@ -92,32 +138,32 @@ test('the held on-task is raised when the previous node is uninstalled', () => {
     desired: desired('c-lightning'),
     state: { activeTarget: null, pendingOff: ['lnd'] },
     installed: ['c-lightning'],
-    offTaskStates: {},
+    nodeVpn: {},
   })
   assert.equal(plan.on?.packageId, 'c-lightning')
   assert.deepEqual(plan.retire, ['lnd'])
 })
 
-test('a stopped previous node still holds the on-task (it could start with its tunnel)', () => {
-  // Fail closed: a stopped node that has not accepted its off-task would
-  // bring the tunnel back up when started, next to the new node.
+test('a previous node whose state cannot be read keeps holding the on-task (fail closed)', () => {
+  // Covers a stopped or still-initializing node: started before turning its
+  // tunnel off, it would bring the tunnel back up next to the new node.
   const plan = planClearnetVpnTasks({
     desired: desired('c-lightning'),
     state: { activeTarget: 'lnd', pendingOff: [] },
     installed: ALL_INSTALLED,
-    offTaskStates: {},
+    nodeVpn: { lnd: 'unknown' },
   })
   assert.equal(plan.on, null)
   assert.deepEqual(plan.held, { packageId: 'c-lightning', waitingFor: ['lnd'] })
   assert.deepEqual(plan.off, ['lnd'])
 })
 
-test('an already-active target is never held (it keeps being tracked for a later off)', () => {
+test('an already-active target is never held (the owing node stays tracked)', () => {
   const plan = planClearnetVpnTasks({
     desired: desired('c-lightning'),
     state: { activeTarget: 'c-lightning', pendingOff: ['lnd'] },
     installed: ALL_INSTALLED,
-    offTaskStates: { lnd: 'active' },
+    nodeVpn: { lnd: 'on' },
   })
   assert.equal(plan.on?.packageId, 'c-lightning')
   assert.deepEqual(plan.next, {
@@ -131,7 +177,7 @@ test('turning the subscription off raises the off-task on the active node', () =
     desired: null,
     state: { activeTarget: 'eclair', pendingOff: [] },
     installed: ALL_INSTALLED,
-    offTaskStates: {},
+    nodeVpn: { eclair: 'on' },
   })
   assert.equal(plan.on, null)
   assert.deepEqual(plan.off, ['eclair'])
@@ -143,40 +189,11 @@ test('a config that cannot be announced is handed over as off, never as a half-c
     desired: desired('lnd', null),
     state: { activeTarget: 'lnd', pendingOff: [] },
     installed: ALL_INSTALLED,
-    offTaskStates: {},
+    nodeVpn: { lnd: 'on' },
   })
   assert.equal(plan.on, null)
   assert.deepEqual(plan.off, ['lnd'])
   assert.deepEqual(plan.next, { activeTarget: null, pendingOff: ['lnd'] })
-})
-
-test('a pending off-task stays raised until the node confirms it is off', () => {
-  for (const s of ['active', 'unknown'] as const) {
-    const plan = planClearnetVpnTasks({
-      desired: desired('c-lightning'),
-      state: { activeTarget: 'c-lightning', pendingOff: ['lnd'] },
-      installed: ALL_INSTALLED,
-      offTaskStates: { lnd: s },
-    })
-    assert.deepEqual(plan.off, ['lnd'], `state ${s}`)
-    assert.deepEqual(plan.retire, [], `state ${s}`)
-    assert.deepEqual(plan.next.pendingOff, ['lnd'], `state ${s}`)
-  }
-})
-
-test('a satisfied pending off-task is retired and its task cleared', () => {
-  const plan = planClearnetVpnTasks({
-    desired: desired('c-lightning'),
-    state: { activeTarget: 'c-lightning', pendingOff: ['lnd'] },
-    installed: ALL_INSTALLED,
-    offTaskStates: { lnd: 'satisfied' },
-  })
-  assert.deepEqual(plan.off, [])
-  assert.deepEqual(plan.retire, ['lnd'])
-  assert.deepEqual(plan.next, {
-    activeTarget: 'c-lightning',
-    pendingOff: [],
-  })
 })
 
 test('an uninstalled pending node is retired (its tunnel went with it)', () => {
@@ -184,19 +201,19 @@ test('an uninstalled pending node is retired (its tunnel went with it)', () => {
     desired: desired('c-lightning'),
     state: { activeTarget: 'lnd', pendingOff: ['eclair'] },
     installed: ['c-lightning', 'lnd'],
-    offTaskStates: {},
+    nodeVpn: { lnd: 'on' },
   })
   assert.deepEqual(plan.off, ['lnd'])
   assert.deepEqual(plan.retire, ['eclair'])
   assert.deepEqual(plan.next.pendingOff, ['lnd'])
 })
 
-test('switching back to a node with a pending off-task replaces it with the on-task once the other node is off', () => {
+test('switching back to a node that owes an off waits for the other node, then hands it the on-task', () => {
   const held = planClearnetVpnTasks({
     desired: desired('lnd'),
     state: { activeTarget: 'c-lightning', pendingOff: ['lnd'] },
     installed: ALL_INSTALLED,
-    offTaskStates: { lnd: 'active' },
+    nodeVpn: { 'c-lightning': 'on', lnd: 'on' },
   })
   assert.equal(held.on, null)
   assert.deepEqual(held.off, ['c-lightning'])
@@ -209,7 +226,7 @@ test('switching back to a node with a pending off-task replaces it with the on-t
     desired: desired('lnd'),
     state: held.next,
     installed: ALL_INSTALLED,
-    offTaskStates: { 'c-lightning': 'satisfied' },
+    nodeVpn: { 'c-lightning': 'off' },
   })
   assert.equal(released.on?.packageId, 'lnd')
   assert.deepEqual(released.retire, ['c-lightning'])
@@ -221,7 +238,7 @@ test('re-enabling the node that owes an off hands it the on-task directly', () =
     desired: desired('lnd'),
     state: { activeTarget: null, pendingOff: ['lnd'] },
     installed: ALL_INSTALLED,
-    offTaskStates: { lnd: 'active' },
+    nodeVpn: { lnd: 'on' },
   })
   assert.equal(plan.on?.packageId, 'lnd')
   assert.deepEqual(plan.off, [])
@@ -233,13 +250,15 @@ test('duplicate and malformed state entries are normalised', () => {
     desired: null,
     state: {
       activeTarget: 'lnd',
-      pendingOff: ['lnd', 'lnd', 'eclair'],
+      pendingOff: ['lnd', 'lnd', 'eclair', 'bogus' as never],
     },
     installed: ALL_INSTALLED,
-    offTaskStates: {},
+    nodeVpn: {},
   })
   assert.deepEqual(plan.off, ['lnd', 'eclair'])
 })
+
+// --- contract helpers
 
 test('task inputs follow the node clearnet-vpn contract', () => {
   assert.deepEqual(buildOnTaskInput(CONF, 'h:1'), {
@@ -255,20 +274,14 @@ test('task inputs follow the node clearnet-vpn contract', () => {
   })
 })
 
-test('readOffTaskState only trusts entries that carry our off input', () => {
-  const offEntry = (active: boolean) => ({
-    active,
-    task: { input: buildOffTaskInput() },
-  })
-  const onEntry = {
-    active: false,
-    task: { input: buildOnTaskInput(CONF, 'h:1') },
-  }
-  assert.equal(readOffTaskState(undefined), 'unknown')
-  assert.equal(readOffTaskState(offEntry(true)), 'active')
-  assert.equal(readOffTaskState(offEntry(false)), 'satisfied')
-  assert.equal(readOffTaskState(onEntry), 'unknown')
-  assert.equal(readOffTaskState({ active: false, task: {} }), 'unknown')
+test('readNodeVpnState reads the node clearnet-vpn input, unknown when unreadable', () => {
+  assert.equal(readNodeVpnState({ config: CONF, announce: 'h:1' }), 'on')
+  assert.equal(readNodeVpnState({ config: null, announce: null }), 'off')
+  assert.equal(readNodeVpnState({ config: '   ' }), 'off')
+  assert.equal(readNodeVpnState({}), 'off')
+  assert.equal(readNodeVpnState(null), 'unknown')
+  assert.equal(readNodeVpnState(undefined), 'unknown')
+  assert.equal(readNodeVpnState({ config: 42 }), 'unknown')
 })
 
 test('executeClearnetVpnPlan raises on/off, clears retired, and reports failures separately', async () => {
