@@ -441,6 +441,20 @@ class TestPayTaskAcknowledgement(SettlementTestBase):
         bridge.ack_pay_tasks(["tunnelsats-renewal:cln"])
         self.assertEqual(self.read_meta(), {"vpnPort": 1})
 
+    def test_a_new_pay_task_under_the_same_replay_id_is_never_cleared(self):
+        # A Buy on eclair after the previous eclair order settled raised its
+        # task under the same replay ID, replacing the settled one. Clearing
+        # the queued ID now would remove the new, unpaid task.
+        retry_at = iso(NOW + timedelta(minutes=1))
+        self.write_meta({
+            "payTasksToClear": ["tunnelsats-order:eclair", "tunnelsats-renewal:cln"],
+            "pendingOrder": self.pending_order(nextAttemptAt=retry_at, lastError="x"),
+        })
+        result = self.settle()
+        self.assertEqual(result["clearPayTasks"], ["tunnelsats-renewal:cln"])
+        self.assertEqual(self.read_meta()["payTasksToClear"], ["tunnelsats-renewal:cln"])
+        self.assertEqual(self.api.requests, [])
+
     def test_cli_settle_prints_the_outcome_and_ack_clears(self):
         self.write_meta({"payTasksToClear": ["tunnelsats-order:lnd"]})
         out = io.StringIO()

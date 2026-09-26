@@ -826,6 +826,35 @@ def _pay_tasks_to_clear(meta):
     return [t for t in meta.get("payTasksToClear") or [] if isinstance(t, str)]
 
 
+def _live_pay_tasks(meta):
+    """Replay IDs of the pay tasks of the current pending entries."""
+    live = set()
+    for kind, key in PENDING_KINDS:
+        pending = meta.get(key)
+        if isinstance(pending, dict) and pending.get("targetNode") in TARGET_NODES:
+            live.add(pay_task_replay_id(kind, pending["targetNode"]))
+    return live
+
+
+def _drain_pay_tasks():
+    """The queued replay IDs that are safe to clear. A Buy/Renew after the
+    settlement raised its task under the same replay ID, which replaced the
+    settled task; such IDs are dropped instead, or clearing them would remove
+    the new, unpaid task."""
+    with meta_lock():
+        meta = read_meta()
+        tasks = _pay_tasks_to_clear(meta)
+        live = _live_pay_tasks(meta)
+        clearable = [t for t in tasks if t not in live]
+        if len(clearable) != len(tasks):
+            if clearable:
+                meta["payTasksToClear"] = clearable
+            else:
+                meta.pop("payTasksToClear", None)
+            atomic_write_json(META_FILE_PATH, meta)
+        return clearable
+
+
 def settle_pending(now=None):
     """One settlement tick. Returns {"outcomes": [...], "clearPayTasks": [...],
     "busy": bool}. Each outcome's result is one of "waiting", "provisioned",
@@ -844,9 +873,7 @@ def settle_pending(now=None):
             pending = meta.get(key)
             if isinstance(pending, dict) and isinstance(pending.get("paymentHash"), str) and pending["paymentHash"]:
                 outcomes.append(_settle_one(kind, key, pending, now))
-        with meta_lock():
-            tasks = _pay_tasks_to_clear(read_meta())
-        return {"outcomes": outcomes, "clearPayTasks": tasks, "busy": False}
+        return {"outcomes": outcomes, "clearPayTasks": _drain_pay_tasks(), "busy": False}
 
 
 def ack_pay_tasks(replay_ids):
