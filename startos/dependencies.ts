@@ -14,6 +14,7 @@ import {
   planClearnetVpnTasks,
   executeClearnetVpnPlan,
   nextStateAfter,
+  sameHandoffState,
   previousNodes,
   handedOverTarget,
   buildOnTaskInput,
@@ -360,11 +361,10 @@ async function handOffClearnetVpn(
   const desired = getTargetVpnConfig(config)
   const nodes = previousNodes(state, installed, handedOverTarget(desired))
   await watchPreviousNodes(effects, nodes)
-  const nodeVpn = await readNodeVpnStates(
-    effects,
-    nodes,
-    config?.['tunnelsats-conf'],
-  )
+  const nodeVpn = await readNodeVpnStates(effects, nodes, {
+    ownConf: config?.['tunnelsats-conf'],
+    handedOutKeys: state?.handedOutKeys ?? [],
+  })
 
   const plan = planClearnetVpnTasks({ desired, state, installed, nodeVpn })
   if (plan.held) {
@@ -412,13 +412,7 @@ async function handOffClearnetVpn(
   }
 
   const next = nextStateAfter(plan, outcome)
-  const prevPending = state?.pendingOff ?? []
-  if (
-    state === null ||
-    (state?.activeTarget ?? null) !== next.activeTarget ||
-    prevPending.length !== next.pendingOff.length ||
-    prevPending.some((p, i) => p !== next.pendingOff[i])
-  ) {
+  if (!sameHandoffState(state, next)) {
     await vpnHandoff.write(effects, next)
   }
 

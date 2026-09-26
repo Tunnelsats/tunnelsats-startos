@@ -9,8 +9,18 @@ import {
   runHandoffRecheck,
   buildOnTaskInput,
   buildOffTaskInput,
+  tunnelFingerprint,
+  sameHandoffState,
   type ClearnetVpnPlan,
+  type VpnHandoffState,
 } from '../startos/vpnHandoff'
+import { generateWireguardKeypair } from '../startos/keygen'
+
+/** The fields every plan test asserts on; handedOutKeys has its own tests. */
+const core = (s: VpnHandoffState) => ({
+  activeTarget: s.activeTarget,
+  pendingOff: s.pendingOff,
+})
 
 const CONF =
   '[Interface]\nPrivateKey = x\n[Peer]\nEndpoint = de2.tunnelsats.com:51820\n'
@@ -41,7 +51,7 @@ test('bootstrap: nodes without a tunnel are retired and the target gets its on-t
   assert.equal(plan.held, null)
   assert.deepEqual(plan.off, [])
   assert.deepEqual(plan.retire, ['c-lightning', 'eclair'])
-  assert.deepEqual(plan.next, { activeTarget: 'lnd', pendingOff: [] })
+  assert.deepEqual(core(plan.next), { activeTarget: 'lnd', pendingOff: [] })
 })
 
 test('bootstrap: a node that already runs a tunnel is asked to turn off first', () => {
@@ -60,7 +70,7 @@ test('bootstrap: a node that already runs a tunnel is asked to turn off first', 
   })
   assert.deepEqual(plan.off, ['lnd'])
   assert.deepEqual(plan.retire, ['eclair'])
-  assert.deepEqual(plan.next, { activeTarget: null, pendingOff: ['lnd'] })
+  assert.deepEqual(core(plan.next), { activeTarget: null, pendingOff: ['lnd'] })
 })
 
 test('bootstrap: a VPN TunnelSats did not configure is left alone and does not block activation', () => {
@@ -76,18 +86,16 @@ test('bootstrap: a VPN TunnelSats did not configure is left alone and does not b
   assert.deepEqual(plan.retire, ['c-lightning', 'eclair'])
 })
 
-test('a tracked node is turned off whatever its tunnel looks like (we handed it out)', () => {
-  // e.g. an older subscription's key behind a bare IP endpoint: the
-  // ownership heuristic reads it as foreign, but the record says it is ours.
+test('a tracked node whose tunnel was replaced by an unrelated VPN is left alone', () => {
   const plan = planClearnetVpnTasks({
     desired: desired('c-lightning'),
     state: { activeTarget: 'lnd', pendingOff: [] },
     installed: ALL_INSTALLED,
     nodeVpn: { lnd: 'foreign' },
   })
-  assert.equal(plan.on, null)
-  assert.deepEqual(plan.off, ['lnd'])
-  assert.deepEqual(plan.retire, [])
+  assert.equal(plan.on?.packageId, 'c-lightning')
+  assert.deepEqual(plan.off, [])
+  assert.deepEqual(plan.retire, ['lnd'])
 })
 
 test('bootstrap: a node whose state cannot be read holds the on-task (fail closed)', () => {
@@ -110,7 +118,7 @@ test('bootstrap with TunnelSats off and no node tunnels leaves nothing behind', 
   })
   assert.equal(plan.on, null)
   assert.deepEqual(plan.off, [])
-  assert.deepEqual(plan.next, { activeTarget: null, pendingOff: [] })
+  assert.deepEqual(core(plan.next), { activeTarget: null, pendingOff: [] })
 })
 
 // --- tracked transitions
@@ -125,7 +133,7 @@ test('first activation with an empty record raises the on-task on the target onl
   assert.equal(plan.on?.packageId, 'lnd')
   assert.deepEqual(plan.off, [])
   assert.deepEqual(plan.retire, [])
-  assert.deepEqual(plan.next, { activeTarget: 'lnd', pendingOff: [] })
+  assert.deepEqual(core(plan.next), { activeTarget: 'lnd', pendingOff: [] })
 })
 
 test('switching nodes raises the off-task on the previous node and holds the new on-task', () => {
@@ -144,7 +152,7 @@ test('switching nodes raises the off-task on the previous node and holds the new
   })
   assert.deepEqual(plan.off, ['lnd'])
   assert.deepEqual(plan.retire, [])
-  assert.deepEqual(plan.next, { activeTarget: null, pendingOff: ['lnd'] })
+  assert.deepEqual(core(plan.next), { activeTarget: null, pendingOff: ['lnd'] })
 })
 
 test('the held on-task is raised once the previous node is off', () => {
@@ -157,7 +165,7 @@ test('the held on-task is raised once the previous node is off', () => {
   assert.equal(plan.on?.packageId, 'c-lightning')
   assert.equal(plan.held, null)
   assert.deepEqual(plan.retire, ['lnd'])
-  assert.deepEqual(plan.next, {
+  assert.deepEqual(core(plan.next), {
     activeTarget: 'c-lightning',
     pendingOff: [],
   })
@@ -196,7 +204,7 @@ test('an already-active target is never held (the owing node stays tracked)', ()
     nodeVpn: { lnd: 'on' },
   })
   assert.equal(plan.on?.packageId, 'c-lightning')
-  assert.deepEqual(plan.next, {
+  assert.deepEqual(core(plan.next), {
     activeTarget: 'c-lightning',
     pendingOff: ['lnd'],
   })
@@ -211,7 +219,10 @@ test('turning the subscription off raises the off-task on the active node', () =
   })
   assert.equal(plan.on, null)
   assert.deepEqual(plan.off, ['eclair'])
-  assert.deepEqual(plan.next, { activeTarget: null, pendingOff: ['eclair'] })
+  assert.deepEqual(core(plan.next), {
+    activeTarget: null,
+    pendingOff: ['eclair'],
+  })
 })
 
 test('a config that cannot be announced is handed over as off, never as a half-configured tunnel', () => {
@@ -223,7 +234,7 @@ test('a config that cannot be announced is handed over as off, never as a half-c
   })
   assert.equal(plan.on, null)
   assert.deepEqual(plan.off, ['lnd'])
-  assert.deepEqual(plan.next, { activeTarget: null, pendingOff: ['lnd'] })
+  assert.deepEqual(core(plan.next), { activeTarget: null, pendingOff: ['lnd'] })
 })
 
 test('an uninstalled pending node is retired (its tunnel went with it)', () => {
@@ -247,7 +258,7 @@ test('switching back to a node that owes an off waits for the other node, then h
   })
   assert.equal(held.on, null)
   assert.deepEqual(held.off, ['c-lightning'])
-  assert.deepEqual(held.next, {
+  assert.deepEqual(core(held.next), {
     activeTarget: null,
     pendingOff: ['c-lightning'],
   })
@@ -260,7 +271,7 @@ test('switching back to a node that owes an off waits for the other node, then h
   })
   assert.equal(released.on?.packageId, 'lnd')
   assert.deepEqual(released.retire, ['c-lightning'])
-  assert.deepEqual(released.next, { activeTarget: 'lnd', pendingOff: [] })
+  assert.deepEqual(core(released.next), { activeTarget: 'lnd', pendingOff: [] })
 })
 
 test('re-enabling the node that owes an off hands it the on-task directly', () => {
@@ -272,7 +283,7 @@ test('re-enabling the node that owes an off hands it the on-task directly', () =
   })
   assert.equal(plan.on?.packageId, 'lnd')
   assert.deepEqual(plan.off, [])
-  assert.deepEqual(plan.next, { activeTarget: 'lnd', pendingOff: [] })
+  assert.deepEqual(core(plan.next), { activeTarget: 'lnd', pendingOff: [] })
 })
 
 test('switching away and back before the previous node turned off never forces an off/on cycle', () => {
@@ -285,7 +296,7 @@ test('switching away and back before the previous node turned off never forces a
     nodeVpn: { lnd: 'on' },
   })
   assert.equal(away.on, null)
-  assert.deepEqual(away.next, { activeTarget: null, pendingOff: ['lnd'] })
+  assert.deepEqual(core(away.next), { activeTarget: null, pendingOff: ['lnd'] })
 
   const back = planClearnetVpnTasks({
     desired: desired('lnd'),
@@ -299,7 +310,7 @@ test('switching away and back before the previous node turned off never forces a
   assert.equal(back.held, null)
   assert.deepEqual(back.off, [])
   assert.deepEqual(back.retire, [])
-  assert.deepEqual(back.next, { activeTarget: 'lnd', pendingOff: [] })
+  assert.deepEqual(core(back.next), { activeTarget: 'lnd', pendingOff: [] })
 })
 
 test('duplicate and malformed state entries are normalised', () => {
@@ -334,42 +345,40 @@ test('task inputs follow the node clearnet-vpn contract', () => {
 test('readNodeVpnState only claims TunnelSats-owned tunnels, unknown when unreadable', () => {
   const OWN =
     '[Interface]\nPrivateKey = OWNKEY=\n[Peer]\nEndpoint = 203.0.113.7:51820\n'
+  const O = { ownConf: OWN, handedOutKeys: [] }
   const conf = (key: string, endpoint: string) =>
     `[Interface]\nPrivateKey = ${key}\nAddress = 10.9.0.2/32\n[Peer]\nEndpoint = ${endpoint}\n`
   // TunnelSats endpoint, any key (e.g. a previous subscription's key)
   assert.equal(
     readNodeVpnState(
       { config: conf('OLDKEY=', 'de2.tunnelsats.com:51820') },
-      OWN,
+      O,
     ),
     'on',
   )
   assert.equal(
     readNodeVpnState(
       { config: conf('OLDKEY=', 'DE2.TunnelSats.com:51820') },
-      null,
+      { ownConf: null, handedOutKeys: [] },
     ),
     'on',
   )
   // Our current key, even behind a bare IP endpoint
   assert.equal(
-    readNodeVpnState({ config: conf('OWNKEY=', '203.0.113.7:51820') }, OWN),
+    readNodeVpnState({ config: conf('OWNKEY=', '203.0.113.7:51820') }, O),
     'on',
   )
   // Someone else's VPN
   assert.equal(
-    readNodeVpnState({ config: conf('OTHER=', 'vpn.example.com:51820') }, OWN),
+    readNodeVpnState({ config: conf('OTHER=', 'vpn.example.com:51820') }, O),
     'foreign',
   )
   assert.equal(
-    readNodeVpnState(
-      { config: conf('OTHER=', 'eviltunnelsats.com:51820') },
-      OWN,
-    ),
+    readNodeVpnState({ config: conf('OTHER=', 'eviltunnelsats.com:51820') }, O),
     'foreign',
   )
   assert.equal(
-    readNodeVpnState({ config: conf('OTHER=', '[2001:db8::1]:51820') }, OWN),
+    readNodeVpnState({ config: conf('OTHER=', '[2001:db8::1]:51820') }, O),
     'foreign',
   )
   // A commented-out key never matches
@@ -378,16 +387,16 @@ test('readNodeVpnState only claims TunnelSats-owned tunnels, unknown when unread
       {
         config: '# PrivateKey = OWNKEY=\n[Peer]\nEndpoint = 203.0.113.7:51820',
       },
-      OWN,
+      O,
     ),
     'foreign',
   )
-  assert.equal(readNodeVpnState({ config: null, announce: null }, OWN), 'off')
-  assert.equal(readNodeVpnState({ config: '   ' }, OWN), 'off')
-  assert.equal(readNodeVpnState({}, OWN), 'off')
-  assert.equal(readNodeVpnState(null, OWN), 'unknown')
-  assert.equal(readNodeVpnState(undefined, OWN), 'unknown')
-  assert.equal(readNodeVpnState({ config: 42 }, OWN), 'unknown')
+  assert.equal(readNodeVpnState({ config: null, announce: null }, O), 'off')
+  assert.equal(readNodeVpnState({ config: '   ' }, O), 'off')
+  assert.equal(readNodeVpnState({}, O), 'off')
+  assert.equal(readNodeVpnState(null, O), 'unknown')
+  assert.equal(readNodeVpnState(undefined, O), 'unknown')
+  assert.equal(readNodeVpnState({ config: 42 }, O), 'unknown')
 })
 
 test('executeClearnetVpnPlan raises on/off, clears retired, and reports failures separately', async () => {
@@ -430,14 +439,20 @@ test('nextStateAfter keeps a node whose task clear failed queued for a retry', (
     held: null,
     off: ['eclair'],
     retire: ['lnd'],
-    next: { activeTarget: 'c-lightning', pendingOff: ['eclair'] },
+    next: {
+      activeTarget: 'c-lightning',
+      pendingOff: ['eclair'],
+      handedOutKeys: ['K='],
+    },
   }
   assert.deepEqual(
-    nextStateAfter(plan, {
-      raised: ['c-lightning', 'eclair'],
-      cleared: [],
-      failures: [{ packageId: 'lnd', op: 'clear', error: 'boom' }],
-    }),
+    core(
+      nextStateAfter(plan, {
+        raised: ['c-lightning', 'eclair'],
+        cleared: [],
+        failures: [{ packageId: 'lnd', op: 'clear', error: 'boom' }],
+      }),
+    ),
     { activeTarget: 'c-lightning', pendingOff: ['eclair', 'lnd'] },
   )
   // Raise failures need no bookkeeping: the node is already pending (off)
@@ -464,14 +479,15 @@ test('handoffProgress splits pending nodes into waiting and resolved', () => {
     ),
     { waitingFor: ['lnd'], resolved: ['eclair'] },
   )
-  // Uninstalled resolves; tracked foreign and unknown keep waiting.
+  // Uninstalled and foreign (the operator replaced our tunnel) resolve, the
+  // same as in the planner; unknown keeps waiting (fail closed).
   assert.deepEqual(
     handoffProgress(
       { activeTarget: null, pendingOff: ['lnd', 'eclair', 'c-lightning'] },
       ['eclair', 'c-lightning'],
       { eclair: 'foreign' },
     ),
-    { waitingFor: ['eclair', 'c-lightning'], resolved: ['lnd'] },
+    { waitingFor: ['c-lightning'], resolved: ['lnd', 'eclair'] },
   )
   assert.deepEqual(handoffProgress(null, ALL_INSTALLED, {}), {
     waitingFor: [],
@@ -488,7 +504,8 @@ test('runHandoffRecheck requests a dependency re-run only when a pending node re
     const progress = await runHandoffRecheck({
       readState: async () => state,
       readInstalled: async () => ALL_INSTALLED,
-      readNodeVpn: async (nodes) => {
+      readNodeVpn: async (nodes, passed) => {
+        assert.equal(passed, state)
         calls.push(`read:${nodes.join(',')}`)
         return nodeVpn
       },
@@ -518,4 +535,113 @@ test('runHandoffRecheck requests a dependency re-run only when a pending node re
   // Nothing pending: no node is read at all.
   const idle = await run({ activeTarget: 'lnd', pendingOff: [] }, {})
   assert.deepEqual(idle.calls, [])
+})
+
+function realConf(privateKey: string, endpoint: string) {
+  return `[Interface]\nPrivateKey = ${privateKey}\nAddress = 10.9.0.2/32\n[Peer]\nPublicKey = ${generateWireguardKeypair().publicKey}\nEndpoint = ${endpoint}\n`
+}
+
+test('the planner records the key of every tunnel it hands out', () => {
+  const kp = generateWireguardKeypair()
+  const conf = realConf(kp.privateKey, 'de2.tunnelsats.com:51820')
+  const plan = planClearnetVpnTasks({
+    desired: { targetPackage: 'lnd', announceEndpoint: 'h:1', wgConf: conf },
+    state: { activeTarget: null, pendingOff: [], handedOutKeys: ['OLD='] },
+    installed: ALL_INSTALLED,
+    nodeVpn: {},
+  })
+  assert.equal(tunnelFingerprint(conf), kp.publicKey)
+  assert.deepEqual(plan.next.handedOutKeys, ['OLD=', kp.publicKey])
+
+  // Held: nothing handed out, keys unchanged.
+  const held = planClearnetVpnTasks({
+    desired: { targetPackage: 'lnd', announceEndpoint: 'h:1', wgConf: conf },
+    state: { activeTarget: 'eclair', pendingOff: [], handedOutKeys: ['OLD='] },
+    installed: ALL_INSTALLED,
+    nodeVpn: { eclair: 'on' },
+  })
+  assert.equal(held.on, null)
+  assert.deepEqual(held.next.handedOutKeys, ['OLD='])
+})
+
+test('handedOutKeys stays de-duplicated and bounded', () => {
+  const kp = generateWireguardKeypair()
+  const conf = realConf(kp.privateKey, 'de2.tunnelsats.com:51820')
+  const many = Array.from({ length: 40 }, (_, i) => `K${i}=`)
+  const plan = planClearnetVpnTasks({
+    desired: { targetPackage: 'lnd', announceEndpoint: 'h:1', wgConf: conf },
+    state: {
+      activeTarget: 'lnd',
+      pendingOff: [],
+      handedOutKeys: [...many, kp.publicKey],
+    },
+    installed: ALL_INSTALLED,
+    nodeVpn: {},
+  })
+  const keys = plan.next.handedOutKeys ?? []
+  assert.equal(keys.length, 32)
+  assert.equal(keys[keys.length - 1], kp.publicKey)
+  assert.equal(new Set(keys).size, keys.length)
+})
+
+test('readNodeVpnState recognises an older key TunnelSats handed out, even behind a bare IP', () => {
+  const old = generateWireguardKeypair()
+  const current = generateWireguardKeypair()
+  const other = generateWireguardKeypair()
+  const ownership = {
+    ownConf: realConf(current.privateKey, 'de2.tunnelsats.com:51820'),
+    handedOutKeys: [old.publicKey],
+  }
+  assert.equal(
+    readNodeVpnState(
+      { config: realConf(old.privateKey, '203.0.113.7:51820') },
+      ownership,
+    ),
+    'on',
+  )
+  assert.equal(
+    readNodeVpnState(
+      { config: realConf(other.privateKey, '203.0.113.7:51820') },
+      ownership,
+    ),
+    'foreign',
+  )
+  // A config whose key cannot be parsed falls back to the endpoint check.
+  assert.equal(
+    readNodeVpnState(
+      {
+        config:
+          '[Interface]\nPrivateKey = junk\n[Peer]\nEndpoint = vpn.example.com:51820',
+      },
+      ownership,
+    ),
+    'foreign',
+  )
+})
+
+test('sameHandoffState compares every persisted field; a missing record always differs', () => {
+  const base = {
+    activeTarget: 'lnd' as const,
+    pendingOff: [],
+    handedOutKeys: ['A='],
+  }
+  assert.equal(sameHandoffState(base, { ...base }), true)
+  assert.equal(sameHandoffState(null, base), false)
+  assert.equal(
+    sameHandoffState(base, { ...base, handedOutKeys: ['A=', 'B='] }),
+    false,
+  )
+  assert.equal(
+    sameHandoffState(base, { ...base, pendingOff: ['eclair'] }),
+    false,
+  )
+  assert.equal(sameHandoffState(base, { ...base, activeTarget: null }), false)
+  // A record from before handedOutKeys existed equals an empty list.
+  assert.equal(
+    sameHandoffState(
+      { activeTarget: null, pendingOff: [] },
+      { activeTarget: null, pendingOff: [], handedOutKeys: [] },
+    ),
+    true,
+  )
 })

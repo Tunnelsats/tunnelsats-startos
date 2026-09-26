@@ -6,6 +6,7 @@ import {
   type PackageId,
   type NodeVpnState,
   type HandoffProgress,
+  type TunnelOwnership,
   CLEARNET_VPN_ACTION_ID,
   readNodeVpnState,
   runHandoffRecheck,
@@ -22,7 +23,7 @@ type Effects = Parameters<typeof sdk.checkDependencies>[0]
 export async function readNodeVpnStates(
   effects: Effects,
   nodes: readonly PackageId[],
-  ownConf: string | null | undefined,
+  ownership: TunnelOwnership,
 ): Promise<Partial<Record<PackageId, NodeVpnState>>> {
   const states: Partial<Record<PackageId, NodeVpnState>> = {}
   for (const p of nodes) {
@@ -31,7 +32,7 @@ export async function readNodeVpnStates(
         packageId: p,
         actionId: CLEARNET_VPN_ACTION_ID,
       })
-      states[p] = readNodeVpnState(input?.value, ownConf)
+      states[p] = readNodeVpnState(input?.value, ownership)
       if (states[p] === 'foreign') {
         console.info(`TunnelSats: ${p} runs a VPN TunnelSats did not configure`)
       }
@@ -53,9 +54,12 @@ export async function checkHandoffProgress(
   return runHandoffRecheck({
     readState: () => vpnHandoff.read().once(),
     readInstalled: () => effects.getInstalledPackages(),
-    readNodeVpn: async (nodes) => {
+    readNodeVpn: async (nodes, state) => {
       const config = await configJson.read().once()
-      return readNodeVpnStates(effects, nodes, config?.['tunnelsats-conf'])
+      return readNodeVpnStates(effects, nodes, {
+        ownConf: config?.['tunnelsats-conf'],
+        handedOutKeys: state.handedOutKeys ?? [],
+      })
     },
     requestRecheck: () =>
       handoffRecheck.write(effects, {

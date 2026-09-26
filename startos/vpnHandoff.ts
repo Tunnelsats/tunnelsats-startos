@@ -12,8 +12,18 @@
  * Whether a node is off is read from the node itself: the current input of
  * its clearnet-vpn action (effects.action.getInput), the same value StartOS
  * compares a task against. Anything unreadable counts as on (fail closed).
- * Without a record, only a TunnelSats-looking tunnel counts (current key or
- * a tunnelsats.com endpoint); a VPN we did not configure is left alone.
+ * Only a TunnelSats tunnel counts as on: our current key, a key we handed
+ * out before (`handedOutKeys`, public keys only), or a tunnelsats.com
+ * endpoint. Any other VPN is 'foreign' and left alone, even on a node we
+ * track: the operator replaced our tunnel, and turning theirs off would cut
+ * a VPN we never configured. Deciding by key rather than by the record keeps
+ * both cases right: an older TunnelSats key behind a bare IP is still ours,
+ * a replacement VPN never is.
+ *
+ * Limitation: a tunnel handed out before `handedOutKeys` existed is only
+ * recognised by our current key or its endpoint host. TunnelSats configs use
+ * tunnelsats.com hostnames, and no released build handed out clearnet-vpn
+ * tunnels, so this only affects hand-edited or pre-release installs.
  *
  * StartOS does not reap tasks that are not re-raised, and it hides tasks on
  * packages that are not current dependencies, so every node that still owes
@@ -34,6 +44,8 @@
  * checked, so a tunnel handed out before the record existed is found too.
  */
 
+import { derivePublicKey } from './keygen'
+
 export type PackageId = 'lnd' | 'c-lightning' | 'eclair'
 
 export const ALL_PACKAGE_IDS: readonly PackageId[] = [
@@ -53,11 +65,28 @@ export interface VpnHandoffState {
   activeTarget: PackageId | null
   /** Nodes that still owe us an off. */
   pendingOff: PackageId[]
+  /**
+   * Public keys of the tunnels we raised an on-task with, oldest first,
+   * capped at HANDED_OUT_KEYS_CAP. Missing in records written before it
+   * existed.
+   */
+  handedOutKeys?: string[]
 }
+
+export const HANDED_OUT_KEYS_CAP = 32
 
 export const EMPTY_HANDOFF_STATE: VpnHandoffState = {
   activeTarget: null,
   pendingOff: [],
+  handedOutKeys: [],
+}
+
+/** What identifies a tunnel as one TunnelSats handed out. */
+export interface TunnelOwnership {
+  /** The WireGuard config TunnelSats currently holds. */
+  ownConf: string | null | undefined
+  /** Public keys of tunnels handed out before (VpnHandoffState). */
+  handedOutKeys: readonly string[]
 }
 
 export interface DesiredVpn {
@@ -132,19 +161,14 @@ export function planClearnetVpnTasks(params: {
         }
       : null
 
-  // A node in the record got its tunnel from us, whatever it looks like now
-  // (an older key behind a bare IP endpoint reads as foreign). Only without
-  // a record does the ownership heuristic decide.
-  const tracked = params.state != null
+  // A foreign VPN is never ours to turn off, tracked node or not: ownership
+  // is decided by key (see module doc), so an older TunnelSats key behind a
+  // bare IP still reads as on.
   const off: PackageId[] = []
   const retire: PackageId[] = []
   for (const p of previousNodes(params.state, installed, target)) {
     const vpn = nodeVpn[p]
-    if (
-      !installed.includes(p) ||
-      vpn === 'off' ||
-      (vpn === 'foreign' && !tracked)
-    ) {
+    if (!installed.includes(p) || vpn === 'off' || vpn === 'foreign') {
       retire.push(p)
     } else {
       off.push(p)
@@ -165,8 +189,31 @@ export function planClearnetVpnTasks(params: {
     held: hold && target ? { packageId: target, waitingFor: [...off] } : null,
     off,
     retire,
-    next: { activeTarget: on ? target : null, pendingOff: off },
+    next: {
+      activeTarget: on ? target : null,
+      pendingOff: off,
+      handedOutKeys: recordHandedOut(
+        prev.handedOutKeys ?? [],
+        on ? tunnelFingerprint(on.config) : null,
+      ),
+    },
   }
+}
+
+/**
+ * Appends a handed-out key (moved to the end if already known) and keeps the
+ * newest HANDED_OUT_KEYS_CAP. Recorded when the on-task is planned, even if
+ * raising it then fails: the key is ours either way.
+ */
+function recordHandedOut(
+  keys: readonly string[],
+  key: string | null,
+): string[] {
+  const out = [
+    ...new Set(keys.filter((k) => typeof k === 'string' && k && k !== key)),
+  ]
+  if (key) out.push(key)
+  return out.slice(-HANDED_OUT_KEYS_CAP)
 }
 
 export function buildOnTaskInput(config: string, announce: string) {
@@ -197,15 +244,35 @@ function endpointHost(endpoint: string): string {
 }
 
 /**
- * A tunnel TunnelSats handed out: it uses our current WireGuard key, or it
- * peers with a TunnelSats server (covers a previous subscription's key).
+ * The public key of a WireGuard config's interface, or null when the config
+ * has no parsable private key. Public keys are what we persist, so the
+ * handoff record never holds a secret.
+ */
+export function tunnelFingerprint(
+  config: string | null | undefined,
+): string | null {
+  const key = config?.match(PRIVATE_KEY_LINE)?.[1]
+  if (!key) return null
+  try {
+    return derivePublicKey(key)
+  } catch {
+    return null
+  }
+}
+
+/**
+ * A tunnel TunnelSats handed out: it uses our current WireGuard key or one we
+ * handed out before, or it peers with a TunnelSats server.
  */
 export function isTunnelsatsTunnel(
   config: string,
-  ownConf: string | null | undefined,
+  ownership: TunnelOwnership,
 ): boolean {
-  const ownKey = ownConf?.match(PRIVATE_KEY_LINE)?.[1]
-  if (ownKey && config.match(PRIVATE_KEY_LINE)?.[1] === ownKey) return true
+  const key = config.match(PRIVATE_KEY_LINE)?.[1]
+  const ownKey = ownership.ownConf?.match(PRIVATE_KEY_LINE)?.[1]
+  if (key && ownKey && key === ownKey) return true
+  const fingerprint = tunnelFingerprint(config)
+  if (fingerprint && ownership.handedOutKeys.includes(fingerprint)) return true
   const endpoint = config.match(ENDPOINT_LINE)?.[1]
   if (!endpoint) return false
   const host = endpointHost(endpoint).toLowerCase()
@@ -214,19 +281,18 @@ export function isTunnelsatsTunnel(
 
 /**
  * A node's clearnet-vpn state from its current action input
- * (`{ config, announce }`). `ownConf` is the WireGuard config TunnelSats
- * holds. Unreadable or unexpected input is unknown.
+ * (`{ config, announce }`). Unreadable or unexpected input is unknown.
  */
 export function readNodeVpnState(
   value: Record<string, unknown> | null | undefined,
-  ownConf: string | null | undefined,
+  ownership: TunnelOwnership,
 ): NodeVpnState {
   if (!value) return 'unknown'
   const config = value.config
   if (config === null || config === undefined) return 'off'
   if (typeof config !== 'string') return 'unknown'
   if (!config.trim()) return 'off'
-  return isTunnelsatsTunnel(config, ownConf) ? 'on' : 'foreign'
+  return isTunnelsatsTunnel(config, ownership) ? 'on' : 'foreign'
 }
 
 export interface ClearnetVpnOps {
@@ -291,14 +357,36 @@ export async function executeClearnetVpnPlan(
 export function nextStateAfter(
   plan: ClearnetVpnPlan,
   outcome: ClearnetVpnOutcome,
-): VpnHandoffState {
+): Required<VpnHandoffState> {
   const pendingOff = [...plan.next.pendingOff]
   for (const f of outcome.failures) {
     if (f.op === 'clear' && !pendingOff.includes(f.packageId)) {
       pendingOff.push(f.packageId)
     }
   }
-  return { activeTarget: plan.next.activeTarget, pendingOff }
+  return {
+    activeTarget: plan.next.activeTarget,
+    pendingOff,
+    handedOutKeys: [...(plan.next.handedOutKeys ?? [])],
+  }
+}
+
+/**
+ * Whether persisting `next` would change nothing. A missing record (null) is
+ * never the same, so the first run always writes one.
+ */
+export function sameHandoffState(
+  prev: VpnHandoffState | null | undefined,
+  next: VpnHandoffState,
+): boolean {
+  if (!prev) return false
+  const same = (a: readonly string[], b: readonly string[]) =>
+    a.length === b.length && a.every((v, i) => v === b[i])
+  return (
+    (prev.activeTarget ?? null) === next.activeTarget &&
+    same(prev.pendingOff ?? [], next.pendingOff) &&
+    same(prev.handedOutKeys ?? [], next.handedOutKeys ?? [])
+  )
 }
 
 /** Display names for operator-facing messages. */
@@ -311,7 +399,10 @@ export const NODE_TITLES: Record<PackageId, string> = {
 export interface HandoffProgress {
   /** Pending nodes that may still run the tunnel. */
   waitingFor: PackageId[]
-  /** Pending nodes that are off or uninstalled; the next run retires them. */
+  /**
+   * Pending nodes that are off, uninstalled or now run a foreign VPN; the
+   * next run retires them.
+   */
   resolved: PackageId[]
 }
 
@@ -323,7 +414,8 @@ export function handoffProgress(
 ): HandoffProgress {
   const progress: HandoffProgress = { waitingFor: [], resolved: [] }
   for (const p of new Set((state?.pendingOff ?? []).filter(isPackageId))) {
-    if (!installed.includes(p) || nodeVpn[p] === 'off') {
+    const vpn = nodeVpn[p]
+    if (!installed.includes(p) || vpn === 'off' || vpn === 'foreign') {
       progress.resolved.push(p)
     } else {
       progress.waitingFor.push(p)
@@ -335,8 +427,10 @@ export function handoffProgress(
 export interface HandoffRecheckOps {
   readState: () => Promise<VpnHandoffState | null>
   readInstalled: () => Promise<readonly string[]>
+  /** `state` carries the handed-out keys ownership is decided by. */
   readNodeVpn: (
     nodes: readonly PackageId[],
+    state: VpnHandoffState,
   ) => Promise<Partial<Record<PackageId, NodeVpnState>>>
   /** Makes setupDependencies re-run (it watches the recheck file). */
   requestRecheck: () => Promise<unknown>
@@ -353,10 +447,11 @@ export async function runHandoffRecheck(
 ): Promise<HandoffProgress> {
   const state = await ops.readState()
   const pending = (state?.pendingOff ?? []).filter(isPackageId)
-  if (pending.length === 0) return { waitingFor: [], resolved: [] }
+  if (!state || pending.length === 0) return { waitingFor: [], resolved: [] }
   const installed = await ops.readInstalled()
   const nodeVpn = await ops.readNodeVpn(
     pending.filter((p) => installed.includes(p)),
+    state,
   )
   const progress = handoffProgress(state, installed, nodeVpn)
   if (progress.resolved.length > 0) await ops.requestRecheck()
