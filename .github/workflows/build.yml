@@ -53,6 +53,11 @@ jobs:
       - name: TypeScript typecheck
         run: npm run check
 
+      # Same SDK lint the Start9 package build (s9pk.mk) runs; fails here
+      # in seconds instead of minutes into the package build.
+      - name: Lint (Start9 SDK rules)
+        run: npm run lint
+
   build:
     name: Build StartOS Package
     needs: test
