@@ -105,11 +105,14 @@ export async function fetchServers(
 
 /**
  * Submits an order for a new WireGuard subscription and returns the BOLT11 invoice.
+ * `wgPublicKey` is the on-device key the tunnel is provisioned for; its
+ * private key never leaves the server.
  */
 export async function createSubscriptionOrder(
   params: {
     serverId: string
     duration: number
+    wgPublicKey: string
     referralCode?: string
   },
   baseUrl = DEFAULT_API_BASE,

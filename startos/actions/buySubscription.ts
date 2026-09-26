@@ -3,6 +3,7 @@ import { tunnelsatsMeta } from '../fileModels/tunnelsatsMeta'
 import { i18n } from '../i18n'
 import { generateWireguardKeypair } from '../keygen'
 import { createSubscriptionOrder } from '../apiClient'
+import { payTaskReplayId } from '../settlement'
 import { payInvoice as lndPayInvoice } from 'lnd-startos/startos/actions/payInvoice'
 import { payInvoice as clnPayInvoice } from 'cln-startos/startos/actions/payInvoice'
 import { payInvoice as eclairPayInvoice } from 'eclair-startos/startos/actions/payInvoice'
@@ -63,10 +64,12 @@ export const buySubscription = sdk.Action.withInput(
   async ({ effects }) => ({}),
   async ({ effects, input }) => {
     const keypair = generateWireguardKeypair()
+    const targetNode = input['target-node']
 
     const order = await createSubscriptionOrder({
       serverId: input['server-region'],
       duration: parseInt(input.duration, 10),
+      wgPublicKey: keypair.publicKey,
     })
 
     await tunnelsatsMeta.merge(effects, {
@@ -75,16 +78,20 @@ export const buySubscription = sdk.Action.withInput(
         orderId: order.orderId,
         privateKey: keypair.privateKey,
         publicKey: keypair.publicKey,
-        targetNode: input['target-node'] as 'lnd' | 'cln' | 'eclair',
+        targetNode,
         serverId: input['server-region'],
         createdAt: new Date().toISOString(),
+        // merge() is a deep merge: without these, a backoff left by an
+        // earlier order would delay settling this one.
+        lastError: undefined,
+        nextAttemptAt: undefined,
       },
     })
 
     let packageId: string
     let payInvoiceAction: any
 
-    switch (input['target-node']) {
+    switch (targetNode) {
       case 'lnd':
         packageId = 'lnd'
         payInvoiceAction = lndPayInvoice
@@ -99,7 +106,7 @@ export const buySubscription = sdk.Action.withInput(
         break
       default: {
         // Compile-time exhaustiveness: a new target node must be handled above.
-        const unsupported: never = input['target-node']
+        const unsupported: never = targetNode
         throw new Error(`Unsupported target node: ${String(unsupported)}`)
       }
     }
@@ -110,6 +117,9 @@ export const buySubscription = sdk.Action.withInput(
       payInvoiceAction,
       'important',
       {
+        // The settlement health check clears the task under this ID once the
+        // order is settled or expired.
+        replayId: payTaskReplayId('order', targetNode),
         input: {
           kind: 'partial',
           accept: [],

@@ -12,6 +12,9 @@ import {
   MONTHLY_BANDWIDTH_LIMIT_GB,
 } from '../startos/apiClient'
 
+/** The last body POSTed to subscription/create. */
+let lastCreateBody: Record<string, unknown> | null = null
+
 function startMockApiServer(): Promise<{ server: Server; url: string }> {
   return new Promise((resolve) => {
     const server = createServer((req, res) => {
@@ -56,6 +59,7 @@ function startMockApiServer(): Promise<{ server: Server; url: string }> {
           url.pathname === '/api/public/v1/subscription/create'
         ) {
           const parsed = JSON.parse(body)
+          lastCreateBody = parsed
           if (parsed.serverId === 'eu-de') {
             res.writeHead(200)
             res.end(
@@ -212,16 +216,22 @@ test('fetchServers retrieves list of available VPN servers', async () => {
   }
 })
 
-test('createSubscriptionOrder returns valid invoice and payment hash', async () => {
+test('createSubscriptionOrder registers the on-device key and returns the invoice', async () => {
   const { server, url } = await startMockApiServer()
   try {
+    const wgPublicKey = 'clientPubkeyBase64123456789012345678901234='
     const order = await createSubscriptionOrder(
-      { serverId: 'eu-de', duration: 1 },
+      { serverId: 'eu-de', duration: 1, wgPublicKey },
       url,
     )
     assert.equal(order.amountSats, 25000)
     assert.ok(order.invoice.startsWith('lnbc'))
     assert.equal(order.paymentHash.length, 64)
+    assert.deepEqual(lastCreateBody, {
+      serverId: 'eu-de',
+      duration: 1,
+      wgPublicKey,
+    })
   } finally {
     server.close()
   }
