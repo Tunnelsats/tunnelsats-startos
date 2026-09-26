@@ -97,8 +97,11 @@ export const buySubscription = sdk.Action.withInput(
         packageId = 'eclair'
         payInvoiceAction = eclairPayInvoice
         break
-      default:
-        throw new Error(`Unsupported target node: ${input['target-node']}`)
+      default: {
+        // Compile-time exhaustiveness: a new target node must be handled above.
+        const unsupported: never = input['target-node']
+        throw new Error(`Unsupported target node: ${String(unsupported)}`)
+      }
     }
 
     await sdk.action.createTask(
