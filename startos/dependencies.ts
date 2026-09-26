@@ -1,18 +1,39 @@
-import { isIPv6, isIPv4 } from 'node:net'
 import { sdk } from './sdk'
 import { configJson } from './fileModels/config.json'
 import { tunnelsatsMeta } from './fileModels/tunnelsatsMeta'
 import { i18n } from './i18n'
-import { parseWireguardTunnelInfo } from './utils'
-import { configure } from './actions/configure'
-import { customExternalHostConfig } from 'lnd-startos/startos/actions/config/customExternalHost'
-import { config as clnConfigAction } from 'cln-startos/startos/actions/config/config'
+import { getAnnounceEndpoint } from './utils'
+export { getAnnounceEndpoint } from './utils'
+import { importSubscription } from './actions/importSubscription'
+import { clearnetVpn as lndClearnetVpn } from 'lnd-startos/startos/actions/clearnetVpn'
+import { clearnetVpn as clnClearnetVpn } from 'cln-startos/startos/actions/clearnetVpn'
+import { clearnetVpn as eclairClearnetVpn } from 'eclair-startos/startos/actions/clearnetVpn'
 
-export interface TargetGatewayConfig {
-  targetPackage: 'lnd' | 'c-lightning'
-  clearPackage: 'lnd' | 'c-lightning'
-  gatewayName: string
+export type TargetNode = 'lnd' | 'cln' | 'eclair'
+export type PackageId = 'lnd' | 'c-lightning' | 'eclair'
+
+/** All three clearnet-vpn actions share the same input shape */
+const clearnetVpnActions = {
+  lnd: { packageId: 'lnd' as PackageId, action: lndClearnetVpn },
+  'c-lightning': {
+    packageId: 'c-lightning' as PackageId,
+    action: clnClearnetVpn,
+  },
+  eclair: { packageId: 'eclair' as PackageId, action: eclairClearnetVpn },
+}
+
+/** All possible clearnet-vpn task keys that we might create, used for cleanup */
+const ALL_CLEARNET_VPN_TASK_KEYS = [
+  'lnd:clearnet-vpn',
+  'c-lightning:clearnet-vpn',
+  'eclair:clearnet-vpn',
+]
+
+export interface TargetVpnConfig {
+  targetPackage: PackageId
+  clearPackages: PackageId[]
   announceEndpoint: string | null
+  wgConf: string
 }
 
 export interface SubscriptionMeta {
@@ -32,72 +53,45 @@ export interface SubscriptionExpiryTask {
   clearTaskKey: string
 }
 
-export function getAnnounceEndpoint(
-  wgConf: string | null | undefined,
-  allowIpv6 = false,
-): string | null {
-  if (!wgConf) return null
-  const info = parseWireguardTunnelInfo(wgConf)
-  if (!info.endpoint || !info.vpnPort) return null
-
-  const fullEndpoint = info.endpoint.trim()
-  const vpnPort = info.vpnPort
-
-  // 1. Bracketed IPv6 e.g. [2001:db8::1]:51820 or [2001:db8::1]
-  if (fullEndpoint.startsWith('[')) {
-    const closingBracket = fullEndpoint.indexOf(']')
-    if (closingBracket === -1) return null
-    const ipCandidate = fullEndpoint.substring(1, closingBracket)
-    if (!isIPv6(ipCandidate)) return null
-    if (!allowIpv6) return null
-    return `[${ipCandidate}]:${vpnPort}`
+/**
+ * Maps a config target-node value to the StartOS package ID.
+ */
+export function resolvePackageId(targetNode: TargetNode): PackageId {
+  switch (targetNode) {
+    case 'cln':
+      return 'c-lightning'
+    case 'eclair':
+      return 'eclair'
+    case 'lnd':
+    default:
+      return 'lnd'
   }
-
-  // 2. Unbracketed IPv6 without port e.g. 2001:db8::1
-  if (isIPv6(fullEndpoint)) {
-    if (!allowIpv6) return null
-    return `[${fullEndpoint}]:${vpnPort}`
-  }
-
-  // 3. Unbracketed IPv6 with explicit port e.g. 2001:db8::1:51820
-  const lastColonIndex = fullEndpoint.lastIndexOf(':')
-  if (lastColonIndex !== -1) {
-    const ipCandidate = fullEndpoint.substring(0, lastColonIndex)
-    const portCandidate = fullEndpoint.substring(lastColonIndex + 1)
-    if (isIPv6(ipCandidate) && /^\d+$/.test(portCandidate)) {
-      if (!allowIpv6) return null
-      return `[${ipCandidate}]:${vpnPort}`
-    }
-  }
-
-  // 4. Reject any remaining malformed IPv6 strings containing colons
-  if (fullEndpoint.includes(':') && !isIPv4(fullEndpoint.split(':')[0])) {
-    const parts = fullEndpoint.split(':')
-    if (parts.length > 2) return null
-  }
-
-  const host = fullEndpoint.split(':')[0]
-  if (!host) return null
-
-  return `${host}:${vpnPort}`
 }
 
-export function getTargetGatewayConfig(
+/**
+ * Returns all package IDs except the active one (for clearing stale tasks).
+ */
+export function getInactivePackageIds(active: PackageId): PackageId[] {
+  return (['lnd', 'c-lightning', 'eclair'] as PackageId[]).filter(
+    (id) => id !== active,
+  )
+}
+
+export function getTargetVpnConfig(
   config:
     | {
         enabled?: boolean
-        'target-node'?: 'lnd' | 'cln'
+        'target-node'?: TargetNode
         'tunnelsats-conf'?: string | null
         'allow-ipv6'?: boolean
       }
     | null
     | undefined,
-): TargetGatewayConfig | null {
-  if (!config?.enabled) return null
+): TargetVpnConfig | null {
+  if (!config?.enabled || !config['tunnelsats-conf']) return null
 
-  const targetNode = config['target-node'] === 'cln' ? 'cln' : 'lnd'
-  const targetPackage = targetNode === 'cln' ? 'c-lightning' : 'lnd'
-  const clearPackage = targetNode === 'cln' ? 'lnd' : 'c-lightning'
+  const targetPackage = resolvePackageId(config['target-node'] ?? 'lnd')
+  const clearPackages = getInactivePackageIds(targetPackage)
   const announceEndpoint = getAnnounceEndpoint(
     config['tunnelsats-conf'],
     config['allow-ipv6'],
@@ -105,12 +99,25 @@ export function getTargetGatewayConfig(
 
   return {
     targetPackage,
-    clearPackage,
-    gatewayName: 'tunnelsats',
+    clearPackages,
     announceEndpoint,
+    wgConf: config['tunnelsats-conf'],
   }
 }
 
+/** Compatibility shim for legacy gateway routing tests */
+export function getTargetGatewayConfig(config: any) {
+  const vpn = getTargetVpnConfig(config)
+  if (!vpn) return null
+  return {
+    targetPackage: vpn.targetPackage,
+    clearPackage: vpn.clearPackages[0],
+    gatewayName: 'tunnelsats',
+    announceEndpoint: vpn.announceEndpoint,
+  }
+}
+
+/** Compatibility shim for legacy gateway task details */
 export function getGatewayTaskDetails(
   targetPackage: 'lnd' | 'c-lightning',
   announceEndpoint: string,
@@ -141,7 +148,7 @@ export function getSubscriptionExpiryTask(
   meta?: SubscriptionMeta | null,
   currentDate = new Date(),
 ): SubscriptionExpiryTask {
-  const clearTaskKey = 'tunnelsats:configure'
+  const clearTaskKey = 'tunnelsats:import-subscription'
 
   if (!config?.enabled || !config['tunnelsats-conf']) {
     return { shouldCreateTask: false, clearTaskKey }
@@ -216,19 +223,30 @@ export function getSubscriptionExpiryTask(
 }
 
 export function getDependenciesForConfig(
-  config:
-    { enabled?: boolean; 'target-node'?: 'lnd' | 'cln' } | null | undefined,
+  config: { enabled?: boolean; 'target-node'?: TargetNode } | null | undefined,
 ) {
   if (!config?.enabled) {
     return {}
   }
 
-  if (config['target-node'] === 'cln') {
+  const targetNode = config['target-node'] ?? 'lnd'
+
+  if (targetNode === 'cln') {
     return {
       'c-lightning': {
         kind: 'running' as const,
         versionRange: '>=23.2.2:0',
         healthChecks: ['lightningd'],
+      },
+    }
+  }
+
+  if (targetNode === 'eclair') {
+    return {
+      eclair: {
+        kind: 'running' as const,
+        versionRange: '>=0.10.0:0',
+        healthChecks: ['eclair'],
       },
     }
   }
@@ -252,51 +270,59 @@ export const setDependencies = sdk.setupDependencies(async ({ effects }) => {
   // 1. Proactive Subscription Expiry Alert Task
   const expiryTask = getSubscriptionExpiryTask(config, meta)
   if (expiryTask.shouldCreateTask && expiryTask.severity && expiryTask.reason) {
-    await sdk.action.createOwnTask(effects, configure, expiryTask.severity, {
-      reason: expiryTask.reason,
-    })
+    await sdk.action.createOwnTask(
+      effects,
+      importSubscription,
+      expiryTask.severity,
+      {
+        reason: expiryTask.reason,
+      },
+    )
   } else {
     await sdk.action.clearTask(effects, expiryTask.clearTaskKey)
   }
 
-  // 2. 1-Click Lightning Node External Host Announcement Task
-  const gatewayConfig = getTargetGatewayConfig(config)
-  if (gatewayConfig && gatewayConfig.announceEndpoint) {
-    const taskDetails = getGatewayTaskDetails(
-      gatewayConfig.targetPackage,
-      gatewayConfig.announceEndpoint,
+  // 2. In-Container Clearnet VPN Task on Target Lightning Node
+  const vpnConfig = getTargetVpnConfig(config)
+  if (vpnConfig && vpnConfig.announceEndpoint) {
+    const target = clearnetVpnActions[vpnConfig.targetPackage]
+
+    // Raise clearnet-vpn task on the active target node
+    await sdk.action.createTask(
+      effects,
+      target.packageId,
+      target.action,
+      'important',
+      {
+        input: {
+          kind: 'partial',
+          accept: [
+            {
+              config: vpnConfig.wgConf,
+              announce: vpnConfig.announceEndpoint,
+            },
+          ],
+          set: {
+            config: vpnConfig.wgConf,
+            announce: vpnConfig.announceEndpoint,
+          },
+        },
+        when: { condition: 'input-not-matches', once: false },
+        reason: i18n(
+          'Activate TunnelSats VPN tunnel and advertise clearnet endpoint to the Lightning Network',
+        ),
+      },
     )
 
-    if (gatewayConfig.targetPackage === 'lnd') {
-      await sdk.action.createTask(
-        effects,
-        'lnd',
-        customExternalHostConfig,
-        'important',
-        {
-          input: taskDetails.input,
-          when: { condition: 'input-not-matches', once: false },
-          reason: taskDetails.reason,
-        },
-      )
-      await sdk.action.clearTask(effects, taskDetails.clearTaskKey)
-    } else {
-      await sdk.action.createTask(
-        effects,
-        'c-lightning',
-        clnConfigAction,
-        'important',
-        {
-          input: taskDetails.input,
-          when: { condition: 'input-not-matches', once: false },
-          reason: taskDetails.reason,
-        },
-      )
-      await sdk.action.clearTask(effects, taskDetails.clearTaskKey)
+    // Clear stale clearnet-vpn tasks on inactive nodes
+    for (const pkg of vpnConfig.clearPackages) {
+      await sdk.action.clearTask(effects, `${pkg}:clearnet-vpn`)
     }
   } else {
-    await sdk.action.clearTask(effects, 'lnd:custom-external-host-config')
-    await sdk.action.clearTask(effects, 'c-lightning:config')
+    // No active VPN config — clear all clearnet-vpn tasks
+    for (const key of ALL_CLEARNET_VPN_TASK_KEYS) {
+      await sdk.action.clearTask(effects, key)
+    }
   }
 
   return getDependenciesForConfig(config)

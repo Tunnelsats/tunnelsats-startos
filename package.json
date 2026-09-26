@@ -12,6 +12,7 @@
   "dependencies": {
     "@start9labs/start-sdk": "2.0.9",
     "cln-startos": "github:Start9Labs/cln-startos#master",
+    "eclair-startos": "github:Start9Labs/eclair-startos#master",
     "lnd-startos": "github:Start9Labs/lnd-startos#master"
   },
   "overrides": {

@@ -11,7 +11,11 @@ export const main = sdk.setupMain(async ({ effects }) => {
 
   // 2. Resolve target Lightning node internal DNS address
   const targetAddr =
-    targetNode === 'lnd' ? 'lnd.embassy:9735' : 'c-lightning.embassy:9735'
+    targetNode === 'cln'
+      ? 'c-lightning.embassy:9735'
+      : targetNode === 'eclair'
+        ? 'eclair.embassy:9735'
+        : 'lnd.embassy:9735'
 
   // 3. Setup environment variables
   const env: Record<string, string> = {}

@@ -43,14 +43,14 @@ test('getDependenciesForConfig returns c-lightning dependency when enabled and t
 test('getSubscriptionExpiryTask returns no task when disabled or unconfigured', () => {
   const resNull = getSubscriptionExpiryTask(null)
   assert.equal(resNull.shouldCreateTask, false)
-  assert.equal(resNull.clearTaskKey, 'tunnelsats:configure')
+  assert.equal(resNull.clearTaskKey, 'tunnelsats:import-subscription')
 
   const resDisabled = getSubscriptionExpiryTask({
     enabled: false,
     'tunnelsats-conf': '[Interface]\n# Valid Until: 2026-08-25T12:00:00Z\n',
   })
   assert.equal(resDisabled.shouldCreateTask, false)
-  assert.equal(resDisabled.clearTaskKey, 'tunnelsats:configure')
+  assert.equal(resDisabled.clearTaskKey, 'tunnelsats:import-subscription')
 })
 
 test('getSubscriptionExpiryTask returns no task when subscription has > 7 days remaining', () => {
@@ -63,7 +63,7 @@ test('getSubscriptionExpiryTask returns no task when subscription has > 7 days r
     currentDate,
   )
   assert.equal(res.shouldCreateTask, false)
-  assert.equal(res.clearTaskKey, 'tunnelsats:configure')
+  assert.equal(res.clearTaskKey, 'tunnelsats:import-subscription')
 })
 
 test('getSubscriptionExpiryTask returns important task when subscription has <= 7 days remaining', () => {
@@ -119,7 +119,7 @@ test('getSubscriptionExpiryTask respects later renewed metadata over earlier sta
     currentDate,
   )
   assert.equal(res.shouldCreateTask, false)
-  assert.equal(res.clearTaskKey, 'tunnelsats:configure')
+  assert.equal(res.clearTaskKey, 'tunnelsats:import-subscription')
 })
 
 test('getSubscriptionExpiryTask respects newer configuration comment over stale expired metadata', () => {
@@ -138,7 +138,7 @@ test('getSubscriptionExpiryTask respects newer configuration comment over stale 
     currentDate,
   )
   assert.equal(res.shouldCreateTask, false)
-  assert.equal(res.clearTaskKey, 'tunnelsats:configure')
+  assert.equal(res.clearTaskKey, 'tunnelsats:import-subscription')
 })
 
 test('getSubscriptionExpiryTask detects expiry from meta when config has no comment', () => {
