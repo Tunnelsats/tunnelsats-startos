@@ -67,7 +67,7 @@ export const es_ES: LangDict = {
   63: 'Factura de Renovación Creada',
   64: 'Se ha creado una tarea de pago en tu nodo Lightning. Una vez pagada, tu suscripción será extendida. Caducidad actual: ${oldExpiry}. Nueva caducidad después del pago: ${newExpiry}.',
   65: 'Pagar factura de renovación de suscripción a la VPN de TunnelSats',
-  66: 'Desactiva el túnel de TunnelSats en este nodo. TunnelSats ahora enruta otro nodo o ha sido desactivado.',
+  66: 'Desactiva el túnel de TunnelSats en este nodo. TunnelSats ahora enruta otro nodo o ha sido desactivado; al nuevo nodo se le pedirá que tome el relevo cuando este esté apagado.',
   67: 'Esta configuración no tiene ningún endpoint que se pueda anunciar a la Lightning Network (un endpoint IPv6 requiere «Permitir coexistencia con IPv6 local»).',
 }
 
@@ -138,7 +138,7 @@ export const de_DE: LangDict = {
   63: 'Erneuerungsrechnung erstellt',
   64: 'Es wurde eine Zahlungsaufgabe auf Ihrem Lightning-Knoten erstellt. Sobald bezahlt, wird Ihr Abonnement verlängert. Aktueller Ablauf: ${oldExpiry}. Neuer Ablauf nach Zahlung: ${newExpiry}.',
   65: 'TunnelSats VPN-Abonnement-Erneuerungsrechnung bezahlen',
-  66: 'Schalten Sie den TunnelSats-Tunnel auf diesem Knoten ab. TunnelSats leitet jetzt einen anderen Knoten oder wurde ausgeschaltet.',
+  66: 'Schalten Sie den TunnelSats-Tunnel auf diesem Knoten ab. TunnelSats leitet jetzt einen anderen Knoten oder wurde ausgeschaltet; der neue Knoten wird zur Übernahme aufgefordert, sobald dieser abgeschaltet ist.',
   67: 'Diese Konfiguration enthält keinen Endpunkt, der im Lightning-Netzwerk angekündigt werden kann (ein IPv6-Endpunkt erfordert „Heim-IPv6-Koexistenz zulassen“).',
 }
 
@@ -209,7 +209,7 @@ export const pl_PL: LangDict = {
   63: 'Faktura odnowienia utworzona',
   64: 'W Twoim węźle Lightning utworzono zadanie płatności. Po opłaceniu Twoja subskrypcja zostanie przedłużona. Obecne wygaśnięcie: ${oldExpiry}. Nowe wygaśnięcie po opłaceniu: ${newExpiry}.',
   65: 'Opłać fakturę za odnowienie subskrypcji VPN TunnelSats',
-  66: 'Wyłącz tunel TunnelSats na tym węźle. TunnelSats obsługuje teraz inny węzeł lub został wyłączony.',
+  66: 'Wyłącz tunel TunnelSats na tym węźle. TunnelSats obsługuje teraz inny węzeł lub został wyłączony; nowy węzeł zostanie poproszony o przejęcie tunelu, gdy ten zostanie wyłączony.',
   67: 'Ta konfiguracja nie zawiera punktu końcowego, który można ogłosić w sieci Lightning (punkt końcowy IPv6 wymaga opcji „Zezwól na współistnienie domowego IPv6”).',
 }
 
@@ -280,7 +280,7 @@ export const fr_FR: LangDict = {
   63: 'Facture de renouvellement créée',
   64: 'Une tâche de paiement a été créée sur votre nœud Lightning. Une fois payé, votre abonnement sera prolongé. Expiration actuelle : ${oldExpiry}. Nouvelle expiration après paiement : ${newExpiry}.',
   65: "Payer la facture de renouvellement de l'abonnement VPN TunnelSats",
-  66: 'Désactivez le tunnel TunnelSats sur ce nœud. TunnelSats achemine désormais un autre nœud ou a été désactivé.',
+  66: 'Désactivez le tunnel TunnelSats sur ce nœud. TunnelSats achemine désormais un autre nœud ou a été désactivé ; le nouveau nœud sera invité à prendre le relais une fois celui-ci désactivé.',
   67: 'Cette configuration ne contient aucun point de terminaison annonçable sur le Lightning Network (un point de terminaison IPv6 nécessite « Autoriser la coexistence IPv6 domestique »).',
 }
 

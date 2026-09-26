@@ -4,7 +4,10 @@ import {
   getDependenciesForConfig,
   getSubscriptionExpiryTask,
   getConfirmedExpiry,
+  EXPIRY_TASK_KEY,
+  RETIRED_TASK_KEYS,
 } from '../startos/dependencies'
+import { clearnetVpnReplayId } from '../startos/vpnHandoff'
 import { generateWireguardKeypair } from '../startos/keygen'
 
 test('getDependenciesForConfig returns empty object when disabled or unconfigured', () => {
@@ -231,4 +234,28 @@ test('getConfirmedExpiry rejects unconfirmed, legacy, malformed and foreign-key 
     getConfirmedExpiry(conf, confirmed('2026-09-30T12:00:00Z'))?.toISOString(),
     '2026-09-30T12:00:00.000Z',
   )
+})
+
+test('every task key raised by released versions is retired, and no live key is', () => {
+  // v0.4.0_5 raised these; StartOS never reaps a replay key that is no longer
+  // written, so an upgraded box would keep offering obsolete routing changes.
+  for (const released of [
+    'tunnelsats:configure',
+    'tunnelsats:import-subscription',
+    'lnd:custom-external-host-config',
+    'c-lightning:config',
+  ]) {
+    assert.ok(RETIRED_TASK_KEYS.includes(released), released)
+  }
+  for (const live of [
+    EXPIRY_TASK_KEY,
+    clearnetVpnReplayId('lnd'),
+    clearnetVpnReplayId('c-lightning'),
+    clearnetVpnReplayId('eclair'),
+    'lnd:pay-invoice',
+    'c-lightning:pay-invoice',
+    'eclair:pay-invoice',
+  ]) {
+    assert.ok(!RETIRED_TASK_KEYS.includes(live), live)
+  }
 })

@@ -67,7 +67,7 @@ const dict = {
   'Renewal Invoice Created': 63,
   'A payment task has been raised on your Lightning node. Once paid, your subscription will be extended. Current expiry: ${oldExpiry}. New expiry after payment: ${newExpiry}.': 64,
   'Pay TunnelSats VPN subscription renewal invoice': 65,
-  'Turn off the TunnelSats tunnel on this node. TunnelSats now routes a different node or has been switched off.': 66,
+  'Turn off the TunnelSats tunnel on this node. TunnelSats now routes a different node or has been switched off; the new node is asked to take over once this one is off.': 66,
   'This configuration has no endpoint that can be announced to the Lightning Network (an IPv6 endpoint needs Allow Home IPv6 Coexistence).': 67,
 } as const
 

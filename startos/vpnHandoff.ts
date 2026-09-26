@@ -14,6 +14,12 @@
  * with an outstanding off-task in `pendingOff` (declared as an `exists`
  * dependency by the caller) until the node reports the off-task satisfied or
  * the node is uninstalled.
+ *
+ * StartOS cannot order tasks across packages either, so the new node's
+ * on-task is withheld until every previous node is positively off (off-task
+ * satisfied, uninstalled, or stopped). The caller watches those nodes'
+ * status, so accepting the off-task (which restarts the node) re-runs the
+ * planner and releases the on-task.
  */
 
 export type PackageId = 'lnd' | 'c-lightning' | 'eclair'
@@ -52,6 +58,8 @@ export type OffTaskState = 'active' | 'satisfied' | 'unknown'
 
 export interface ClearnetVpnPlan {
   on: { packageId: PackageId; config: string; announce: string } | null
+  /** The target's on-task, withheld until these nodes are positively off. */
+  held: { packageId: PackageId; waitingFor: PackageId[] } | null
   /** Nodes to raise (or keep raising) the off-task on. */
   off: PackageId[]
   /** Nodes whose off-task is done or moot; their task gets cleared. */
@@ -63,18 +71,34 @@ function isPackageId(v: unknown): v is PackageId {
   return typeof v === 'string' && (ALL_PACKAGE_IDS as string[]).includes(v)
 }
 
+/**
+ * True only for a node that is stopped and not starting. Anything else
+ * (running, restarting, backing up, unknown) may still run its tunnel.
+ */
+export function isPositivelyStopped(
+  status:
+    { started: string | null; desired: { main: string } } | null | undefined,
+): boolean {
+  return (
+    !!status && status.desired.main === 'stopped' && status.started === null
+  )
+}
+
 export function planClearnetVpnTasks(params: {
   desired: DesiredVpn | null
   state: VpnHandoffState | null | undefined
   installed: readonly string[]
   offTaskStates: Partial<Record<PackageId, OffTaskState>>
+  /** Nodes positively known to be stopped (see isPositivelyStopped). */
+  stopped?: readonly string[]
 }): ClearnetVpnPlan {
   const { desired, installed, offTaskStates } = params
+  const stopped = params.stopped ?? []
   const prev = params.state ?? EMPTY_HANDOFF_STATE
 
   // Only a config we can announce is handed over; the node gets no
   // half-configured tunnel.
-  const on =
+  const onCandidate =
     desired && desired.announceEndpoint
       ? {
           packageId: desired.targetPackage,
@@ -82,7 +106,7 @@ export function planClearnetVpnTasks(params: {
           announce: desired.announceEndpoint,
         }
       : null
-  const target = on?.packageId ?? null
+  const target = onCandidate?.packageId ?? null
 
   const previouslyPending = new Set((prev.pendingOff ?? []).filter(isPackageId))
   const candidates: PackageId[] = []
@@ -110,11 +134,24 @@ export function planClearnetVpnTasks(params: {
     }
   }
 
+  // StartOS cannot order tasks across packages. If the new node's on-task
+  // were raised while a previous node still runs the tunnel, accepting it
+  // first would put one WireGuard key on two nodes. So it is withheld until
+  // every previous node is confirmed off, uninstalled, or stopped. A target
+  // that already holds the tunnel is never withheld.
+  const waitingFor = off.filter((p) => !stopped.includes(p))
+  const hold =
+    onCandidate !== null &&
+    prev.activeTarget !== target &&
+    waitingFor.length > 0
+  const on = hold ? null : onCandidate
+
   return {
     on,
+    held: hold && target ? { packageId: target, waitingFor } : null,
     off,
     retire,
-    next: { activeTarget: target, pendingOff: off },
+    next: { activeTarget: on ? target : null, pendingOff: off },
   }
 }
 

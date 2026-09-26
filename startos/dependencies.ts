@@ -13,6 +13,7 @@ import {
   planClearnetVpnTasks,
   executeClearnetVpnPlan,
   readOffTaskState,
+  isPositivelyStopped,
   buildOnTaskInput,
   buildOffTaskInput,
   clearnetVpnReplayId,
@@ -34,10 +35,18 @@ const clearnetVpnActions = {
 /** Replay key of the expiry task. */
 export const EXPIRY_TASK_KEY = 'tunnelsats:renew-subscription'
 /**
- * Expiry tasks used to point at Import Subscription. StartOS never reaps a
- * replay key that is no longer written, so the retired key is cleared here.
+ * Task keys raised by earlier versions: expiry tasks that pointed at
+ * Configure / Import Subscription, and the external-host announcement tasks
+ * of the retired gateway routing. StartOS never reaps a replay key that is no
+ * longer written, so an upgraded box would keep offering obsolete routing
+ * changes. They are cleared on every run.
  */
-export const RETIRED_EXPIRY_TASK_KEY = 'tunnelsats:import-subscription'
+export const RETIRED_TASK_KEYS: readonly string[] = [
+  'tunnelsats:configure',
+  'tunnelsats:import-subscription',
+  'lnd:custom-external-host-config',
+  'c-lightning:config',
+]
 
 export interface TargetVpnConfig {
   targetPackage: PackageId
@@ -335,6 +344,31 @@ async function readOffTaskStates(
   return states
 }
 
+/**
+ * Status of nodes that may still run the tunnel. Read with `.const()`, so a
+ * status change re-runs setupDependencies: accepting the off-task rewrites
+ * the node's store.json, which restarts its main. A node whose status cannot
+ * be read counts as running (fail closed: the on-task stays held).
+ */
+async function readStoppedNodes(
+  effects: Parameters<typeof sdk.checkDependencies>[0],
+  nodes: readonly PackageId[],
+): Promise<PackageId[]> {
+  const stopped: PackageId[] = []
+  for (const p of nodes) {
+    try {
+      const status = await sdk.getStatus(effects, { packageId: p }).const()
+      if (isPositivelyStopped(status)) stopped.push(p)
+    } catch (e) {
+      console.warn(
+        `TunnelSats: could not read ${p} status; treating it as running:`,
+        e,
+      )
+    }
+  }
+  return stopped
+}
+
 async function handOffClearnetVpn(
   effects: Parameters<typeof sdk.checkDependencies>[0],
   config: Parameters<typeof getTargetVpnConfig>[0],
@@ -354,13 +388,27 @@ async function handOffClearnetVpn(
     effects,
     state?.pendingOff ?? [],
   )
+  const desired = getTargetVpnConfig(config)
+  const previousNodes = [
+    ...new Set([...(state?.pendingOff ?? []), state?.activeTarget]),
+  ].filter(
+    (p): p is PackageId =>
+      !!p && p !== desired?.targetPackage && installed.includes(p),
+  )
+  const stopped = await readStoppedNodes(effects, previousNodes)
 
   const plan = planClearnetVpnTasks({
-    desired: getTargetVpnConfig(config),
+    desired,
     state,
     installed,
     offTaskStates,
+    stopped,
   })
+  if (plan.held) {
+    console.info(
+      `TunnelSats: holding the clearnet-vpn on-task for ${plan.held.packageId} until ${plan.held.waitingFor.join(', ')} confirm off`,
+    )
+  }
 
   const outcome = await executeClearnetVpnPlan(plan, {
     raiseOn: (on) =>
@@ -387,7 +435,7 @@ async function handOffClearnetVpn(
           input: buildOffTaskInput(),
           when: { condition: 'input-not-matches', once: false },
           reason: i18n(
-            'Turn off the TunnelSats tunnel on this node. TunnelSats now routes a different node or has been switched off.',
+            'Turn off the TunnelSats tunnel on this node. TunnelSats now routes a different node or has been switched off; the new node is asked to take over once this one is off.',
           ),
         },
       ),
@@ -433,7 +481,7 @@ export const setDependencies = sdk.setupDependencies(async ({ effects }) => {
   } else {
     await sdk.action.clearTask(effects, expiryTask.clearTaskKey)
   }
-  await sdk.action.clearTask(effects, RETIRED_EXPIRY_TASK_KEY)
+  await sdk.action.clearTask(effects, ...RETIRED_TASK_KEYS)
 
   // 2. Clearnet-VPN handoff: on-task for the target, off-task for the rest
   const pendingOff = await serializeHandoff(() =>
