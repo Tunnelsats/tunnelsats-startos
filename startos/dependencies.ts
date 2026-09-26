@@ -2,6 +2,8 @@ import { sdk } from './sdk'
 import { configJson } from './fileModels/config.json'
 import { tunnelsatsMeta } from './fileModels/tunnelsatsMeta'
 import { vpnHandoff } from './fileModels/vpnHandoff'
+import { handoffRecheck } from './fileModels/handoffRecheck'
+import { readNodeVpnStates } from './handoffIO'
 import { i18n } from './i18n'
 import { getAnnounceEndpoint, parseWireguardTunnelInfo } from './utils'
 export { getAnnounceEndpoint } from './utils'
@@ -9,14 +11,11 @@ import { derivePublicKey } from './keygen'
 import { renewSubscription } from './actions/renewSubscription'
 import {
   type PackageId,
-  type NodeVpnState,
   planClearnetVpnTasks,
   executeClearnetVpnPlan,
   nextStateAfter,
-  readNodeVpnState,
   previousNodes,
   handedOverTarget,
-  CLEARNET_VPN_ACTION_ID,
   buildOnTaskInput,
   buildOffTaskInput,
   clearnetVpnReplayId,
@@ -322,41 +321,6 @@ function serializeHandoff<T>(fn: () => Promise<T>): Promise<T> {
 }
 
 /**
- * Reads each node's current clearnet-vpn input, the same value StartOS checks
- * a task against. Works whether or not the node is a declared dependency. A
- * node that cannot answer (stopped container, still initializing) is
- * unknown, which the planner treats as on.
- */
-async function readNodeVpnStates(
-  effects: Parameters<typeof sdk.checkDependencies>[0],
-  nodes: readonly PackageId[],
-  ownConf: string | null | undefined,
-): Promise<Partial<Record<PackageId, NodeVpnState>>> {
-  const states: Partial<Record<PackageId, NodeVpnState>> = {}
-  for (const p of nodes) {
-    try {
-      const input = await effects.action.getInput({
-        packageId: p,
-        actionId: CLEARNET_VPN_ACTION_ID,
-      })
-      states[p] = readNodeVpnState(input?.value, ownConf)
-      if (states[p] === 'foreign') {
-        console.info(
-          `TunnelSats: ${p} runs a VPN TunnelSats did not configure; leaving it alone`,
-        )
-      }
-    } catch (e) {
-      console.warn(
-        `TunnelSats: could not read the clearnet-vpn state of ${p}; treating it as on:`,
-        e,
-      )
-      states[p] = 'unknown'
-    }
-  }
-  return states
-}
-
-/**
  * Registers a status watch on nodes that may still run the tunnel, so a
  * status change re-runs setupDependencies: accepting the off-task on a
  * running node rewrites its store.json, which restarts its main. Starting a
@@ -486,7 +450,13 @@ export const setDependencies = sdk.setupDependencies(async ({ effects }) => {
   }
   await sdk.action.clearTask(effects, ...RETIRED_TASK_KEYS)
 
-  // 2. Clearnet-VPN handoff: on-task for the target, off-task for the rest
+  // 2. Clearnet-VPN handoff: on-task for the target, off-task for the rest.
+  // The handoff health check writes handoffRecheck when a pending node turned
+  // off without a status change; watching it re-runs this hook.
+  await handoffRecheck
+    .read()
+    .const(effects)
+    .catch(() => null)
   const pendingOff = await serializeHandoff(() =>
     handOffClearnetVpn(effects, config),
   )

@@ -69,6 +69,10 @@ const dict = {
   'Pay TunnelSats VPN subscription renewal invoice': 65,
   'Turn off the TunnelSats tunnel on this node. TunnelSats now routes a different node or has been switched off; the new node is asked to take over once this one is off.': 66,
   'This configuration has no endpoint that can be announced to the Lightning Network (an IPv6 endpoint needs Allow Home IPv6 Coexistence).': 67,
+  'VPN Handoff': 68,
+  'Waiting for ${nodes} to turn off the TunnelSats tunnel. Accept the task on that node to finish the handoff.': 69,
+  'No node handoff pending': 70,
+  'Could not check the VPN handoff: ${error}': 71,
 } as const
 
 /**

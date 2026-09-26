@@ -12,7 +12,8 @@
  * Whether a node is off is read from the node itself: the current input of
  * its clearnet-vpn action (effects.action.getInput), the same value StartOS
  * compares a task against. Anything unreadable counts as on (fail closed).
- * Only a TunnelSats tunnel counts; a VPN we did not configure is left alone.
+ * Without a record, only a TunnelSats-looking tunnel counts (current key or
+ * a tunnelsats.com endpoint); a VPN we did not configure is left alone.
  *
  * StartOS does not reap tasks that are not re-raised, and it hides tasks on
  * packages that are not current dependencies, so every node that still owes
@@ -23,10 +24,10 @@
  * on-task is withheld until every previous node is off or uninstalled. The
  * caller watches those nodes' status, so accepting the off-task on a running
  * node (which restarts it) re-runs the planner and releases the on-task.
- * Known limitation: StartOS offers no change notification for action input,
- * so an off-task accepted on a node that stays stopped is only noticed on the
- * next re-run (node started, TunnelSats restarted, or subscription metadata
- * synced). The delay is safe, never a dual activation.
+ * StartOS offers no change notification for action input, so an off-task
+ * accepted on a node that stays stopped changes nothing the status watch
+ * sees. For that case a TunnelSats health check polls pending nodes
+ * (runHandoffRecheck) and requests a re-run once one of them is off.
  *
  * Without a handoff record (fresh install, upgrade from a build that had
  * none, unreadable file) every installed node other than the target is
@@ -131,11 +132,19 @@ export function planClearnetVpnTasks(params: {
         }
       : null
 
+  // A node in the record got its tunnel from us, whatever it looks like now
+  // (an older key behind a bare IP endpoint reads as foreign). Only without
+  // a record does the ownership heuristic decide.
+  const tracked = params.state != null
   const off: PackageId[] = []
   const retire: PackageId[] = []
   for (const p of previousNodes(params.state, installed, target)) {
     const vpn = nodeVpn[p]
-    if (!installed.includes(p) || vpn === 'off' || vpn === 'foreign') {
+    if (
+      !installed.includes(p) ||
+      vpn === 'off' ||
+      (vpn === 'foreign' && !tracked)
+    ) {
       retire.push(p)
     } else {
       off.push(p)
@@ -290,4 +299,66 @@ export function nextStateAfter(
     }
   }
   return { activeTarget: plan.next.activeTarget, pendingOff }
+}
+
+/** Display names for operator-facing messages. */
+export const NODE_TITLES: Record<PackageId, string> = {
+  lnd: 'LND',
+  'c-lightning': 'Core Lightning',
+  eclair: 'Eclair',
+}
+
+export interface HandoffProgress {
+  /** Pending nodes that may still run the tunnel. */
+  waitingFor: PackageId[]
+  /** Pending nodes that are off or uninstalled; the next run retires them. */
+  resolved: PackageId[]
+}
+
+/** Classifies the recorded pending nodes the same way the planner does. */
+export function handoffProgress(
+  state: VpnHandoffState | null | undefined,
+  installed: readonly string[],
+  nodeVpn: Partial<Record<PackageId, NodeVpnState>>,
+): HandoffProgress {
+  const progress: HandoffProgress = { waitingFor: [], resolved: [] }
+  for (const p of new Set((state?.pendingOff ?? []).filter(isPackageId))) {
+    if (!installed.includes(p) || nodeVpn[p] === 'off') {
+      progress.resolved.push(p)
+    } else {
+      progress.waitingFor.push(p)
+    }
+  }
+  return progress
+}
+
+export interface HandoffRecheckOps {
+  readState: () => Promise<VpnHandoffState | null>
+  readInstalled: () => Promise<readonly string[]>
+  readNodeVpn: (
+    nodes: readonly PackageId[],
+  ) => Promise<Partial<Record<PackageId, NodeVpnState>>>
+  /** Makes setupDependencies re-run (it watches the recheck file). */
+  requestRecheck: () => Promise<unknown>
+}
+
+/**
+ * Polled by a health check. Reports handoff progress and, when a pending
+ * node turned off without a status change (off-task accepted on a stopped
+ * node), requests a setupDependencies re-run so the held on-task is
+ * released.
+ */
+export async function runHandoffRecheck(
+  ops: HandoffRecheckOps,
+): Promise<HandoffProgress> {
+  const state = await ops.readState()
+  const pending = (state?.pendingOff ?? []).filter(isPackageId)
+  if (pending.length === 0) return { waitingFor: [], resolved: [] }
+  const installed = await ops.readInstalled()
+  const nodeVpn = await ops.readNodeVpn(
+    pending.filter((p) => installed.includes(p)),
+  )
+  const progress = handoffProgress(state, installed, nodeVpn)
+  if (progress.resolved.length > 0) await ops.requestRecheck()
+  return progress
 }

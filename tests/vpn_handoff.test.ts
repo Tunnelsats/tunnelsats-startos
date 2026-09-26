@@ -5,6 +5,8 @@ import {
   readNodeVpnState,
   executeClearnetVpnPlan,
   nextStateAfter,
+  handoffProgress,
+  runHandoffRecheck,
   buildOnTaskInput,
   buildOffTaskInput,
   type ClearnetVpnPlan,
@@ -74,16 +76,18 @@ test('bootstrap: a VPN TunnelSats did not configure is left alone and does not b
   assert.deepEqual(plan.retire, ['c-lightning', 'eclair'])
 })
 
-test('a tracked node that now runs a foreign VPN is no longer ours to turn off', () => {
+test('a tracked node is turned off whatever its tunnel looks like (we handed it out)', () => {
+  // e.g. an older subscription's key behind a bare IP endpoint: the
+  // ownership heuristic reads it as foreign, but the record says it is ours.
   const plan = planClearnetVpnTasks({
     desired: desired('c-lightning'),
-    state: { activeTarget: null, pendingOff: ['lnd'] },
+    state: { activeTarget: 'lnd', pendingOff: [] },
     installed: ALL_INSTALLED,
     nodeVpn: { lnd: 'foreign' },
   })
-  assert.equal(plan.on?.packageId, 'c-lightning')
-  assert.deepEqual(plan.off, [])
-  assert.deepEqual(plan.retire, ['lnd'])
+  assert.equal(plan.on, null)
+  assert.deepEqual(plan.off, ['lnd'])
+  assert.deepEqual(plan.retire, [])
 })
 
 test('bootstrap: a node whose state cannot be read holds the on-task (fail closed)', () => {
@@ -449,4 +453,69 @@ test('nextStateAfter keeps a node whose task clear failed queued for a retry', (
     }),
     plan.next,
   )
+})
+
+test('handoffProgress splits pending nodes into waiting and resolved', () => {
+  assert.deepEqual(
+    handoffProgress(
+      { activeTarget: 'c-lightning', pendingOff: ['lnd', 'eclair'] },
+      ['lnd', 'c-lightning', 'eclair'],
+      { lnd: 'on', eclair: 'off' },
+    ),
+    { waitingFor: ['lnd'], resolved: ['eclair'] },
+  )
+  // Uninstalled resolves; tracked foreign and unknown keep waiting.
+  assert.deepEqual(
+    handoffProgress(
+      { activeTarget: null, pendingOff: ['lnd', 'eclair', 'c-lightning'] },
+      ['eclair', 'c-lightning'],
+      { eclair: 'foreign' },
+    ),
+    { waitingFor: ['eclair', 'c-lightning'], resolved: ['lnd'] },
+  )
+  assert.deepEqual(handoffProgress(null, ALL_INSTALLED, {}), {
+    waitingFor: [],
+    resolved: [],
+  })
+})
+
+test('runHandoffRecheck requests a dependency re-run only when a pending node resolved', async () => {
+  const run = async (
+    state: Parameters<typeof handoffProgress>[0],
+    nodeVpn: Parameters<typeof handoffProgress>[2],
+  ) => {
+    const calls: string[] = []
+    const progress = await runHandoffRecheck({
+      readState: async () => state,
+      readInstalled: async () => ALL_INSTALLED,
+      readNodeVpn: async (nodes) => {
+        calls.push(`read:${nodes.join(',')}`)
+        return nodeVpn
+      },
+      requestRecheck: async () => {
+        calls.push('recheck')
+      },
+    })
+    return { progress, calls }
+  }
+
+  // An off-task accepted on a stopped node: no status change, but the
+  // recheck notices the node is off and re-runs setupDependencies.
+  const accepted = await run(
+    { activeTarget: null, pendingOff: ['lnd'] },
+    { lnd: 'off' },
+  )
+  assert.deepEqual(accepted.calls, ['read:lnd', 'recheck'])
+  assert.deepEqual(accepted.progress, { waitingFor: [], resolved: ['lnd'] })
+
+  const waiting = await run(
+    { activeTarget: null, pendingOff: ['lnd'] },
+    { lnd: 'on' },
+  )
+  assert.deepEqual(waiting.calls, ['read:lnd'])
+  assert.deepEqual(waiting.progress.waitingFor, ['lnd'])
+
+  // Nothing pending: no node is read at all.
+  const idle = await run({ activeTarget: 'lnd', pendingOff: [] }, {})
+  assert.deepEqual(idle.calls, [])
 })

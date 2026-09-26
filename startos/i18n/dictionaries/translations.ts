@@ -69,6 +69,10 @@ export const es_ES: LangDict = {
   65: 'Pagar factura de renovación de suscripción a la VPN de TunnelSats',
   66: 'Desactiva el túnel de TunnelSats en este nodo. TunnelSats ahora enruta otro nodo o ha sido desactivado; al nuevo nodo se le pedirá que tome el relevo cuando este esté apagado.',
   67: 'Esta configuración no tiene ningún endpoint que se pueda anunciar a la Lightning Network (un endpoint IPv6 requiere «Permitir coexistencia con IPv6 local»).',
+  68: 'Traspaso de VPN',
+  69: 'Esperando a que ${nodes} desactive el túnel de TunnelSats. Acepta la tarea en ese nodo para completar el traspaso.',
+  70: 'No hay ningún traspaso de nodo pendiente',
+  71: 'No se pudo comprobar el traspaso de VPN: ${error}',
 }
 
 export const de_DE: LangDict = {
@@ -140,6 +144,10 @@ export const de_DE: LangDict = {
   65: 'TunnelSats VPN-Abonnement-Erneuerungsrechnung bezahlen',
   66: 'Schalten Sie den TunnelSats-Tunnel auf diesem Knoten ab. TunnelSats leitet jetzt einen anderen Knoten oder wurde ausgeschaltet; der neue Knoten wird zur Übernahme aufgefordert, sobald dieser abgeschaltet ist.',
   67: 'Diese Konfiguration enthält keinen Endpunkt, der im Lightning-Netzwerk angekündigt werden kann (ein IPv6-Endpunkt erfordert „Heim-IPv6-Koexistenz zulassen“).',
+  68: 'VPN-Übergabe',
+  69: 'Warte darauf, dass ${nodes} den TunnelSats-Tunnel abschaltet. Akzeptieren Sie die Aufgabe auf diesem Knoten, um die Übergabe abzuschließen.',
+  70: 'Keine Knotenübergabe ausstehend',
+  71: 'Die VPN-Übergabe konnte nicht geprüft werden: ${error}',
 }
 
 export const pl_PL: LangDict = {
@@ -211,6 +219,10 @@ export const pl_PL: LangDict = {
   65: 'Opłać fakturę za odnowienie subskrypcji VPN TunnelSats',
   66: 'Wyłącz tunel TunnelSats na tym węźle. TunnelSats obsługuje teraz inny węzeł lub został wyłączony; nowy węzeł zostanie poproszony o przejęcie tunelu, gdy ten zostanie wyłączony.',
   67: 'Ta konfiguracja nie zawiera punktu końcowego, który można ogłosić w sieci Lightning (punkt końcowy IPv6 wymaga opcji „Zezwól na współistnienie domowego IPv6”).',
+  68: 'Przekazanie VPN',
+  69: 'Oczekiwanie, aż ${nodes} wyłączy tunel TunnelSats. Zaakceptuj zadanie w tym węźle, aby zakończyć przekazanie.',
+  70: 'Brak oczekującego przekazania węzła',
+  71: 'Nie udało się sprawdzić przekazania VPN: ${error}',
 }
 
 export const fr_FR: LangDict = {
@@ -282,6 +294,10 @@ export const fr_FR: LangDict = {
   65: "Payer la facture de renouvellement de l'abonnement VPN TunnelSats",
   66: 'Désactivez le tunnel TunnelSats sur ce nœud. TunnelSats achemine désormais un autre nœud ou a été désactivé ; le nouveau nœud sera invité à prendre le relais une fois celui-ci désactivé.',
   67: 'Cette configuration ne contient aucun point de terminaison annonçable sur le Lightning Network (un point de terminaison IPv6 nécessite « Autoriser la coexistence IPv6 domestique »).',
+  68: 'Transfert VPN',
+  69: 'En attente que ${nodes} désactive le tunnel TunnelSats. Acceptez la tâche sur ce nœud pour terminer le transfert.',
+  70: 'Aucun transfert de nœud en attente',
+  71: 'Impossible de vérifier le transfert VPN : ${error}',
 }
 
 export default {

@@ -1,6 +1,8 @@
 import { i18n } from './i18n'
 import { sdk } from './sdk'
 import { configJson } from './fileModels/config.json'
+import { checkHandoffProgress } from './handoffIO'
+import { NODE_TITLES } from './vpnHandoff'
 
 export const main = sdk.setupMain(async ({ effects }) => {
   console.info(i18n('Starting TunnelSats!'))
@@ -112,5 +114,43 @@ export const main = sdk.setupMain(async ({ effects }) => {
         },
       },
       requires: ['main'],
+    })
+    .addHealthCheck('vpn-handoff', {
+      ready: {
+        display: i18n('VPN Handoff'),
+        // Shows a pending node switch and, when the previous node turned its
+        // tunnel off without a status change (off-task accepted while it was
+        // stopped), makes setupDependencies release the new node's task.
+        fn: async () => {
+          try {
+            const progress = await checkHandoffProgress(effects)
+            if (progress.waitingFor.length > 0) {
+              return {
+                result: 'waiting',
+                message: i18n(
+                  'Waiting for ${nodes} to turn off the TunnelSats tunnel. Accept the task on that node to finish the handoff.',
+                  {
+                    nodes: progress.waitingFor
+                      .map((p) => NODE_TITLES[p])
+                      .join(', '),
+                  },
+                ),
+              }
+            }
+            return {
+              result: 'success',
+              message: i18n('No node handoff pending'),
+            }
+          } catch (e) {
+            return {
+              result: 'failure',
+              message: i18n('Could not check the VPN handoff: ${error}', {
+                error: e instanceof Error ? e.message : String(e),
+              }),
+            }
+          }
+        },
+      },
+      requires: [],
     })
 })
