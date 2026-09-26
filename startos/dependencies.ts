@@ -334,9 +334,52 @@ async function watchPreviousNodes(
   }
 }
 
+export interface OwnTaskOps {
+  raiseExpiry: (
+    severity: NonNullable<SubscriptionExpiryTask['severity']>,
+    reason: string,
+  ) => Promise<unknown>
+  clear: (...keys: string[]) => Promise<unknown>
+}
+
+export interface OwnTaskFailure {
+  op: 'expiry' | 'retired'
+  error: string
+}
+
+/**
+ * Raises or clears the Renew reminder and clears retired task keys. Never
+ * throws: a failure here must not keep the clearnet-vpn handoff from
+ * running. Failures are returned so the caller records them for a retry.
+ */
+export async function updateOwnTasks(
+  expiryTask: SubscriptionExpiryTask,
+  ops: OwnTaskOps,
+): Promise<OwnTaskFailure[]> {
+  const failures: OwnTaskFailure[] = []
+  const attempt = async (
+    op: OwnTaskFailure['op'],
+    fn: () => Promise<unknown>,
+  ) => {
+    try {
+      await fn()
+    } catch (e) {
+      failures.push({ op, error: e instanceof Error ? e.message : String(e) })
+    }
+  }
+  await attempt('expiry', () =>
+    expiryTask.shouldCreateTask && expiryTask.severity && expiryTask.reason
+      ? ops.raiseExpiry(expiryTask.severity, expiryTask.reason)
+      : ops.clear(expiryTask.clearTaskKey),
+  )
+  await attempt('retired', () => ops.clear(...RETIRED_TASK_KEYS))
+  return failures
+}
+
 async function handOffClearnetVpn(
   effects: Parameters<typeof sdk.checkDependencies>[0],
   config: Parameters<typeof getTargetVpnConfig>[0],
+  retryOwnTasks: boolean,
 ): Promise<PackageId[]> {
   const state = await vpnHandoff
     .read()
@@ -407,7 +450,7 @@ async function handOffClearnetVpn(
     )
   }
 
-  const next = nextStateAfter(plan, outcome)
+  const next = { ...nextStateAfter(plan, outcome), retryOwnTasks }
   if (!sameHandoffState(state, next)) {
     await vpnHandoff.write(effects, next)
   }
@@ -442,28 +485,27 @@ export const setDependencies = sdk.setupDependencies(async ({ effects }) => {
         .catch(() => null),
     }),
     async ({ config, meta }) => {
-      // 1. Expiry task, driven only by the API-confirmed expiry
-      const expiryTask = getSubscriptionExpiryTask(config, meta)
-      if (
-        expiryTask.shouldCreateTask &&
-        expiryTask.severity &&
-        expiryTask.reason
-      ) {
-        await sdk.action.createOwnTask(
-          effects,
-          renewSubscription,
-          expiryTask.severity,
-          {
-            reason: expiryTask.reason,
-          },
+      // 1. Own tasks: the Renew reminder, driven only by the API-confirmed
+      // expiry, and retired task keys. Guarded so a failure never skips the
+      // handoff; it is recorded and retried via the handoff health check.
+      const ownTaskFailures = await updateOwnTasks(
+        getSubscriptionExpiryTask(config, meta),
+        {
+          raiseExpiry: (severity, reason) =>
+            sdk.action.createOwnTask(effects, renewSubscription, severity, {
+              reason,
+            }),
+          clear: (...keys) => sdk.action.clearTask(effects, ...keys),
+        },
+      )
+      for (const f of ownTaskFailures) {
+        console.error(
+          `TunnelSats: updating the ${f.op} task failed (will retry): ${f.error}`,
         )
-      } else {
-        await sdk.action.clearTask(effects, expiryTask.clearTaskKey)
       }
-      await sdk.action.clearTask(effects, ...RETIRED_TASK_KEYS)
 
       // 2. Clearnet-VPN handoff: on-task for the target, off-task for the rest.
-      return handOffClearnetVpn(effects, config)
+      return handOffClearnetVpn(effects, config, ownTaskFailures.length > 0)
     },
   )
 

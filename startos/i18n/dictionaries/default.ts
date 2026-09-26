@@ -74,6 +74,7 @@ const dict = {
   'No node handoff pending': 70,
   'Could not check the VPN handoff: ${error}': 71,
   'Offering the TunnelSats task to ${nodes} failed; retrying automatically.': 72,
+  'Updating the TunnelSats renewal reminder failed; retrying automatically.': 73,
 } as const
 
 /**

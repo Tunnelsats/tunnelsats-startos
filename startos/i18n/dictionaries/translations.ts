@@ -74,6 +74,7 @@ export const es_ES: LangDict = {
   70: 'No hay ningún traspaso de nodo pendiente',
   71: 'No se pudo comprobar el traspaso de VPN: ${error}',
   72: 'No se pudo ofrecer la tarea de TunnelSats a ${nodes}; se reintenta automáticamente.',
+  73: 'No se pudo actualizar el recordatorio de renovación de TunnelSats; se reintenta automáticamente.',
 }
 
 export const de_DE: LangDict = {
@@ -150,6 +151,7 @@ export const de_DE: LangDict = {
   70: 'Keine Knotenübergabe ausstehend',
   71: 'Die VPN-Übergabe konnte nicht geprüft werden: ${error}',
   72: 'Die TunnelSats-Aufgabe konnte ${nodes} nicht angeboten werden; wird automatisch erneut versucht.',
+  73: 'Die TunnelSats-Verlängerungserinnerung konnte nicht aktualisiert werden; wird automatisch erneut versucht.',
 }
 
 export const pl_PL: LangDict = {
@@ -226,6 +228,7 @@ export const pl_PL: LangDict = {
   70: 'Brak oczekującego przekazania węzła',
   71: 'Nie udało się sprawdzić przekazania VPN: ${error}',
   72: 'Nie udało się zaoferować zadania TunnelSats dla ${nodes}; ponawianie automatyczne.',
+  73: 'Nie udało się zaktualizować przypomnienia o odnowieniu TunnelSats; ponawianie automatyczne.',
 }
 
 export const fr_FR: LangDict = {
@@ -302,6 +305,7 @@ export const fr_FR: LangDict = {
   70: 'Aucun transfert de nœud en attente',
   71: 'Impossible de vérifier le transfert VPN : ${error}',
   72: 'Impossible de proposer la tâche TunnelSats à ${nodes} ; nouvelle tentative automatique.',
+  73: 'Impossible de mettre à jour le rappel de renouvellement TunnelSats ; nouvelle tentative automatique.',
 }
 
 export default {

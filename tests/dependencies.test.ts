@@ -6,6 +6,7 @@ import {
   getConfirmedExpiry,
   EXPIRY_TASK_KEY,
   RETIRED_TASK_KEYS,
+  updateOwnTasks,
 } from '../startos/dependencies'
 import { clearnetVpnReplayId } from '../startos/vpnHandoff'
 import { generateWireguardKeypair } from '../startos/keygen'
@@ -258,4 +259,43 @@ test('every task key raised by released versions is retired, and no live key is'
   ]) {
     assert.ok(!RETIRED_TASK_KEYS.includes(live), live)
   }
+})
+
+test('updateOwnTasks never throws and still clears retired tasks when the expiry task fails', async () => {
+  const calls: string[] = []
+  const failures = await updateOwnTasks(
+    {
+      shouldCreateTask: true,
+      severity: 'important',
+      reason: 'renew',
+      clearTaskKey: EXPIRY_TASK_KEY,
+    },
+    {
+      raiseExpiry: async () => {
+        calls.push('raise')
+        throw new Error('boom')
+      },
+      clear: async (...keys) => {
+        calls.push(`clear:${keys.join(',')}`)
+      },
+    },
+  )
+  assert.deepEqual(calls, ['raise', `clear:${RETIRED_TASK_KEYS.join(',')}`])
+  assert.deepEqual(failures, [{ op: 'expiry', error: 'boom' }])
+
+  const cleared: string[] = []
+  const none = await updateOwnTasks(
+    { shouldCreateTask: false, clearTaskKey: EXPIRY_TASK_KEY },
+    {
+      raiseExpiry: async () => {
+        throw new Error('must not raise')
+      },
+      clear: async (...keys) => {
+        cleared.push(keys.join(','))
+        if (keys.includes(RETIRED_TASK_KEYS[0])) throw new Error('down')
+      },
+    },
+  )
+  assert.deepEqual(cleared, [EXPIRY_TASK_KEY, RETIRED_TASK_KEYS.join(',')])
+  assert.deepEqual(none, [{ op: 'retired', error: 'down' }])
 })

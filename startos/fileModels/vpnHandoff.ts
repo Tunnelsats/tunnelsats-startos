@@ -14,6 +14,7 @@ export const vpnHandoffShape = z.object({
   pendingOff: z.array(packageId).catch([]),
   handedOutKeys: z.array(z.string()).catch([]),
   unraised: z.array(packageId).catch([]),
+  retryOwnTasks: z.boolean().catch(false),
 })
 
 export const vpnHandoff = FileHelper.json(

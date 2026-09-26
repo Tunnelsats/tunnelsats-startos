@@ -509,7 +509,7 @@ test('nextStateAfter keeps a node whose task clear failed queued for a retry', (
         { packageId: 'eclair', op: 'off', error: 'y' },
       ],
     }),
-    { ...plan.next, unraised: ['c-lightning', 'eclair'] },
+    { ...plan.next, unraised: ['c-lightning', 'eclair'], retryOwnTasks: false },
   )
 })
 
@@ -520,7 +520,12 @@ test('handoffProgress splits pending nodes into waiting and resolved', () => {
       ['lnd', 'c-lightning', 'eclair'],
       { lnd: 'on', eclair: 'off' },
     ),
-    { waitingFor: ['lnd'], resolved: ['eclair'], retrying: [] },
+    {
+      waitingFor: ['lnd'],
+      resolved: ['eclair'],
+      retrying: [],
+      retryingOwnTasks: false,
+    },
   )
   // Uninstalled and foreign (the operator replaced our tunnel) resolve, the
   // same as in the planner; unknown keeps waiting (fail closed).
@@ -530,12 +535,18 @@ test('handoffProgress splits pending nodes into waiting and resolved', () => {
       ['eclair', 'c-lightning'],
       { eclair: 'foreign' },
     ),
-    { waitingFor: ['c-lightning'], resolved: ['lnd', 'eclair'], retrying: [] },
+    {
+      waitingFor: ['c-lightning'],
+      resolved: ['lnd', 'eclair'],
+      retrying: [],
+      retryingOwnTasks: false,
+    },
   )
   assert.deepEqual(handoffProgress(null, ALL_INSTALLED, {}), {
     waitingFor: [],
     resolved: [],
     retrying: [],
+    retryingOwnTasks: false,
   })
   // Only installed nodes are retried: a task cannot be raised on a node that
   // is gone.
@@ -581,6 +592,7 @@ test('runHandoffRecheck requests a dependency re-run only when a pending node re
     waitingFor: [],
     resolved: ['lnd'],
     retrying: [],
+    retryingOwnTasks: false,
   })
 
   const waiting = await run(
@@ -622,7 +634,7 @@ test('the planner records the key of every tunnel it hands out', () => {
   assert.deepEqual(held.next.handedOutKeys, ['OLD='])
 })
 
-test('handedOutKeys stays de-duplicated and bounded', () => {
+test('handedOutKeys stays de-duplicated and never forgets a key', () => {
   const kp = generateWireguardKeypair()
   const conf = realConf(kp.privateKey, 'de2.tunnelsats.com:51820')
   const many = Array.from({ length: 40 }, (_, i) => `K${i}=`)
@@ -636,8 +648,11 @@ test('handedOutKeys stays de-duplicated and bounded', () => {
     installed: ALL_INSTALLED,
     nodeVpn: {},
   })
+  // No cap: an evicted key would make a node still running that tunnel read
+  // as foreign and keep it running.
   const keys = plan.next.handedOutKeys ?? []
-  assert.equal(keys.length, 32)
+  assert.equal(keys.length, 41)
+  assert.equal(keys[0], 'K0=')
   assert.equal(keys[keys.length - 1], kp.publicKey)
   assert.equal(new Set(keys).size, keys.length)
 })
@@ -760,6 +775,7 @@ test('runHandoffRecheck requests a re-run while a task could not be raised', asy
     waitingFor: [],
     resolved: [],
     retrying: ['c-lightning'],
+    retryingOwnTasks: false,
   })
 })
 
@@ -822,4 +838,32 @@ test('a failed handoff run does not block the queue', async () => {
       result: 4,
     },
   )
+})
+
+test('a failed own-task update is retried through the handoff health check', async () => {
+  const calls: string[] = []
+  const progress = await runHandoffRecheck({
+    readState: async () => ({
+      activeTarget: 'lnd',
+      pendingOff: [],
+      retryOwnTasks: true,
+    }),
+    readInstalled: async () => ALL_INSTALLED,
+    readNodeVpn: async () => {
+      calls.push('read')
+      return {}
+    },
+    requestRecheck: async () => {
+      calls.push('recheck')
+    },
+  })
+  assert.deepEqual(calls, ['recheck'])
+  assert.deepEqual(progress, {
+    waitingFor: [],
+    resolved: [],
+    retrying: [],
+    retryingOwnTasks: true,
+  })
+  const base = { activeTarget: null, pendingOff: [], retryOwnTasks: false }
+  assert.equal(sameHandoffState(base, { ...base, retryOwnTasks: true }), false)
 })

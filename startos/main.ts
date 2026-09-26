@@ -150,6 +150,14 @@ export const main = sdk.setupMain(async ({ effects }) => {
                 ),
               }
             }
+            if (progress.retryingOwnTasks) {
+              return {
+                result: 'waiting',
+                message: i18n(
+                  'Updating the TunnelSats renewal reminder failed; retrying automatically.',
+                ),
+              }
+            }
             return {
               result: 'success',
               message: i18n('No node handoff pending'),

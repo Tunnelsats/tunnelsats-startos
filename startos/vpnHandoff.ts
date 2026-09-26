@@ -66,9 +66,12 @@ export interface VpnHandoffState {
   /** Nodes that still owe us an off. */
   pendingOff: PackageId[]
   /**
-   * Public keys of the tunnels we raised an on-task with, oldest first,
-   * capped at HANDED_OUT_KEYS_CAP. Missing in records written before it
-   * existed.
+   * Public keys of the tunnels we raised an on-task with, oldest first.
+   * Deliberately uncapped: an evicted key would make a node still running
+   * that tunnel read as foreign, so it would never be asked to turn it off.
+   * A key is only added when a new WireGuard key is handed out (a new
+   * subscription), so the list stays small. Missing in records written
+   * before it existed.
    */
   handedOutKeys?: string[]
   /**
@@ -77,15 +80,19 @@ export interface VpnHandoffState {
    * transient failure never leaves the operator without a task.
    */
   unraised?: PackageId[]
+  /**
+   * Updating our own tasks (Renew reminder, retired task keys) failed on the
+   * last run; the handoff health check requests a re-run while set.
+   */
+  retryOwnTasks?: boolean
 }
-
-export const HANDED_OUT_KEYS_CAP = 32
 
 export const EMPTY_HANDOFF_STATE: VpnHandoffState = {
   activeTarget: null,
   pendingOff: [],
   handedOutKeys: [],
   unraised: [],
+  retryOwnTasks: false,
 }
 
 /** What identifies a tunnel as one TunnelSats handed out. */
@@ -208,9 +215,9 @@ export function planClearnetVpnTasks(params: {
 }
 
 /**
- * Appends a handed-out key (moved to the end if already known) and keeps the
- * newest HANDED_OUT_KEYS_CAP. Recorded when the on-task is planned, even if
- * raising it then fails: the key is ours either way.
+ * Appends a handed-out key (moved to the end if already known). Recorded
+ * when the on-task is planned, even if raising it then fails: the key is
+ * ours either way.
  */
 function recordHandedOut(
   keys: readonly string[],
@@ -220,7 +227,7 @@ function recordHandedOut(
     ...new Set(keys.filter((k) => typeof k === 'string' && k && k !== key)),
   ]
   if (key) out.push(key)
-  return out.slice(-HANDED_OUT_KEYS_CAP)
+  return out
 }
 
 export function buildOnTaskInput(config: string, announce: string) {
@@ -400,6 +407,7 @@ export function nextStateAfter(
     pendingOff,
     handedOutKeys: [...(plan.next.handedOutKeys ?? [])],
     unraised,
+    retryOwnTasks: false,
   }
 }
 
@@ -418,7 +426,8 @@ export function sameHandoffState(
     (prev.activeTarget ?? null) === next.activeTarget &&
     same(prev.pendingOff ?? [], next.pendingOff) &&
     same(prev.handedOutKeys ?? [], next.handedOutKeys ?? []) &&
-    same(prev.unraised ?? [], next.unraised ?? [])
+    same(prev.unraised ?? [], next.unraised ?? []) &&
+    (prev.retryOwnTasks ?? false) === (next.retryOwnTasks ?? false)
   )
 }
 
@@ -439,6 +448,8 @@ export interface HandoffProgress {
   resolved: PackageId[]
   /** Installed nodes whose task could not be raised; the next run retries. */
   retrying: PackageId[]
+  /** Updating our own tasks failed; the next run retries. */
+  retryingOwnTasks: boolean
 }
 
 /** Classifies the recorded pending nodes the same way the planner does. */
@@ -457,6 +468,7 @@ export function handoffProgress(
         ),
       ),
     ],
+    retryingOwnTasks: state?.retryOwnTasks ?? false,
   }
   for (const p of new Set((state?.pendingOff ?? []).filter(isPackageId))) {
     const vpn = nodeVpn[p]
@@ -485,22 +497,36 @@ export interface HandoffRecheckOps {
  * Polled by a health check. Reports handoff progress and requests a
  * setupDependencies re-run when a pending node turned off without a status
  * change (off-task accepted on a stopped node), so the held on-task is
- * released, or when a task could not be raised last run, so it is retried
- * (the poll interval is the backoff).
+ * released, or when a task (a node's or our own) could not be updated last
+ * run, so it is retried (the poll interval is the backoff).
  */
 export async function runHandoffRecheck(
   ops: HandoffRecheckOps,
 ): Promise<HandoffProgress> {
   const state = await ops.readState()
   const pending = (state?.pendingOff ?? []).filter(isPackageId)
-  if (!state || (pending.length === 0 && (state.unraised ?? []).length === 0)) {
-    return { waitingFor: [], resolved: [], retrying: [] }
+  if (
+    !state ||
+    (pending.length === 0 &&
+      (state.unraised ?? []).length === 0 &&
+      !state.retryOwnTasks)
+  ) {
+    return {
+      waitingFor: [],
+      resolved: [],
+      retrying: [],
+      retryingOwnTasks: false,
+    }
   }
   const installed = await ops.readInstalled()
   const toRead = pending.filter((p) => installed.includes(p))
   const nodeVpn = toRead.length > 0 ? await ops.readNodeVpn(toRead, state) : {}
   const progress = handoffProgress(state, installed, nodeVpn)
-  if (progress.resolved.length > 0 || progress.retrying.length > 0) {
+  if (
+    progress.resolved.length > 0 ||
+    progress.retrying.length > 0 ||
+    progress.retryingOwnTasks
+  ) {
     await ops.requestRecheck()
   }
   return progress
