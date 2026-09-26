@@ -13,7 +13,6 @@ import {
   planClearnetVpnTasks,
   executeClearnetVpnPlan,
   readOffTaskState,
-  isPositivelyStopped,
   buildOnTaskInput,
   buildOffTaskInput,
   clearnetVpnReplayId,
@@ -345,28 +344,25 @@ async function readOffTaskStates(
 }
 
 /**
- * Status of nodes that may still run the tunnel. Read with `.const()`, so a
- * status change re-runs setupDependencies: accepting the off-task rewrites
- * the node's store.json, which restarts its main. A node whose status cannot
- * be read counts as running (fail closed: the on-task stays held).
+ * Registers a status watch on nodes that may still run the tunnel, so a
+ * status change re-runs setupDependencies: accepting the off-task on a
+ * running node rewrites its store.json, which restarts its main. Starting a
+ * stopped node re-runs it as well.
  */
-async function readStoppedNodes(
+async function watchPreviousNodes(
   effects: Parameters<typeof sdk.checkDependencies>[0],
   nodes: readonly PackageId[],
-): Promise<PackageId[]> {
-  const stopped: PackageId[] = []
+): Promise<void> {
   for (const p of nodes) {
     try {
-      const status = await sdk.getStatus(effects, { packageId: p }).const()
-      if (isPositivelyStopped(status)) stopped.push(p)
+      await sdk.getStatus(effects, { packageId: p }).const()
     } catch (e) {
       console.warn(
-        `TunnelSats: could not read ${p} status; treating it as running:`,
+        `TunnelSats: could not watch ${p} status; the held on-task is released on the next re-run:`,
         e,
       )
     }
   }
-  return stopped
 }
 
 async function handOffClearnetVpn(
@@ -395,14 +391,13 @@ async function handOffClearnetVpn(
     (p): p is PackageId =>
       !!p && p !== desired?.targetPackage && installed.includes(p),
   )
-  const stopped = await readStoppedNodes(effects, previousNodes)
+  await watchPreviousNodes(effects, previousNodes)
 
   const plan = planClearnetVpnTasks({
     desired,
     state,
     installed,
     offTaskStates,
-    stopped,
   })
   if (plan.held) {
     console.info(

@@ -39,7 +39,7 @@ const dict = {
   'Select which Lightning node will receive inbound connections through the VPN tunnel.': 35,
   'Paste the full contents of your TunnelSats .conf file here.': 36,
   'Subscription Imported': 37,
-  'WireGuard configuration saved. A task has been raised on your Lightning node to activate the VPN tunnel.': 38,
+  'WireGuard configuration saved. Your Lightning node will ask you to activate the VPN tunnel. If TunnelSats routed a different node before, that node first asks you to turn its tunnel off.': 38,
   'Public Key': 39,
   'Announce Endpoint': 40,
   'Not available': 41,

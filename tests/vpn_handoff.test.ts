@@ -7,7 +7,6 @@ import {
   buildOnTaskInput,
   buildOffTaskInput,
   EMPTY_HANDOFF_STATE,
-  isPositivelyStopped,
   type ClearnetVpnPlan,
 } from '../startos/vpnHandoff'
 
@@ -99,20 +98,18 @@ test('the held on-task is raised when the previous node is uninstalled', () => {
   assert.deepEqual(plan.retire, ['lnd'])
 })
 
-test('a stopped previous node does not hold the on-task but keeps its off-task', () => {
+test('a stopped previous node still holds the on-task (it could start with its tunnel)', () => {
+  // Fail closed: a stopped node that has not accepted its off-task would
+  // bring the tunnel back up when started, next to the new node.
   const plan = planClearnetVpnTasks({
     desired: desired('c-lightning'),
     state: { activeTarget: 'lnd', pendingOff: [] },
     installed: ALL_INSTALLED,
     offTaskStates: {},
-    stopped: ['lnd'],
   })
-  assert.equal(plan.on?.packageId, 'c-lightning')
+  assert.equal(plan.on, null)
+  assert.deepEqual(plan.held, { packageId: 'c-lightning', waitingFor: ['lnd'] })
   assert.deepEqual(plan.off, ['lnd'])
-  assert.deepEqual(plan.next, {
-    activeTarget: 'c-lightning',
-    pendingOff: ['lnd'],
-  })
 })
 
 test('an already-active target is never held (it keeps being tracked for a later off)', () => {
@@ -306,20 +303,4 @@ test('executeClearnetVpnPlan raises on/off, clears retired, and reports failures
   assert.equal(outcome.failures.length, 1)
   assert.equal(outcome.failures[0].packageId, 'eclair')
   assert.equal(outcome.failures[0].op, 'off')
-})
-
-test('isPositivelyStopped only trusts a stopped, not-started status', () => {
-  const status = (main: string, started: string | null) => ({
-    started,
-    desired: { main } as { main: 'stopped' },
-  })
-  assert.equal(isPositivelyStopped(status('stopped', null)), true)
-  assert.equal(
-    isPositivelyStopped(status('stopped', '2026-09-26T00:00:00Z')),
-    false,
-  )
-  assert.equal(isPositivelyStopped(status('running', null)), false)
-  assert.equal(isPositivelyStopped(status('restarting', null)), false)
-  assert.equal(isPositivelyStopped(null), false)
-  assert.equal(isPositivelyStopped(undefined), false)
 })

@@ -111,7 +111,7 @@ export const importSubscription = sdk.Action.withInput(
       version: '1' as const,
       title: i18n('Subscription Imported'),
       message: i18n(
-        'WireGuard configuration saved. A task has been raised on your Lightning node to activate the VPN tunnel.',
+        'WireGuard configuration saved. Your Lightning node will ask you to activate the VPN tunnel. If TunnelSats routed a different node before, that node first asks you to turn its tunnel off.',
       ),
       result: {
         type: 'group' as const,
