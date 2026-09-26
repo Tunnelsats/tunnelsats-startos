@@ -12,6 +12,7 @@ import {
   type NodeVpnState,
   planClearnetVpnTasks,
   executeClearnetVpnPlan,
+  nextStateAfter,
   readNodeVpnState,
   previousNodes,
   handedOverTarget,
@@ -436,17 +437,20 @@ async function handOffClearnetVpn(
     )
   }
 
+  const next = nextStateAfter(plan, outcome)
   const prevPending = state?.pendingOff ?? []
   if (
     state === null ||
-    (state?.activeTarget ?? null) !== plan.next.activeTarget ||
-    prevPending.length !== plan.next.pendingOff.length ||
-    prevPending.some((p, i) => p !== plan.next.pendingOff[i])
+    (state?.activeTarget ?? null) !== next.activeTarget ||
+    prevPending.length !== next.pendingOff.length ||
+    prevPending.some((p, i) => p !== next.pendingOff[i])
   ) {
-    await vpnHandoff.write(effects, plan.next)
+    await vpnHandoff.write(effects, next)
   }
 
-  return plan.next.pendingOff
+  // Only installed nodes can be declared: a queued clear for an uninstalled
+  // node must not surface as a missing dependency.
+  return next.pendingOff.filter((p) => installed.includes(p))
 }
 
 export const setDependencies = sdk.setupDependencies(async ({ effects }) => {

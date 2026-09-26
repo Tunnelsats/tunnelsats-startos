@@ -236,3 +236,22 @@ export async function executeClearnetVpnPlan(
   for (const p of plan.retire) await attempt(p, 'clear', () => ops.clear(p))
   return outcome
 }
+
+/**
+ * The state to persist after a plan ran. A node whose task clear failed stays
+ * in `pendingOff`, so the next run retries the clear instead of stranding an
+ * obsolete prompt. Failed raises need nothing extra: the node is already
+ * pending (off) or the target (on), so the next run raises it again.
+ */
+export function nextStateAfter(
+  plan: ClearnetVpnPlan,
+  outcome: ClearnetVpnOutcome,
+): VpnHandoffState {
+  const pendingOff = [...plan.next.pendingOff]
+  for (const f of outcome.failures) {
+    if (f.op === 'clear' && !pendingOff.includes(f.packageId)) {
+      pendingOff.push(f.packageId)
+    }
+  }
+  return { activeTarget: plan.next.activeTarget, pendingOff }
+}

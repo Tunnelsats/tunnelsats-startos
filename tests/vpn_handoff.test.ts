@@ -4,6 +4,7 @@ import {
   planClearnetVpnTasks,
   readNodeVpnState,
   executeClearnetVpnPlan,
+  nextStateAfter,
   buildOnTaskInput,
   buildOffTaskInput,
   type ClearnetVpnPlan,
@@ -245,6 +246,33 @@ test('re-enabling the node that owes an off hands it the on-task directly', () =
   assert.deepEqual(plan.next, { activeTarget: 'lnd', pendingOff: [] })
 })
 
+test('switching away and back before the previous node turned off never forces an off/on cycle', () => {
+  // lnd runs the tunnel; the operator picks c-lightning, then lnd again
+  // before lnd accepted its off-task.
+  const away = planClearnetVpnTasks({
+    desired: desired('c-lightning'),
+    state: { activeTarget: 'lnd', pendingOff: [] },
+    installed: ALL_INSTALLED,
+    nodeVpn: { lnd: 'on' },
+  })
+  assert.equal(away.on, null)
+  assert.deepEqual(away.next, { activeTarget: null, pendingOff: ['lnd'] })
+
+  const back = planClearnetVpnTasks({
+    desired: desired('lnd'),
+    state: away.next,
+    installed: ALL_INSTALLED,
+    nodeVpn: { lnd: 'on' },
+  })
+  // lnd is the target again: its off-task is replaced by the on-task (same
+  // replay id) at once, and c-lightning never received anything.
+  assert.equal(back.on?.packageId, 'lnd')
+  assert.equal(back.held, null)
+  assert.deepEqual(back.off, [])
+  assert.deepEqual(back.retire, [])
+  assert.deepEqual(back.next, { activeTarget: 'lnd', pendingOff: [] })
+})
+
 test('duplicate and malformed state entries are normalised', () => {
   const plan = planClearnetVpnTasks({
     desired: null,
@@ -316,4 +344,35 @@ test('executeClearnetVpnPlan raises on/off, clears retired, and reports failures
   assert.equal(outcome.failures.length, 1)
   assert.equal(outcome.failures[0].packageId, 'eclair')
   assert.equal(outcome.failures[0].op, 'off')
+})
+
+test('nextStateAfter keeps a node whose task clear failed queued for a retry', () => {
+  const plan: ClearnetVpnPlan = {
+    on: { packageId: 'c-lightning', config: CONF, announce: 'h:1' },
+    held: null,
+    off: ['eclair'],
+    retire: ['lnd'],
+    next: { activeTarget: 'c-lightning', pendingOff: ['eclair'] },
+  }
+  assert.deepEqual(
+    nextStateAfter(plan, {
+      raised: ['c-lightning', 'eclair'],
+      cleared: [],
+      failures: [{ packageId: 'lnd', op: 'clear', error: 'boom' }],
+    }),
+    { activeTarget: 'c-lightning', pendingOff: ['eclair', 'lnd'] },
+  )
+  // Raise failures need no bookkeeping: the node is already pending (off)
+  // or the target (on), so the next run raises it again.
+  assert.deepEqual(
+    nextStateAfter(plan, {
+      raised: [],
+      cleared: ['lnd'],
+      failures: [
+        { packageId: 'c-lightning', op: 'on', error: 'x' },
+        { packageId: 'eclair', op: 'off', error: 'y' },
+      ],
+    }),
+    plan.next,
+  )
 })
