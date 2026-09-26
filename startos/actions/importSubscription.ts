@@ -8,9 +8,6 @@ import {
 } from '../utils'
 import { i18n } from '../i18n'
 import { derivePublicKey } from '../keygen'
-import { clearnetVpn as lndClearnetVpn } from 'lnd-startos/startos/actions/clearnetVpn'
-import { clearnetVpn as clnClearnetVpn } from 'cln-startos/startos/actions/clearnetVpn'
-import { clearnetVpn as eclairClearnetVpn } from 'eclair-startos/startos/actions/clearnetVpn'
 
 const { InputSpec, Value } = sdk
 
@@ -91,15 +88,12 @@ export const importSubscription = sdk.Action.withInput(
       input['tunnelsats-conf'],
       input['allow-ipv6'],
     )
-
-    let packageId = 'lnd'
-    let clearnetVpnAction = lndClearnetVpn
-    if (input['target-node'] === 'cln') {
-      packageId = 'c-lightning'
-      clearnetVpnAction = clnClearnetVpn
-    } else if (input['target-node'] === 'eclair') {
-      packageId = 'eclair'
-      clearnetVpnAction = eclairClearnetVpn
+    if (!announceEndpoint) {
+      throw new Error(
+        i18n(
+          'This configuration has no endpoint that can be announced to the Lightning Network (an IPv6 endpoint needs Allow Home IPv6 Coexistence).',
+        ),
+      )
     }
 
     await configJson.merge(effects, {
@@ -110,31 +104,14 @@ export const importSubscription = sdk.Action.withInput(
     })
     await tunnelsatsConf.write(effects, input['tunnelsats-conf'])
 
-    await sdk.action.createTask(
-      effects,
-      packageId,
-      clearnetVpnAction,
-      'important',
-      {
-        input: {
-          kind: 'partial',
-          accept: [
-            { config: input['tunnelsats-conf'], announce: announceEndpoint },
-          ],
-          set: { config: input['tunnelsats-conf'], announce: announceEndpoint },
-        },
-        when: { condition: 'input-not-matches', once: false },
-        reason: i18n(
-          'Activate TunnelSats VPN tunnel and advertise clearnet endpoint to the Lightning Network',
-        ),
-      },
-    )
+    // The clearnet-vpn task (and the off-task for a previously targeted
+    // node) is raised by setDependencies, which reacts to this config write.
 
     return {
       version: '1' as const,
       title: i18n('Subscription Imported'),
       message: i18n(
-        'WireGuard configuration saved. A task has been raised on your Lightning node to activate the VPN tunnel.',
+        'WireGuard configuration saved. Your Lightning node will ask you to activate the VPN tunnel. If TunnelSats routed a different node before, that node first asks you to turn its tunnel off.',
       ),
       result: {
         type: 'group' as const,

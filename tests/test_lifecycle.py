@@ -85,7 +85,8 @@ class TestBridgeLifecycle(unittest.TestCase):
                 mock_response.__exit__ = MagicMock(return_value=False)
                 mock_urlopen.return_value = mock_response
 
-                bridge.lazy_sync("mock_pubkey_123")
+                with patch('bridge.get_wg_pubkey', return_value="mock_pubkey_123"):
+                    self.assertEqual(bridge.lazy_sync("mock_pubkey_123"), "confirmed")
 
                 self.assertTrue(os.path.exists(meta_file))
                 with open(meta_file, "r") as f:
@@ -97,20 +98,6 @@ class TestBridgeLifecycle(unittest.TestCase):
                 self.assertEqual(os.stat(meta_file).st_mode & 0o777, 0o600)
             finally:
                 bridge.META_FILE_PATH = orig_meta
-
-    @patch('builtins.open', new_callable=unittest.mock.mock_open, read_data='{"expiresAt": "2026-12-31T23:59:59Z"}')
-    @patch('os.path.exists')
-    @patch('bridge.datetime')
-    def test_format_subscription_expiry_active(self, mock_datetime, mock_exists, mock_open):
-        mock_exists.return_value = True
-        
-        from datetime import datetime, timezone
-        fixed_now = datetime(2026, 12, 20, 12, 0, 0, tzinfo=timezone.utc)
-        mock_datetime.now.return_value = fixed_now
-        mock_datetime.fromisoformat.side_effect = lambda s: datetime.fromisoformat(s)
-        
-        result = bridge.format_subscription_expiry()
-        self.assertEqual(result, "Active (Expires in 11d 11h)")
 
 if __name__ == '__main__':
     unittest.main()

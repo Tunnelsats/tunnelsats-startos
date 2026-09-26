@@ -110,7 +110,9 @@ class TestBridgeKeygenAndConfig(unittest.TestCase):
                 with open(meta_file, "r") as f:
                     meta_data = json.load(f)
                     self.assertEqual(meta_data.get("vpnPort"), 24556)
-                    self.assertEqual(meta_data.get("expiresAt"), "2026-12-31T23:59:59Z")
+                    # The # Valid Until comment is never trusted as an expiry;
+                    # only the API sync may write expiresAt.
+                    self.assertNotIn("expiresAt", meta_data)
                     self.assertEqual(meta_data.get("serverDomain"), "ch1.tunnelsats.com")
 
                 # Verify files have 0600 owner-only permissions
