@@ -5,10 +5,12 @@ import os
 import json
 import subprocess
 import signal
+import fcntl
 import time
 import socket
 import urllib.request
 import urllib.error
+from contextlib import contextmanager
 from datetime import datetime, timezone
 
 
@@ -25,6 +27,7 @@ os.umask(0o077)
 
 _enabled_cache = None
 _enabled_cache_mtime = 0
+_pubkey_cache = None
 _csrf_token = None
 
 def get_csrf_token():
@@ -101,6 +104,31 @@ def atomic_write_file(filepath, content, mode=0o600):
             except Exception:
                 pass
         raise e
+
+@contextmanager
+def meta_lock():
+    """Exclusive cross-process lock around every read-modify-write of the
+    metadata file. The dashboard's sync thread, the forced sync, the health
+    check (a separate process) and save_configuration all rewrite it; without
+    the lock one writer can replace another's newer result with metadata it
+    loaded before a slow API request. The purchase actions (TypeScript
+    FileHelper.merge of pendingOrder/pendingRenewal) cannot take this lock;
+    every writer here therefore merges into a fresh read taken right before
+    its write, which narrows their window to the read-to-rename span."""
+    fd = os.open(META_FILE_PATH + ".lock", os.O_RDWR | os.O_CREAT, 0o600)
+    try:
+        fcntl.flock(fd, fcntl.LOCK_EX)
+        yield
+    finally:
+        os.close(fd)
+
+def read_meta():
+    try:
+        with open(META_FILE_PATH, "r") as f:
+            meta = json.load(f)
+        return meta if isinstance(meta, dict) else {}
+    except (OSError, ValueError):
+        return {}
 
 def validate_config(wg_conf):
     if not wg_conf:
@@ -186,11 +214,21 @@ def save_configuration(conf_content, target_node="lnd"):
 
     # The comment's expiry is a hint only; the confirmed expiry comes from
     # lazy_sync. Port and server stay as display hints.
-    meta = parse_config_comments(conf_content)
-    meta.pop("expiresAt", None)
-    meta["lastSync"] = None
-    meta["syncSuccess"] = False
-    atomic_write_json(META_FILE_PATH, meta)
+    hints = parse_config_comments(conf_content)
+    hints.pop("expiresAt", None)
+    with meta_lock():
+        # The new configuration starts unconfirmed: everything bound to the
+        # previous key or configuration goes. Fields owned by other writers
+        # stay, above all pendingOrder, which holds the private key of an
+        # order that may not be claimed yet.
+        meta = read_meta()
+        for stale in CONFIRMED_META_FIELDS + ("publicKey", "syncError", "lastSyncAttempt",
+                                              "serverDomain", "vpnPort"):
+            meta.pop(stale, None)
+        meta.update(hints)
+        meta["lastSync"] = None
+        meta["syncSuccess"] = False
+        atomic_write_json(META_FILE_PATH, meta)
 
 def get_default_gateway():
     if hasattr(get_default_gateway, "_cache"):
@@ -210,28 +248,65 @@ def get_default_gateway():
     return None
 
 def get_wg_pubkey():
-    if os.path.exists(CONFIG_PATH):
-        try:
-            with open(CONFIG_PATH, 'r') as f:
-                config_content = f.read()
-            private_key_match = re.search(r'^\s*(?!#|;)\s*PrivateKey\s*=\s*(.+)', config_content, re.IGNORECASE | re.MULTILINE)
-            if private_key_match:
-                proc = subprocess.run(["wg", "pubkey"], input=private_key_match.group(1).strip().encode(), capture_output=True)
-                if proc.returncode == 0:
-                    return proc.stdout.decode().strip()
-        except Exception:
-            pass
+    """Public key of the saved configuration, or "Unknown". `wg pubkey` only
+    runs when the file changed (path, mtime, size, inode; saves replace the
+    file, so the inode changes too): the sync loop checks the key every
+    SYNC_POLL_STEP. Failed derivations are not cached and retry next call."""
+    global _pubkey_cache
+    try:
+        st = os.stat(CONFIG_PATH)
+    except OSError:
+        return "Unknown"
+    stamp = (CONFIG_PATH, st.st_mtime_ns, st.st_size, st.st_ino)
+    cached = _pubkey_cache
+    if cached and cached[0] == stamp:
+        return cached[1]
+    try:
+        with open(CONFIG_PATH, 'r') as f:
+            config_content = f.read()
+        private_key_match = re.search(r'^\s*(?!#|;)\s*PrivateKey\s*=\s*(.+)', config_content, re.IGNORECASE | re.MULTILINE)
+        if private_key_match:
+            proc = subprocess.run(["wg", "pubkey"], input=private_key_match.group(1).strip().encode(), capture_output=True)
+            pubkey = proc.stdout.decode().strip() if proc.returncode == 0 else ""
+            if pubkey:
+                # Read after the stat: a save in between only makes the next
+                # call re-derive, never caches an old key under a new stamp.
+                _pubkey_cache = (stamp, pubkey)
+                return pubkey
+    except Exception:
+        pass
     return "Unknown"
 
 def _superseded(wg_pubkey):
     """True when the saved configuration no longer holds the key a sync ran
     for. Its result must then be dropped: save_configuration has reset the
     metadata for the new key, and writing the old key's answer would restore
-    a confirmation (or error) that belongs to a key no longer in use. A save
-    landing between this check and the write still self-heals: the stale
-    entry is bound to the old key (readers ignore it) and the sync loop wakes
-    on the key change and re-syncs."""
+    a confirmation (or error) that belongs to a key no longer in use. Checked
+    under meta_lock: save_configuration writes the configuration before it
+    takes the lock for its reset, so either this check sees the new key or
+    the save's reset lands after the write."""
     return get_wg_pubkey() != wg_pubkey
+
+def _bind_meta_to_key(meta, wg_pubkey):
+    """A confirmation belongs to the key it was confirmed for. A new key
+    (e.g. a freshly imported config) starts unconfirmed."""
+    if meta.get("publicKey") != wg_pubkey:
+        for stale in CONFIRMED_META_FIELDS:
+            meta.pop(stale, None)
+        meta["publicKey"] = wg_pubkey
+
+def _confirmed_since(meta, wg_pubkey, since):
+    """True when meta already holds a confirmation for wg_pubkey recorded at
+    or after `since` (by a concurrent sync)."""
+    if meta.get("publicKey") != wg_pubkey or meta.get("syncSuccess") is not True:
+        return False
+    try:
+        last = datetime.fromisoformat(str(meta.get("lastSync")).replace("Z", "+00:00"))
+    except ValueError:
+        return False
+    if last.tzinfo is None:
+        last = last.replace(tzinfo=timezone.utc)
+    return last >= since
 
 def lazy_sync(wg_pubkey):
     """Refreshes the confirmed subscription state for wg_pubkey.
@@ -257,23 +332,8 @@ def lazy_sync(wg_pubkey):
         method="POST"
     )
 
-    meta = {}
+    started_at = datetime.now(timezone.utc)
     try:
-        # Load existing metadata if it exists
-        if os.path.exists(META_FILE_PATH):
-            try:
-                with open(META_FILE_PATH, 'r') as f:
-                    meta = json.load(f)
-            except Exception:
-                pass
-
-        # A confirmation belongs to the key it was confirmed for. A new key
-        # (e.g. a freshly imported config) starts unconfirmed.
-        if meta.get("publicKey") != wg_pubkey:
-            for stale in CONFIRMED_META_FIELDS:
-                meta.pop(stale, None)
-            meta["publicKey"] = wg_pubkey
-
         response_data = None
         for attempt in range(5):
             try:
@@ -299,30 +359,35 @@ def lazy_sync(wg_pubkey):
             raise ValueError("TunnelSats API returned no valid expiry for this key")
 
         # The only writer of a confirmed expiry. Never the # Valid Until comment.
-        meta["expiresAt"] = expiry
-        meta["expirySource"] = "api"
+        fields = {"expiresAt": expiry, "expirySource": "api"}
 
         server_domain = response_data.get("server_domain")
         if server_domain:
-            meta["serverDomain"] = server_domain
+            fields["serverDomain"] = server_domain
 
         vpn_port = response_data.get("vpn_port")
         if vpn_port:
-            meta["vpnPort"] = vpn_port
+            fields["vpnPort"] = vpn_port
 
         if "bandwidth_used_gb" in response_data:
             try:
-                meta["bandwidth_used_gb"] = float(response_data["bandwidth_used_gb"])
+                fields["bandwidth_used_gb"] = float(response_data["bandwidth_used_gb"])
             except (ValueError, TypeError):
                 pass
 
-        meta["lastSync"] = datetime.now(timezone.utc).isoformat()
-        meta["syncSuccess"] = True
-        meta["syncError"] = None
-        if _superseded(wg_pubkey):
-            print("Subscription sync result dropped: the configured key changed", file=sys.stderr)
-            return "superseded"
-        atomic_write_json(META_FILE_PATH, meta)
+        with meta_lock():
+            if _superseded(wg_pubkey):
+                print("Subscription sync result dropped: the configured key changed", file=sys.stderr)
+                return "superseded"
+            # Merge into a fresh read: the request can take a minute, and
+            # other writers may have updated the file meanwhile.
+            meta = read_meta()
+            _bind_meta_to_key(meta, wg_pubkey)
+            meta.update(fields)
+            meta["lastSync"] = datetime.now(timezone.utc).isoformat()
+            meta["syncSuccess"] = True
+            meta["syncError"] = None
+            atomic_write_json(META_FILE_PATH, meta)
         return "confirmed"
 
     except Exception as e:
@@ -330,15 +395,23 @@ def lazy_sync(wg_pubkey):
         # never substitute the comment.
         err_msg = str(e)
         print(f"Error during lazy subscription sync: {err_msg}", file=sys.stderr)
-        if _superseded(wg_pubkey):
-            return "superseded"
-        meta["syncSuccess"] = False
-        meta["syncError"] = err_msg
-        meta["lastSyncAttempt"] = datetime.now(timezone.utc).isoformat()
         try:
-            atomic_write_json(META_FILE_PATH, meta)
-        except Exception:
-            pass
+            with meta_lock():
+                if _superseded(wg_pubkey):
+                    return "superseded"
+                meta = read_meta()
+                if _confirmed_since(meta, wg_pubkey, started_at):
+                    # A concurrent sync (health check, forced sync) confirmed
+                    # this key after this attempt started; its answer is newer.
+                    print("Subscription sync failure not recorded: a concurrent sync confirmed this key", file=sys.stderr)
+                    return "failed"
+                _bind_meta_to_key(meta, wg_pubkey)
+                meta["syncSuccess"] = False
+                meta["syncError"] = err_msg
+                meta["lastSyncAttempt"] = datetime.now(timezone.utc).isoformat()
+                atomic_write_json(META_FILE_PATH, meta)
+        except Exception as write_error:
+            print(f"Could not record the subscription sync failure: {write_error}", file=sys.stderr)
         return "failed"
 
 SYNC_POLL_STEP = 30
