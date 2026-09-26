@@ -61,6 +61,31 @@ test('bootstrap: a node that already runs a tunnel is asked to turn off first', 
   assert.deepEqual(plan.next, { activeTarget: null, pendingOff: ['lnd'] })
 })
 
+test('bootstrap: a VPN TunnelSats did not configure is left alone and does not block activation', () => {
+  const plan = planClearnetVpnTasks({
+    desired: desired('lnd'),
+    state: null,
+    installed: ALL_INSTALLED,
+    nodeVpn: { 'c-lightning': 'foreign', eclair: 'off' },
+  })
+  assert.equal(plan.on?.packageId, 'lnd')
+  assert.equal(plan.held, null)
+  assert.deepEqual(plan.off, [])
+  assert.deepEqual(plan.retire, ['c-lightning', 'eclair'])
+})
+
+test('a tracked node that now runs a foreign VPN is no longer ours to turn off', () => {
+  const plan = planClearnetVpnTasks({
+    desired: desired('c-lightning'),
+    state: { activeTarget: null, pendingOff: ['lnd'] },
+    installed: ALL_INSTALLED,
+    nodeVpn: { lnd: 'foreign' },
+  })
+  assert.equal(plan.on?.packageId, 'c-lightning')
+  assert.deepEqual(plan.off, [])
+  assert.deepEqual(plan.retire, ['lnd'])
+})
+
 test('bootstrap: a node whose state cannot be read holds the on-task (fail closed)', () => {
   const plan = planClearnetVpnTasks({
     desired: desired('lnd'),
@@ -302,14 +327,63 @@ test('task inputs follow the node clearnet-vpn contract', () => {
   })
 })
 
-test('readNodeVpnState reads the node clearnet-vpn input, unknown when unreadable', () => {
-  assert.equal(readNodeVpnState({ config: CONF, announce: 'h:1' }), 'on')
-  assert.equal(readNodeVpnState({ config: null, announce: null }), 'off')
-  assert.equal(readNodeVpnState({ config: '   ' }), 'off')
-  assert.equal(readNodeVpnState({}), 'off')
-  assert.equal(readNodeVpnState(null), 'unknown')
-  assert.equal(readNodeVpnState(undefined), 'unknown')
-  assert.equal(readNodeVpnState({ config: 42 }), 'unknown')
+test('readNodeVpnState only claims TunnelSats-owned tunnels, unknown when unreadable', () => {
+  const OWN =
+    '[Interface]\nPrivateKey = OWNKEY=\n[Peer]\nEndpoint = 203.0.113.7:51820\n'
+  const conf = (key: string, endpoint: string) =>
+    `[Interface]\nPrivateKey = ${key}\nAddress = 10.9.0.2/32\n[Peer]\nEndpoint = ${endpoint}\n`
+  // TunnelSats endpoint, any key (e.g. a previous subscription's key)
+  assert.equal(
+    readNodeVpnState(
+      { config: conf('OLDKEY=', 'de2.tunnelsats.com:51820') },
+      OWN,
+    ),
+    'on',
+  )
+  assert.equal(
+    readNodeVpnState(
+      { config: conf('OLDKEY=', 'DE2.TunnelSats.com:51820') },
+      null,
+    ),
+    'on',
+  )
+  // Our current key, even behind a bare IP endpoint
+  assert.equal(
+    readNodeVpnState({ config: conf('OWNKEY=', '203.0.113.7:51820') }, OWN),
+    'on',
+  )
+  // Someone else's VPN
+  assert.equal(
+    readNodeVpnState({ config: conf('OTHER=', 'vpn.example.com:51820') }, OWN),
+    'foreign',
+  )
+  assert.equal(
+    readNodeVpnState(
+      { config: conf('OTHER=', 'eviltunnelsats.com:51820') },
+      OWN,
+    ),
+    'foreign',
+  )
+  assert.equal(
+    readNodeVpnState({ config: conf('OTHER=', '[2001:db8::1]:51820') }, OWN),
+    'foreign',
+  )
+  // A commented-out key never matches
+  assert.equal(
+    readNodeVpnState(
+      {
+        config: '# PrivateKey = OWNKEY=\n[Peer]\nEndpoint = 203.0.113.7:51820',
+      },
+      OWN,
+    ),
+    'foreign',
+  )
+  assert.equal(readNodeVpnState({ config: null, announce: null }, OWN), 'off')
+  assert.equal(readNodeVpnState({ config: '   ' }, OWN), 'off')
+  assert.equal(readNodeVpnState({}, OWN), 'off')
+  assert.equal(readNodeVpnState(null, OWN), 'unknown')
+  assert.equal(readNodeVpnState(undefined, OWN), 'unknown')
+  assert.equal(readNodeVpnState({ config: 42 }, OWN), 'unknown')
 })
 
 test('executeClearnetVpnPlan raises on/off, clears retired, and reports failures separately', async () => {

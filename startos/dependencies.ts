@@ -330,6 +330,7 @@ function serializeHandoff<T>(fn: () => Promise<T>): Promise<T> {
 async function readNodeVpnStates(
   effects: Parameters<typeof sdk.checkDependencies>[0],
   nodes: readonly PackageId[],
+  ownConf: string | null | undefined,
 ): Promise<Partial<Record<PackageId, NodeVpnState>>> {
   const states: Partial<Record<PackageId, NodeVpnState>> = {}
   for (const p of nodes) {
@@ -338,7 +339,12 @@ async function readNodeVpnStates(
         packageId: p,
         actionId: CLEARNET_VPN_ACTION_ID,
       })
-      states[p] = readNodeVpnState(input?.value)
+      states[p] = readNodeVpnState(input?.value, ownConf)
+      if (states[p] === 'foreign') {
+        console.info(
+          `TunnelSats: ${p} runs a VPN TunnelSats did not configure; leaving it alone`,
+        )
+      }
     } catch (e) {
       console.warn(
         `TunnelSats: could not read the clearnet-vpn state of ${p}; treating it as on:`,
@@ -390,7 +396,11 @@ async function handOffClearnetVpn(
   const desired = getTargetVpnConfig(config)
   const nodes = previousNodes(state, installed, handedOverTarget(desired))
   await watchPreviousNodes(effects, nodes)
-  const nodeVpn = await readNodeVpnStates(effects, nodes)
+  const nodeVpn = await readNodeVpnStates(
+    effects,
+    nodes,
+    config?.['tunnelsats-conf'],
+  )
 
   const plan = planClearnetVpnTasks({ desired, state, installed, nodeVpn })
   if (plan.held) {

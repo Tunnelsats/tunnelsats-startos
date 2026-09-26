@@ -12,6 +12,7 @@
  * Whether a node is off is read from the node itself: the current input of
  * its clearnet-vpn action (effects.action.getInput), the same value StartOS
  * compares a task against. Anything unreadable counts as on (fail closed).
+ * Only a TunnelSats tunnel counts; a VPN we did not configure is left alone.
  *
  * StartOS does not reap tasks that are not re-raised, and it hides tasks on
  * packages that are not current dependencies, so every node that still owes
@@ -64,8 +65,12 @@ export interface DesiredVpn {
   wgConf: string
 }
 
-/** A node's clearnet-vpn state as read from its action input. */
-export type NodeVpnState = 'on' | 'off' | 'unknown'
+/**
+ * A node's clearnet-vpn state as read from its action input: 'on' is a
+ * TunnelSats tunnel, 'foreign' a VPN TunnelSats did not configure (never
+ * ours to turn off), 'unknown' unreadable (treated as on).
+ */
+export type NodeVpnState = 'on' | 'off' | 'foreign' | 'unknown'
 
 export interface ClearnetVpnPlan {
   on: { packageId: PackageId; config: string; announce: string } | null
@@ -129,7 +134,8 @@ export function planClearnetVpnTasks(params: {
   const off: PackageId[] = []
   const retire: PackageId[] = []
   for (const p of previousNodes(params.state, installed, target)) {
-    if (!installed.includes(p) || nodeVpn[p] === 'off') {
+    const vpn = nodeVpn[p]
+    if (!installed.includes(p) || vpn === 'off' || vpn === 'foreign') {
       retire.push(p)
     } else {
       off.push(p)
@@ -170,18 +176,48 @@ export function buildOffTaskInput() {
   }
 }
 
+const PRIVATE_KEY_LINE = /^[ \t]*PrivateKey[ \t]*=[ \t]*(\S+)/im
+const ENDPOINT_LINE = /^[ \t]*Endpoint[ \t]*=[ \t]*(\S+)/im
+
+function endpointHost(endpoint: string): string {
+  if (endpoint.startsWith('[')) {
+    const end = endpoint.indexOf(']')
+    return end === -1 ? endpoint : endpoint.slice(1, end)
+  }
+  return endpoint.replace(/:\d+$/, '')
+}
+
+/**
+ * A tunnel TunnelSats handed out: it uses our current WireGuard key, or it
+ * peers with a TunnelSats server (covers a previous subscription's key).
+ */
+export function isTunnelsatsTunnel(
+  config: string,
+  ownConf: string | null | undefined,
+): boolean {
+  const ownKey = ownConf?.match(PRIVATE_KEY_LINE)?.[1]
+  if (ownKey && config.match(PRIVATE_KEY_LINE)?.[1] === ownKey) return true
+  const endpoint = config.match(ENDPOINT_LINE)?.[1]
+  if (!endpoint) return false
+  const host = endpointHost(endpoint).toLowerCase()
+  return host === 'tunnelsats.com' || host.endsWith('.tunnelsats.com')
+}
+
 /**
  * A node's clearnet-vpn state from its current action input
- * (`{ config, announce }`). Unreadable or unexpected input is unknown.
+ * (`{ config, announce }`). `ownConf` is the WireGuard config TunnelSats
+ * holds. Unreadable or unexpected input is unknown.
  */
 export function readNodeVpnState(
   value: Record<string, unknown> | null | undefined,
+  ownConf: string | null | undefined,
 ): NodeVpnState {
   if (!value) return 'unknown'
   const config = value.config
   if (config === null || config === undefined) return 'off'
   if (typeof config !== 'string') return 'unknown'
-  return config.trim() ? 'on' : 'off'
+  if (!config.trim()) return 'off'
+  return isTunnelsatsTunnel(config, ownConf) ? 'on' : 'foreign'
 }
 
 export interface ClearnetVpnOps {
