@@ -31,6 +31,8 @@ STATUS_NOT_FOUND_CODE = "ERR_RESOURCE_NOT_FOUND"
 # How long a key the API confirmed before must keep answering "not found"
 # before it counts as unknown. The endpoint also answers 404 while one of
 # its servers is unreachable, so a single answer proves nothing for it.
+# Once tunnelsats-v2-web#309 ships (503 when a server check errored), a 404
+# is definitive and this grace period can go.
 UNKNOWN_KEY_CONFIRM_AFTER = timedelta(hours=24)
 UNKNOWN_KEY_MESSAGE = (
     "TunnelSats has no subscription for the WireGuard key in this configuration. "
@@ -324,6 +326,9 @@ def apply_vpn_port(port):
     re-raised with the new announce address. Caller holds meta_lock and has
     checked the key is still current (_superseded).
 
+    Inactive until the status endpoint returns vpn_port
+    (tunnelsats-v2-web#308).
+
     Returns "unchanged", "updated", "conflict" (config.json holds another
     configuration: the TypeScript actions write it without meta_lock, first
     config.json, then the conf file, so a save is in flight and wins),
@@ -466,6 +471,8 @@ def lazy_sync(wg_pubkey, require_usage=False):
         if server_domain:
             fields["serverDomain"] = server_domain
 
+        # The status endpoint does not return vpn_port yet; the port
+        # rewrite (apply_vpn_port) activates once tunnelsats-v2-web#308 ships.
         vpn_port = valid_vpn_port(response_data.get("vpn_port"))
         if vpn_port is not None:
             fields["vpnPort"] = vpn_port
@@ -550,8 +557,8 @@ def _record_not_found(wg_pubkey, started_at):
     imported config whose key TunnelSats does not know). A key it confirmed
     before is declared unknown only once the answers have persisted for
     UNKNOWN_KEY_CONFIRM_AFTER, because the endpoint also answers 404 while
-    one of its servers is unreachable; until then its last confirmed expiry
-    is kept. Declaring drops the confirmation: the API's latest definitive
+    one of its servers is unreachable (tunnelsats-v2-web#309 changes that
+    to a 503); until then its last confirmed expiry is kept. Declaring drops the confirmation: the API's latest definitive
     answer is that the key has no subscription."""
     try:
         with meta_lock():
