@@ -413,13 +413,27 @@ class TestRenewalSettlement(SettlementTestBase):
         self.assertEqual(self.only(self.settle())["result"], "expired")
         self.assertNotIn("pendingRenewal", self.read_meta())
 
-    def test_legacy_renewal_without_node_clears_no_task(self):
+    def test_paid_legacy_renewal_is_never_confirmed_with_the_current_key(self):
+        # Recorded by an earlier version: neither the key it was paid for nor
+        # its node is known. The configured key's expiry proves nothing
+        # about it, so it is released (TunnelSats applies it to its key)
+        # instead of being reported as renewed.
         self.write_meta({"pendingRenewal": self.pending_renewal(targetNode=None, publicKey=None)})
         self.api.on("GET", f"/subscription/{RENEW_HASH}", response({"status": "paid"}))
         self.api.on("POST", "/subscription/status", response({"expiry": "2026-11-01T00:00:00.000Z"}))
         result = self.settle()
-        self.assertEqual(self.only(result)["result"], "renewed")
+        outcome = self.only(result)
+        self.assertEqual(outcome["result"], "superseded")
+        self.assertIn("earlier version", outcome["message"])
+        self.assertNotIn("pendingRenewal", self.read_meta())
         self.assertEqual(result["clearPayTasks"], [])
+        self.assertNotIn(("POST", "/subscription/status"), [(m, p) for m, p, _ in self.api.requests])
+
+    def test_unpaid_legacy_renewal_still_waits_and_expires(self):
+        self.write_meta({"pendingRenewal": self.pending_renewal(targetNode=None, publicKey=None)})
+        self.api.on("GET", f"/subscription/{RENEW_HASH}", response({"status": "pending"}))
+        self.assertEqual(self.only(self.settle())["result"], "waiting")
+        self.assertEqual(self.only(self.settle(now=NOW + timedelta(hours=25)))["result"], "expired")
 
     def test_order_and_renewal_settle_in_the_same_tick(self):
         self.write_meta({"pendingRenewal": self.pending_renewal(),

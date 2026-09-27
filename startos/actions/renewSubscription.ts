@@ -89,24 +89,9 @@ export const renewSubscription = sdk.Action.withInput(
     const targetNode = config['target-node'] || 'lnd'
     const { packageId, payInvoiceAction } = resolvePayInvoice(targetNode)
 
-    // Recorded before the task exists, like Buy: the settlement tick tracks
-    // the renewal from the moment its invoice can be paid.
-    await tunnelsatsMeta.merge(effects, {
-      pendingRenewal: {
-        paymentHash: renewal.paymentHash,
-        renewalId: renewal.renewalId,
-        oldExpiry: renewal.oldExpiry,
-        newExpiry: renewal.newExpiry,
-        createdAt: new Date().toISOString(),
-        publicKey,
-        targetNode,
-        // merge() is a deep merge: without these, a backoff left by an
-        // earlier renewal would delay settling this one.
-        lastError: undefined,
-        nextAttemptAt: undefined,
-      },
-    })
-
+    // The task is raised before pendingRenewal is replaced, so an earlier
+    // renewal stays tracked if raising it fails. Unlike Buy, a renewal holds
+    // no key that must be stored before its invoice can be paid.
     await sdk.action.createTask(
       effects,
       packageId,
@@ -127,6 +112,22 @@ export const renewSubscription = sdk.Action.withInput(
         reason: i18n('Pay TunnelSats VPN subscription renewal invoice'),
       },
     )
+
+    await tunnelsatsMeta.merge(effects, {
+      pendingRenewal: {
+        paymentHash: renewal.paymentHash,
+        renewalId: renewal.renewalId,
+        oldExpiry: renewal.oldExpiry,
+        newExpiry: renewal.newExpiry,
+        createdAt: new Date().toISOString(),
+        publicKey,
+        targetNode,
+        // merge() is a deep merge: without these, a backoff left by an
+        // earlier renewal would delay settling this one.
+        lastError: undefined,
+        nextAttemptAt: undefined,
+      },
+    })
     await clearReplacedPayTask(
       effects,
       replacedPayTaskId('renewal', meta?.pendingRenewal, renewal.paymentHash),

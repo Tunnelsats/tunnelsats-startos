@@ -787,10 +787,16 @@ def _settle_renewal(pending, now):
     if state != "paid":
         return _unpaid("renewal", "pendingRenewal", pending, state, now)
 
-    configured = get_wg_pubkey()
-    # Renewals recorded before publicKey existed were for the key configured then.
-    key = pending.get("publicKey") or configured
-    if key != configured:
+    key = pending.get("publicKey")
+    if not key:
+        # Recorded by an earlier version without the key it was paid for.
+        # The configured key's expiry proves nothing about it, so it is
+        # released rather than reported as renewed.
+        _finish_pending("pendingRenewal", payment_hash)
+        return _outcome("renewal", "superseded",
+                        "A renewal from an earlier version was paid; TunnelSats applies it to the key it was "
+                        "bought for. Check the expiry under Subscription Status.", payment_hash)
+    if key != get_wg_pubkey():
         _finish_pending("pendingRenewal", payment_hash)
         return _outcome("renewal", "superseded",
                         "The renewal was paid for a key that is no longer configured.", payment_hash)
