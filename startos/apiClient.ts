@@ -49,6 +49,35 @@ export interface RenewalOrder {
   renewalId: string
 }
 
+export interface BandwidthResetOrder {
+  invoice: string
+  paymentHash: string
+  resetId: string
+  amountSats: number
+  /** When the invoice expires; until then it also holds a monthly reset. */
+  expiresAt: string
+  /** Display only. */
+  currentUsagePercent?: number
+  resetsThisMonth?: number
+  maxResetsPerMonth?: number
+}
+
+/**
+ * A non-2xx answer from the TunnelSats API. The message keeps the historic
+ * `HTTP <status> from <url>: <message>` form; `status` and `apiMessage` let
+ * callers explain specific answers.
+ */
+export class ApiHttpError extends Error {
+  constructor(
+    readonly status: number,
+    readonly url: string,
+    readonly apiMessage: string,
+  ) {
+    super(`HTTP ${status} from ${url}: ${apiMessage}`)
+    this.name = 'ApiHttpError'
+  }
+}
+
 /**
  * Helper to make JSON HTTP requests with timeout.
  */
@@ -80,8 +109,10 @@ async function fetchJson<T>(
       } catch {
         errorBody = await response.text().catch(() => '')
       }
-      throw new Error(
-        `HTTP ${response.status} from ${url}: ${errorBody || response.statusText}`,
+      throw new ApiHttpError(
+        response.status,
+        url,
+        String(errorBody || response.statusText),
       )
     }
 
@@ -331,6 +362,73 @@ export async function requestRenewal(
     method: 'POST',
     body: JSON.stringify(params),
   })
+}
+
+/** A BOLT11 invoice: `ln` + bech32 characters (lowercase), nothing else. */
+const BOLT11 = /^ln[0-9a-z]{16,4000}$/
+const PAYMENT_HASH = /^[0-9a-f]{64}$/
+/** ISO 8601 with an explicit zone, as JSON dates are serialized. */
+const ISO_TIMESTAMP =
+  /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?(Z|[+-]\d{2}:\d{2})$/
+
+/**
+ * Requests a bandwidth reset invoice for an existing WireGuard public key.
+ * Each successful request reserves one of the monthly resets until its
+ * invoice expires, so callers should show a still-valid invoice again
+ * instead of requesting another.
+ *
+ * The answer is validated: the invoice is handed to the Lightning node and
+ * the hash names the pending payment on the device. `expiresAt` is required:
+ * without it a pending invoice cannot be safely shown again, and only a
+ * backend that reports typed reset status (needed to settle it) returns it.
+ */
+export async function requestBandwidthReset(
+  params: { wgPublicKey: string; serverId: string },
+  baseUrl = DEFAULT_API_BASE,
+): Promise<BandwidthResetOrder> {
+  const url = `${baseUrl.replace(/\/$/, '')}/api/public/v1/subscription/bandwidth-reset`
+  const raw = await fetchJson<Record<string, unknown>>(url, {
+    method: 'POST',
+    body: JSON.stringify(params),
+  })
+  const bad = (field: string) =>
+    new Error(`TunnelSats API returned an invalid bandwidth reset ${field}`)
+
+  const { invoice, paymentHash, resetId, amountSats, expiresAt } = raw ?? {}
+  if (typeof invoice !== 'string' || !BOLT11.test(invoice)) throw bad('invoice')
+  if (typeof paymentHash !== 'string' || !PAYMENT_HASH.test(paymentHash))
+    throw bad('payment hash')
+  if (typeof resetId !== 'string' || !resetId) throw bad('ID')
+  if (
+    typeof amountSats !== 'number' ||
+    !Number.isSafeInteger(amountSats) ||
+    amountSats <= 0
+  )
+    throw bad('amount')
+  if (
+    typeof expiresAt !== 'string' ||
+    !ISO_TIMESTAMP.test(expiresAt) ||
+    Number.isNaN(Date.parse(expiresAt))
+  )
+    throw bad('expiry')
+
+  const usage = Number(raw.currentUsagePercent)
+  const count = (v: unknown) =>
+    typeof v === 'number' && Number.isSafeInteger(v) && v >= 0 ? v : undefined
+  return {
+    invoice,
+    paymentHash,
+    resetId,
+    amountSats,
+    // Normalized, so bridge.py and the action read the same instant.
+    expiresAt: new Date(expiresAt).toISOString(),
+    currentUsagePercent:
+      raw.currentUsagePercent != null && Number.isFinite(usage)
+        ? usage
+        : undefined,
+    resetsThisMonth: count(raw.resetsThisMonth),
+    maxResetsPerMonth: count(raw.maxResetsPerMonth),
+  }
 }
 
 /**
