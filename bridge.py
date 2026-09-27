@@ -196,12 +196,14 @@ def generate_wg_keypair():
 
 TARGET_NODES = ("lnd", "cln", "eclair")
 
-def save_configuration(conf_content, target_node="lnd", clear_pending_order=None):
+def save_configuration(conf_content, target_node="lnd", clear_pending_order=None, provisioned_key=None):
     """Saves a WireGuard configuration for target_node and resets the
     metadata for it. clear_pending_order (a payment hash) is set by the
     settlement watcher: when it still matches pendingOrder, the settled order
     and its private key are dropped in the same locked write, and its pay
-    task is queued for clearing.
+    task is queued for clearing. provisioned_key (the public key the settled
+    order was claimed for) is recorded as provisionedKey: TunnelSats issued
+    that key, so _record_not_found gives it the long grace.
 
     The configuration is stored exactly as given: the node's clearnet-vpn
     task accepts this string verbatim, so rewriting it (e.g. stripping the
@@ -240,8 +242,10 @@ def save_configuration(conf_content, target_node="lnd", clear_pending_order=None
         # order that may not be claimed yet.
         meta = read_meta()
         for stale in KEY_BOUND_META_FIELDS + ("publicKey", "syncError", "lastSyncAttempt",
-                                              "serverDomain", "vpnPort"):
+                                              "serverDomain", "vpnPort", "provisionedKey"):
             meta.pop(stale, None)
+        if provisioned_key:
+            meta["provisionedKey"] = provisioned_key
         meta.update(hints)
         meta["lastSync"] = None
         meta["syncSuccess"] = False
@@ -608,9 +612,9 @@ def _record_not_found(wg_pubkey, started_at):
     confirmation or an operational failure ends the run. The endpoint also
     answers 404 while one of its servers is unreachable (tunnelsats-v2-web#309
     changes that to a 503), so a key is declared unknown only once the run
-    has lasted NEW_KEY_UNKNOWN_AFTER (a key the API never confirmed) or
-    UNKNOWN_KEY_CONFIRM_AFTER (a key it confirmed before, whose confirmed
-    expiry is kept until then). Declaring drops the confirmation: the API's
+    has lasted NEW_KEY_UNKNOWN_AFTER (a key the API never confirmed, e.g. an
+    import) or UNKNOWN_KEY_CONFIRM_AFTER (a key it confirmed before, whose
+    confirmed expiry is kept until then, or the key of a settled purchase). Declaring drops the confirmation: the API's
     latest definitive answer is that the key has no subscription."""
     try:
         with meta_lock():
@@ -624,8 +628,9 @@ def _record_not_found(wg_pubkey, started_at):
             _bind_meta_to_key(meta, wg_pubkey)
             now = datetime.now(timezone.utc)
             since = _parse_iso(meta.get("notFoundSince")) or now
-            grace = (UNKNOWN_KEY_CONFIRM_AFTER if meta.get("expirySource") == "api"
-                     else NEW_KEY_UNKNOWN_AFTER)
+            known_to_exist = (meta.get("expirySource") == "api"
+                              or meta.get("provisionedKey") == wg_pubkey)
+            grace = UNKNOWN_KEY_CONFIRM_AFTER if known_to_exist else NEW_KEY_UNKNOWN_AFTER
             declared = meta.get("keyUnknown") is True or now - since >= grace
             meta["notFoundSince"] = _iso(since)
             meta["lastSyncAttempt"] = now.isoformat()
@@ -1008,7 +1013,8 @@ def _settle_order(pending, now):
     # one is at best unpaid. Skipping it would lose a paid tunnel for good.
     # save_configuration's hash check keeps the newer pendingOrder, which
     # the next tick settles (and applies) once it is paid.
-    save_configuration(conf, pending.get("targetNode"), clear_pending_order=payment_hash)
+    save_configuration(conf, pending.get("targetNode"), clear_pending_order=payment_hash,
+                       provisioned_key=pending.get("publicKey"))
     return _outcome("order", "provisioned", "The new tunnel was configured.", payment_hash)
 
 

@@ -22,6 +22,8 @@ export const metaShape = z.object({
   keyUnknown: z.boolean().optional().catch(undefined),
   /** First "not found" answer since the last confirmation (bridge.py). */
   notFoundSince: z.string().optional().catch(undefined),
+  /** Public key of the last settled purchase (bridge.py save_configuration). */
+  provisionedKey: z.string().optional().catch(undefined),
   pendingOrder: z
     .object({
       paymentHash: z.string(),

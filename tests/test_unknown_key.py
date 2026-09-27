@@ -118,6 +118,29 @@ class TestNotFoundAnswer(UnknownKeyBase):
         self.assertIn("no subscription", meta["syncError"])
         self.assertNotIn("expiresAt", meta)
 
+    @patch('urllib.request.urlopen')
+    def test_a_purchased_key_gets_the_long_grace(self, urlopen):
+        # The key of a settled purchase is known to exist: a run of 404s past
+        # the short grace is an outage, not a mistyped import.
+        since = iso(datetime.now(timezone.utc) - bridge.NEW_KEY_UNKNOWN_AFTER - timedelta(hours=1))
+        self.write_meta({"publicKey": "pk_current", "provisionedKey": "pk_current",
+                         "syncSuccess": False, "notFoundSince": since})
+        urlopen.side_effect = http_error(404, NOT_FOUND_BODY)
+        self.assertEqual(bridge.lazy_sync("pk_current"), "not-found")
+        self.assertNotIn("keyUnknown", self.read_meta())
+        # Only for that key.
+        self.write_meta({"publicKey": "pk_current", "provisionedKey": "pk_other",
+                         "syncSuccess": False, "notFoundSince": since})
+        urlopen.side_effect = http_error(404, NOT_FOUND_BODY)
+        self.assertEqual(bridge.lazy_sync("pk_current"), "unknown-key")
+
+    def test_a_settled_purchase_records_its_key_and_an_import_drops_it(self):
+        bridge.save_configuration(CONF, "lnd", clear_pending_order="f" * 64,
+                                  provisioned_key="pk_current")
+        self.assertEqual(self.read_meta()["provisionedKey"], "pk_current")
+        bridge.save_configuration(CONF, "lnd")
+        self.assertNotIn("provisionedKey", self.read_meta())
+
     def test_the_short_grace_is_shorter_than_the_confirmed_one(self):
         self.assertLess(bridge.NEW_KEY_UNKNOWN_AFTER, bridge.UNKNOWN_KEY_CONFIRM_AFTER)
         # The retry after a not-found answer lands after the short grace, so
