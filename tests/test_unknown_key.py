@@ -316,6 +316,15 @@ class TestUnknownKeyReporting(UnknownKeyBase):
         self.assertIs(bridge.get_subscription_info("pk_other")["keyUnknown"], False)
 
     @patch('bridge.is_enabled', return_value=True)
+    def test_dashboard_status_names_the_unknown_key(self, _enabled):
+        self.write_meta({"publicKey": "pk_current", "keyUnknown": True, "syncSuccess": False,
+                         "syncError": bridge.UNKNOWN_KEY_MESSAGE})
+        status = bridge.get_status()
+        self.assertEqual(status["status"], "unknown_key")
+        self.assertIs(status["key_unknown"], True)
+        self.assertEqual(status["sync_error"], bridge.UNKNOWN_KEY_MESSAGE)
+
+    @patch('bridge.is_enabled', return_value=True)
     @patch('bridge.lazy_sync')
     @patch('sys.stdout', new_callable=io.StringIO)
     def test_health_names_the_unknown_key(self, stdout, lazy_sync, _enabled):

@@ -654,6 +654,32 @@ def _record_not_found(wg_pubkey, started_at):
 
 SYNC_POLL_STEP = 30
 
+def vpn_port_pending(wg_pubkey):
+    """True while the API confirmed a forwarded port for wg_pubkey that the
+    stored conf file's marker does not hold yet: apply_vpn_port conflicted,
+    failed or was interrupted. Only a port from a confirmed sync counts
+    (save_configuration's marker hint equals the marker by definition)."""
+    meta = read_meta()
+    if meta.get("publicKey") != wg_pubkey or meta.get("expirySource") != "api":
+        return False
+    port = valid_vpn_port(meta.get("vpnPort"))
+    if port is None:
+        return False
+    try:
+        with open(CONFIG_PATH, "r") as f:
+            stored = f.read()
+    except OSError:
+        return False
+    return rewrite_vpn_port(stored, port) is not None
+
+def sync_wait_outcome(outcome, wg_pubkey):
+    """The outcome the background loop waits on: a confirmation whose port
+    rewrite did not land is retried after minutes, not after a day, since
+    the node announces the old port meanwhile."""
+    if outcome == "confirmed" and vpn_port_pending(wg_pubkey):
+        return "port-pending"
+    return outcome
+
 def next_sync_delay(outcome):
     """Seconds until the next background sync. Only a confirmation earns
     the long wait; a superseded sync re-runs almost at once for the new key.
@@ -664,6 +690,8 @@ def next_sync_delay(outcome):
         return 86400
     if outcome == "superseded":
         return 5
+    if outcome == "port-pending":
+        return 300
     if outcome == "not-found":
         return 900
     if outcome == "unknown-key":
@@ -695,7 +723,7 @@ def subscription_sync_loop():
         pubkey = None
         try:
             pubkey = get_wg_pubkey()
-            outcome = lazy_sync(pubkey)
+            outcome = sync_wait_outcome(lazy_sync(pubkey), pubkey)
         except Exception as e:
             print(f"Error in subscription sync loop: {e}", file=sys.stderr)
             outcome = "failed"
@@ -1727,6 +1755,8 @@ def get_status():
         status = "expired"
     elif sub_info["linked"]:
         status = "running"
+    elif sub_info.get("keyUnknown"):
+        status = "unknown_key"
     elif sub_info.get("syncError"):
         status = "sync_error"
     else:
@@ -1751,6 +1781,7 @@ def get_status():
         "pubkey": current_pubkey if has_config else "None",
         "last_sync": sub_info["lastSync"],
         "sync_error": sub_info.get("syncError"),
+        "key_unknown": bool(sub_info.get("keyUnknown")),
         "bandwidth_used_gb": sub_info.get("bandwidthUsedGb", 0.0),
         "bandwidth_limit_gb": 100,
         "version": get_package_version(),

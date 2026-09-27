@@ -122,6 +122,12 @@ test('an earlier expiry for the same key keeps what was sent', () => {
   const plan = planNotifications(inputs({ expiry: at(5) }), sent, NOW)
   assert.deepEqual(plan.steps, [])
   assert.deepEqual(plan.next.sent, ['7d'])
+  // The period keeps its latest expiry, so a correction back to it is not
+  // mistaken for a renewal that re-announces the same threshold.
+  assert.equal(plan.next.expiresAt, at(6).toISOString())
+  const back = planNotifications(inputs({ expiry: at(6) }), plan.next, NOW)
+  assert.deepEqual(back.steps, [])
+  assert.deepEqual(back.next.sent, ['7d'])
 })
 
 test('a new key starts a new period', () => {

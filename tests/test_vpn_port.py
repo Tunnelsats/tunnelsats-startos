@@ -280,3 +280,48 @@ class TestSaveConfigurationHoldsTheLock(VpnPortBase):
 
 if __name__ == '__main__':
     unittest.main()
+
+
+class TestPortUpdateRetry(VpnPortBase):
+    """A confirmed sync whose port rewrite did not land is retried soon, not
+    after the daily wait: the node would announce a stale port meanwhile."""
+
+    def write_meta(self, meta):
+        with open(self.meta_path, "w") as f:
+            json.dump(meta, f)
+
+    def confirmed(self, **extra):
+        meta = {"publicKey": "pk_current", "expirySource": "api",
+                "expiresAt": "2099-01-01T00:00:00Z", "syncSuccess": True}
+        meta.update(extra)
+        return meta
+
+    def test_pending_while_the_marker_differs_from_the_confirmed_port(self):
+        self.write_meta(self.confirmed(vpnPort=30111))
+        self.assertTrue(bridge.vpn_port_pending("pk_current"))
+        self.assertEqual(bridge.sync_wait_outcome("confirmed", "pk_current"), "port-pending")
+        self.assertEqual(bridge.next_sync_delay("port-pending"), 300)
+
+    def test_not_pending_once_applied_or_without_a_confirmed_port(self):
+        self.write_meta(self.confirmed(vpnPort=24556))
+        self.assertFalse(bridge.vpn_port_pending("pk_current"))
+        self.write_meta(self.confirmed())
+        self.assertFalse(bridge.vpn_port_pending("pk_current"))
+        # A port hint for an unconfirmed key or another key never counts.
+        self.write_meta({"publicKey": "pk_current", "vpnPort": 30111})
+        self.assertFalse(bridge.vpn_port_pending("pk_current"))
+        self.write_meta(self.confirmed(vpnPort=30111))
+        self.assertFalse(bridge.vpn_port_pending("pk_other"))
+        self.assertEqual(bridge.sync_wait_outcome("confirmed", "pk_other"), "confirmed")
+
+    def test_only_a_confirmed_outcome_is_mapped(self):
+        self.write_meta(self.confirmed(vpnPort=30111))
+        self.assertEqual(bridge.sync_wait_outcome("failed", "pk_current"), "failed")
+
+    @patch('urllib.request.urlopen')
+    def test_a_conflicting_rewrite_leaves_the_port_pending(self, urlopen):
+        other = CONF.replace("10.9.0.2", "10.9.0.7")
+        self.write_app({"enabled": True, "tunnelsats-conf": other})
+        urlopen.return_value = api_response(status(vpn_port=30111))
+        self.assertEqual(bridge.lazy_sync("pk_current"), "confirmed")
+        self.assertEqual(bridge.sync_wait_outcome("confirmed", "pk_current"), "port-pending")

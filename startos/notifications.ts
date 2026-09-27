@@ -5,10 +5,10 @@
  *
  * sdk.notification.create is not idempotent, so what was sent is persisted
  * (subscription-notices.json) and each notice goes out once per period. A
- * period is one confirmed expiry of one key: a renewal (later expiry) or a
- * new key starts a new one. Only the most severe due stage is posted; the
- * milder ones count as sent, so a box that was off for a week reports the
- * lapse once instead of three notices at once.
+ * period is one confirmed expiry of one key: a renewal (an expiry later than
+ * any seen in the period) or a new key starts a new one. Only the most
+ * severe due stage is posted; the milder ones count as sent, so a box that
+ * was off for a week reports the lapse once instead of three notices.
  *
  * Delivery is at most once: a notice is recorded before it is posted and
  * the record is rolled back when posting fails. A failing state write thus
@@ -172,7 +172,10 @@ export function planNotifications(
       isNaN(prevExpiry.getTime()) ||
       expiry.getTime() > prevExpiry.getTime()
     base.publicKey = publicKey
-    base.expiresAt = expiry.toISOString()
+    // The period keeps the latest expiry it saw: a temporarily earlier
+    // answer and its correction back must not count as a renewal.
+    base.expiresAt =
+      newPeriod || !prevExpiry ? expiry.toISOString() : prevExpiry.toISOString()
     base.sent = newPeriod ? [] : sentStages(prev)
     const stage = expiryStage(expiry, now)
     if (stage && !base.sent.includes(stage)) stageDue = stage
