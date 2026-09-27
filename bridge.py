@@ -879,10 +879,13 @@ def _settle_reset(pending, now):
         _finish_pending("pendingReset", payment_hash)
         return _outcome("reset", "superseded",
                         "The bandwidth reset was applied to a key that is no longer configured.", payment_hash)
-    # Refresh the usage shown in StartOS; the reset stands even if this fails.
-    lazy_sync(key)
-    _finish_pending("pendingReset", payment_hash)
-    return _outcome("reset", "reset", "The bandwidth reset was applied.", payment_hash)
+    result = lazy_sync(key)
+    if result == "confirmed" or stale:
+        _finish_pending("pendingReset", payment_hash)
+        return _outcome("reset", "reset", "The bandwidth reset was applied.", payment_hash)
+    if result == "superseded":
+        return _outcome("reset", "waiting", "The configured key changed; checking again.", payment_hash)
+    raise SettlementError("The bandwidth reset was applied, but the refreshed usage could not be confirmed yet")
 
 
 _SETTLERS = {"order": _settle_order, "renewal": _settle_renewal, "reset": _settle_reset}

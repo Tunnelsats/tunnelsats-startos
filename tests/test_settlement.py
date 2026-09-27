@@ -566,6 +566,23 @@ class TestResetSettlement(SettlementTestBase):
         self.assertTrue(self.requested("POST", "/subscription/status"))
         self.assertEqual(meta["bandwidth_used_gb"], 0.4)
 
+    def test_paid_reset_retries_usage_refresh_until_confirmed(self):
+        self.write_meta({"pendingReset": self.pending_reset(), "bandwidth_used_gb": 85.0})
+        self.reset_status("paid")
+        self.api.on("POST", "/subscription/status",
+                    http_error("u", 503, {"message": "status unavailable"}))
+
+        first = self.only(self.settle())
+        self.assertEqual(first["result"], "failed")
+        self.assertIn("pendingReset", self.read_meta())
+
+        self.api.on("POST", "/subscription/status",
+                    response({"expiry": "2026-11-01T00:00:00.000Z", "bandwidth_used_gb": 0.0}))
+        second = self.only(self.settle(now=NOW + bridge.SETTLE_RETRY_DELAY))
+        self.assertEqual(second["result"], "reset")
+        self.assertNotIn("pendingReset", self.read_meta())
+        self.assertEqual(self.read_meta()["bandwidth_used_gb"], 0.0)
+
     def test_untyped_paid_from_the_old_fallback_never_counts_as_applied(self):
         # Before the backend knew reset hashes, a paid one fell through to
         # the order fallback ("paid, use /claim") without being applied.

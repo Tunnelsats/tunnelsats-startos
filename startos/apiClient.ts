@@ -78,14 +78,11 @@ export class ApiHttpError extends Error {
   }
 }
 
-/**
- * Helper to make JSON HTTP requests with timeout.
- */
-async function fetchJson<T>(
+async function fetchJsonWithStatus<T>(
   url: string,
   options: RequestInit = {},
   timeoutMs = 15000,
-): Promise<T> {
+): Promise<{ status: number; data: T }> {
   const controller = new AbortController()
   const id = setTimeout(() => controller.abort(), timeoutMs)
 
@@ -116,10 +113,21 @@ async function fetchJson<T>(
       )
     }
 
-    return (await response.json()) as T
+    return { status: response.status, data: (await response.json()) as T }
   } finally {
     clearTimeout(id)
   }
+}
+
+/**
+ * Helper to make JSON HTTP requests with timeout.
+ */
+async function fetchJson<T>(
+  url: string,
+  options: RequestInit = {},
+  timeoutMs = 15000,
+): Promise<T> {
+  return (await fetchJsonWithStatus<T>(url, options, timeoutMs)).data
 }
 
 /**
@@ -429,6 +437,48 @@ export async function requestBandwidthReset(
     resetsThisMonth: count(raw.resetsThisMonth),
     maxResetsPerMonth: count(raw.maxResetsPerMonth),
   }
+}
+
+export const RESET_STATES = [
+  'unpaid',
+  'processing',
+  'paid',
+  'failed',
+  'expired',
+] as const
+export type ResetState = (typeof RESET_STATES)[number] | 'unknown'
+
+/**
+ * The state of a bandwidth-reset payment, as bridge.py's _reset_state reads
+ * it: only an answer typed `bandwidth_reset` counts (an untyped `paid` is the
+ * order fallback of a backend that does not know resets); 404 is 'unknown'.
+ */
+export async function fetchBandwidthResetStatus(
+  paymentHash: string,
+  baseUrl = DEFAULT_API_BASE,
+): Promise<ResetState> {
+  const url = `${baseUrl.replace(/\/$/, '')}/api/public/v1/subscription/${encodeURIComponent(paymentHash)}`
+  let status: number
+  let data: Record<string, unknown>
+  try {
+    ;({ status, data } = await fetchJsonWithStatus<Record<string, unknown>>(
+      url,
+      { method: 'GET' },
+    ))
+  } catch (e) {
+    if (e instanceof ApiHttpError && e.status === 404) return 'unknown'
+    throw e
+  }
+  if (data?.type !== 'bandwidth_reset') {
+    throw new Error('The TunnelSats API does not confirm bandwidth resets yet')
+  }
+  const state = status === 202 ? 'processing' : data.status
+  if (!(RESET_STATES as readonly unknown[]).includes(state)) {
+    throw new Error(
+      `TunnelSats API returned an unknown bandwidth reset status: ${JSON.stringify(state)?.slice(0, 40)}`,
+    )
+  }
+  return state as ResetState
 }
 
 /**
