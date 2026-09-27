@@ -372,12 +372,119 @@ export async function requestRenewal(
   })
 }
 
-/** A BOLT11 invoice: `ln` + bech32 characters (lowercase), nothing else. */
-const BOLT11 = /^ln[0-9a-z]{16,4000}$/
+const BECH32_CHARSET = 'qpzry9x8gf2tvdw0s3jn54khce6mua7l'
+const BECH32_GEN = [0x3b6a57b2, 0x26508e6d, 0x1ea119fa, 0x3d4233dd, 0x2a1462b3]
+const BOLT11_HRP = /^ln(?:bcrt|bc|tbs|tb|sb)([1-9]\d*)([munp])?$/
 const PAYMENT_HASH = /^[0-9a-f]{64}$/
 /** ISO 8601 with an explicit zone, as JSON dates are serialized. */
 const ISO_TIMESTAMP =
   /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?(Z|[+-]\d{2}:\d{2})$/
+
+function bech32Polymod(hrp: string, words: readonly number[]): number {
+  let chk = 1
+  const step = (v: number) => {
+    const top = chk >>> 25
+    chk = ((chk & 0x1ffffff) << 5) ^ v
+    for (let i = 0; i < 5; i++) {
+      if ((top >>> i) & 1) chk ^= BECH32_GEN[i]
+    }
+  }
+  for (let i = 0; i < hrp.length; i++) step(hrp.charCodeAt(i) >>> 5)
+  step(0)
+  for (let i = 0; i < hrp.length; i++) step(hrp.charCodeAt(i) & 31)
+  for (const w of words) step(w)
+  return chk
+}
+
+function hrpAmountMsat(
+  digits: string,
+  unit: string | undefined,
+): bigint | null {
+  const n = BigInt(digits)
+  switch (unit) {
+    case undefined:
+      return n * 100_000_000_000n
+    case 'm':
+      return n * 100_000_000n
+    case 'u':
+      return n * 100_000n
+    case 'n':
+      return n * 100n
+    case 'p':
+      return n % 10n === 0n ? n / 10n : null
+    default:
+      return null
+  }
+}
+
+function words5ToHex32(words: readonly number[]): string | null {
+  if (words.length !== 52 || (words[51] & 0x0f) !== 0) return null
+  let value = 0
+  let bits = 0
+  let hex = ''
+  for (const w of words) {
+    value = (value << 5) | w
+    bits += 5
+    while (bits >= 8) {
+      bits -= 8
+      hex += ((value >>> bits) & 0xff).toString(16).padStart(2, '0')
+    }
+  }
+  return hex.length === 64 ? hex : null
+}
+
+/**
+ * Validates that `invoice` is a lowercase BOLT11 Bech32 invoice with a valid
+ * checksum, signature trailer, HRP amount matching `expected.amountSats`, and
+ * tagged payment hash (`p`) matching `expected.paymentHash`.
+ */
+function isValidBolt11Invoice(
+  invoice: string,
+  expected: { paymentHash: string; amountSats: number },
+): boolean {
+  if (invoice.length > 4000 || invoice !== invoice.toLowerCase()) return false
+  const sep = invoice.lastIndexOf('1')
+  if (sep < 4) return false
+
+  const hrp = invoice.slice(0, sep)
+  const hrpMatch = hrp.match(BOLT11_HRP)
+  if (!hrpMatch) return false
+  const msat = hrpAmountMsat(hrpMatch[1], hrpMatch[2])
+  if (msat === null || msat !== BigInt(expected.amountSats) * 1000n) {
+    return false
+  }
+
+  const data = invoice.slice(sep + 1)
+  // 7 (timestamp) + 55 (p tag) + 104 (signature + recovery ID) + 6 (checksum).
+  if (data.length < 172) return false
+  const words: number[] = []
+  for (let i = 0; i < data.length; i++) {
+    const w = BECH32_CHARSET.indexOf(data[i])
+    if (w < 0) return false
+    words.push(w)
+  }
+  if (bech32Polymod(hrp, words) !== 1) return false
+  if (words[words.length - 7] > 3) return false
+
+  const tagEnd = words.length - 110
+  let pos = 7
+  let paymentHash: string | null = null
+  while (pos < tagEnd) {
+    if (pos + 3 > tagEnd) return false
+    const tag = words[pos]
+    const len = (words[pos + 1] << 5) | words[pos + 2]
+    pos += 3
+    if (pos + len > tagEnd) return false
+    if (tag === 1) {
+      if (paymentHash !== null) return false
+      const decoded = words5ToHex32(words.slice(pos, pos + len))
+      if (!decoded) return false
+      paymentHash = decoded
+    }
+    pos += len
+  }
+  return paymentHash === expected.paymentHash
+}
 
 /**
  * Requests a bandwidth reset invoice for an existing WireGuard public key.
@@ -403,7 +510,7 @@ export async function requestBandwidthReset(
     new Error(`TunnelSats API returned an invalid bandwidth reset ${field}`)
 
   const { invoice, paymentHash, resetId, amountSats, expiresAt } = raw ?? {}
-  if (typeof invoice !== 'string' || !BOLT11.test(invoice)) throw bad('invoice')
+  if (typeof invoice !== 'string') throw bad('invoice')
   if (typeof paymentHash !== 'string' || !PAYMENT_HASH.test(paymentHash))
     throw bad('payment hash')
   if (typeof resetId !== 'string' || !resetId) throw bad('ID')
@@ -419,6 +526,8 @@ export async function requestBandwidthReset(
     Number.isNaN(Date.parse(expiresAt))
   )
     throw bad('expiry')
+  if (!isValidBolt11Invoice(invoice, { paymentHash, amountSats }))
+    throw bad('invoice')
 
   const usage = Number(raw.currentUsagePercent)
   const count = (v: unknown) =>

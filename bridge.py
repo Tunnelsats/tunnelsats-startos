@@ -9,6 +9,7 @@ import fcntl
 import time
 import socket
 import ipaddress
+import math
 import urllib.request
 import urllib.error
 from contextlib import contextmanager
@@ -318,7 +319,7 @@ def _confirmed_since(meta, wg_pubkey, since):
         last = last.replace(tzinfo=timezone.utc)
     return last >= since
 
-def lazy_sync(wg_pubkey):
+def lazy_sync(wg_pubkey, require_usage=False):
     """Refreshes the confirmed subscription state for wg_pubkey.
 
     Returns an explicit outcome: "confirmed" (API answered with a valid
@@ -379,11 +380,16 @@ def lazy_sync(wg_pubkey):
         if vpn_port:
             fields["vpnPort"] = vpn_port
 
-        if "bandwidth_used_gb" in response_data:
+        raw_usage = response_data.get("bandwidth_used_gb")
+        if raw_usage is not None and not isinstance(raw_usage, bool):
             try:
-                fields["bandwidth_used_gb"] = float(response_data["bandwidth_used_gb"])
+                usage = float(raw_usage)
+                if math.isfinite(usage) and usage >= 0:
+                    fields["bandwidth_used_gb"] = usage
             except (ValueError, TypeError):
                 pass
+        if require_usage and "bandwidth_used_gb" not in fields:
+            raise ValueError("TunnelSats API returned no valid bandwidth usage for this key")
 
         with meta_lock():
             if _superseded(wg_pubkey):
@@ -864,14 +870,10 @@ def _settle_reset(pending, now):
         return _outcome("reset", "expired", "The bandwidth reset invoice expired unpaid; it was cleared.",
                         payment_hash)
     if state == "failed":
-        message = (f"The payment was received, but the bandwidth reset failed. Contact TunnelSats support "
-                   f"with payment hash {payment_hash}.")
-        if stale:
-            # Kept visible for a day (it retries with a delay meanwhile); then
-            # it is no longer tracked, but this last outcome still says why.
-            _finish_pending("pendingReset", payment_hash)
-            return _outcome("reset", "failed", message, payment_hash)
-        raise SettlementError(message)
+        raise SettlementError(
+            f"The payment was received, but the bandwidth reset failed. Contact TunnelSats support "
+            f"with payment hash {payment_hash}."
+        )
 
     # paid: applied server-side to the key it was bought for.
     key = pending.get("publicKey")
@@ -879,8 +881,8 @@ def _settle_reset(pending, now):
         _finish_pending("pendingReset", payment_hash)
         return _outcome("reset", "superseded",
                         "The bandwidth reset was applied to a key that is no longer configured.", payment_hash)
-    result = lazy_sync(key)
-    if result == "confirmed" or stale:
+    result = lazy_sync(key, require_usage=True)
+    if result == "confirmed":
         _finish_pending("pendingReset", payment_hash)
         return _outcome("reset", "reset", "The bandwidth reset was applied.", payment_hash)
     if result == "superseded":

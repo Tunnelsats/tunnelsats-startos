@@ -20,7 +20,7 @@ import { payTaskReplayId } from '../startos/settlement'
 
 const HASH = 'b'.repeat(64)
 const INVOICE =
-  'lnbc12340n1pjresetqpp5qqqsyqcyq5rqwzqfqqqsyqcyq5rqwzqfqqqsyqcyq5rqwzqfqypq'
+  'lnbc12340n1pzry9x8pp5hwamhwamhwamhwamhwamhwamhwamhwamhwamhwamhwamhwamhwaspppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppqhevkmq'
 const EXPIRES = '2026-10-01T10:00:00.000Z'
 
 const GOOD = {
@@ -111,8 +111,21 @@ test('requestBandwidthReset tolerates missing display-only fields', async () => 
 // decides whether an invoice may be shown again: never trust them unchecked.
 const MALFORMED: [string, Record<string, unknown>][] = [
   ['a non-BOLT11 invoice', { invoice: 'not-an-invoice' }],
+  [
+    'an invoice without a BOLT11 separator',
+    { invoice: `lnbc${'q'.repeat(180)}` },
+  ],
+  [
+    'an invoice with a bad Bech32 checksum',
+    { invoice: `${INVOICE.slice(0, -1)}z` },
+  ],
   ['an invoice with a newline', { invoice: `${INVOICE}\nx` }],
   ['a missing invoice', { invoice: undefined }],
+  [
+    'an invoice whose payment hash does not match paymentHash',
+    { paymentHash: 'a'.repeat(64) },
+  ],
+  ['an invoice whose amount does not match amountSats', { amountSats: 9999 }],
   ['a short payment hash', { paymentHash: 'abc' }],
   ['a non-hex payment hash', { paymentHash: 'z'.repeat(64) }],
   ['an empty reset ID', { resetId: '' }],

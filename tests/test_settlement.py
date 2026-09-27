@@ -583,6 +583,37 @@ class TestResetSettlement(SettlementTestBase):
         self.assertNotIn("pendingReset", self.read_meta())
         self.assertEqual(self.read_meta()["bandwidth_used_gb"], 0.0)
 
+    def test_paid_reset_requires_bandwidth_used_gb_in_status_refresh(self):
+        self.write_meta({"publicKey": self.pub, "pendingReset": self.pending_reset(), "bandwidth_used_gb": 85.0})
+        self.reset_status("paid")
+        self.api.on("POST", "/subscription/status",
+                    response({"expiry": "2026-11-01T00:00:00.000Z"}))
+
+        first = self.only(self.settle())
+        self.assertEqual(first["result"], "failed")
+        self.assertIn("pendingReset", self.read_meta())
+        self.assertEqual(self.read_meta()["bandwidth_used_gb"], 85.0)
+
+        self.api.on("POST", "/subscription/status",
+                    response({"expiry": "2026-11-01T00:00:00.000Z", "bandwidth_used_gb": 0.2}))
+        second = self.only(self.settle(now=NOW + bridge.SETTLE_RETRY_DELAY))
+        self.assertEqual(second["result"], "reset")
+        self.assertNotIn("pendingReset", self.read_meta())
+        self.assertEqual(self.read_meta()["bandwidth_used_gb"], 0.2)
+
+    def test_paid_reset_older_than_24_hours_still_requires_confirmed_refresh(self):
+        self.write_meta({"publicKey": self.pub,
+                         "pendingReset": self.pending_reset(createdAt=iso(NOW - timedelta(hours=25))),
+                         "bandwidth_used_gb": 85.0})
+        self.reset_status("paid")
+        self.api.on("POST", "/subscription/status",
+                    http_error("u", 503, {"message": "status unavailable"}))
+
+        first = self.only(self.settle())
+        self.assertEqual(first["result"], "failed")
+        self.assertIn("pendingReset", self.read_meta())
+        self.assertEqual(self.read_meta()["bandwidth_used_gb"], 85.0)
+
     def test_untyped_paid_from_the_old_fallback_never_counts_as_applied(self):
         # Before the backend knew reset hashes, a paid one fell through to
         # the order fallback ("paid, use /claim") without being applied.
@@ -627,7 +658,7 @@ class TestResetSettlement(SettlementTestBase):
         self.assertNotIn("pendingReset", self.read_meta())
         self.assertEqual(result["clearPayTasks"], [RESET_TASK])
 
-    def test_paid_but_failed_reset_is_kept_visible_then_released(self):
+    def test_paid_but_failed_reset_keeps_support_record_past_24_hours(self):
         self.write_meta({"pendingReset": self.pending_reset()})
         self.reset_status("failed")
 
@@ -637,11 +668,14 @@ class TestResetSettlement(SettlementTestBase):
         self.assertIn(RESET_HASH, outcome["message"])
         self.assertIn("pendingReset", self.read_meta())
 
-        # After a day it is no longer tracked, but the outcome still says why.
+        # Even past 24 hours, a paid reset that failed server-side keeps its
+        # pending record so the health check and action still show the payment
+        # hash needed for support.
         later = self.only(self.settle(now=NOW + timedelta(hours=25)))
         self.assertEqual(later["result"], "failed")
         self.assertIn("support", later["message"])
-        self.assertNotIn("pendingReset", self.read_meta())
+        self.assertIn(RESET_HASH, later["message"])
+        self.assertIn("pendingReset", self.read_meta())
 
     def test_paid_reset_for_a_replaced_key_is_superseded(self):
         self.write_meta({"pendingReset": self.pending_reset(publicKey=OTHER_PUB)})

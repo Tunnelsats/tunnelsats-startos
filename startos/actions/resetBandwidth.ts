@@ -80,8 +80,9 @@ export const resetBandwidth = sdk.Action.withoutInput(
       .read()
       .once()
       .catch(() => null)
-    const serverId =
-      serverMeta?.serverDomain || tunnelInfo.serverDomain || 'eu-de'
+    const metaServerDomain =
+      serverMeta?.publicKey === publicKey ? serverMeta.serverDomain : undefined
+    const serverId = tunnelInfo.serverDomain || metaServerDomain || 'eu-de'
 
     let outcome: ResetRunResult
     try {
