@@ -47,8 +47,9 @@ export const metaShape = z.object({
     .optional()
     .nullable(),
   /**
-   * Replay IDs of pay tasks whose payment is settled or expired, queued by
-   * bridge.py until the settlement health check has cleared them.
+   * Replay IDs of pay tasks whose payment is settled, expired or replaced by
+   * a newer Buy/Renew, queued (by bridge.py or the purchase actions) until
+   * the settlement health check has cleared them.
    */
   payTasksToClear: z.array(z.string()).optional().catch(undefined),
 })

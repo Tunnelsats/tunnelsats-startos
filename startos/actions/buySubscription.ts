@@ -3,8 +3,7 @@ import { tunnelsatsMeta } from '../fileModels/tunnelsatsMeta'
 import { i18n } from '../i18n'
 import { generateWireguardKeypair } from '../keygen'
 import { createSubscriptionOrder } from '../apiClient'
-import { payTaskReplayId, replacedPayTaskId } from '../settlement'
-import { clearReplacedPayTask } from '../payTasks'
+import { payTaskReplayId, replacedPayTaskPatch } from '../settlement'
 import { payInvoice as lndPayInvoice } from 'lnd-startos/startos/actions/payInvoice'
 import { payInvoice as clnPayInvoice } from 'cln-startos/startos/actions/payInvoice'
 import { payInvoice as eclairPayInvoice } from 'eclair-startos/startos/actions/payInvoice'
@@ -91,6 +90,9 @@ export const buySubscription = sdk.Action.withInput(
         lastError: undefined,
         nextAttemptAt: undefined,
       },
+      // Queues the replaced order's pay task for the settlement health check
+      // to clear, in the same write that stops tracking that order.
+      ...replacedPayTaskPatch('order', previous, order.paymentHash),
     })
 
     let packageId: string
@@ -142,10 +144,6 @@ export const buySubscription = sdk.Action.withInput(
           },
         ),
       },
-    )
-    await clearReplacedPayTask(
-      effects,
-      replacedPayTaskId('order', previous, order.paymentHash),
     )
 
     return {

@@ -5,12 +5,7 @@ import { i18n } from '../i18n'
 import { parseWireguardTunnelInfo } from '../utils'
 import { derivePublicKey } from '../keygen'
 import { requestRenewal } from '../apiClient'
-import {
-  payTaskReplayId,
-  recordPaymentOrRetractTask,
-  replacedPayTaskId,
-} from '../settlement'
-import { clearReplacedPayTask } from '../payTasks'
+import { payTaskReplayId, replacedPayTaskPatch } from '../settlement'
 import { payInvoice as lndPayInvoice } from 'lnd-startos/startos/actions/payInvoice'
 import { payInvoice as clnPayInvoice } from 'cln-startos/startos/actions/payInvoice'
 import { payInvoice as eclairPayInvoice } from 'eclair-startos/startos/actions/payInvoice'
@@ -93,17 +88,39 @@ export const renewSubscription = sdk.Action.withInput(
     const targetNode = config['target-node'] || 'lnd'
     const { packageId, payInvoiceAction } = resolvePayInvoice(targetNode)
 
-    // The task is raised before pendingRenewal is replaced, so an earlier
-    // renewal stays tracked if raising it fails. Unlike Buy, a renewal holds
-    // no key that must be stored before its invoice can be paid.
-    const replayId = payTaskReplayId('renewal', targetNode, renewal.paymentHash)
+    // One write records the new renewal and queues the replaced renewal's
+    // pay task for the settlement health check to clear. The task is raised
+    // only after that, so it always belongs to a tracked payment: if the
+    // write fails nothing changed, and if raising the task fails the renewal
+    // is tracked without a task and expires unpaid.
+    await tunnelsatsMeta.merge(effects, {
+      pendingRenewal: {
+        paymentHash: renewal.paymentHash,
+        renewalId: renewal.renewalId,
+        oldExpiry: renewal.oldExpiry,
+        newExpiry: renewal.newExpiry,
+        createdAt: new Date().toISOString(),
+        publicKey,
+        targetNode,
+        // merge() is a deep merge: without these, a backoff left by an
+        // earlier renewal would delay settling this one.
+        lastError: undefined,
+        nextAttemptAt: undefined,
+      },
+      ...replacedPayTaskPatch(
+        'renewal',
+        meta?.pendingRenewal,
+        renewal.paymentHash,
+      ),
+    })
+
     await sdk.action.createTask(
       effects,
       packageId,
       payInvoiceAction,
       'important',
       {
-        replayId,
+        replayId: payTaskReplayId('renewal', targetNode, renewal.paymentHash),
         input: {
           kind: 'partial',
           accept: [],
@@ -116,32 +133,6 @@ export const renewSubscription = sdk.Action.withInput(
         },
         reason: i18n('Pay TunnelSats VPN subscription renewal invoice'),
       },
-    )
-
-    // If pendingRenewal can't be recorded, the watcher could never settle
-    // this invoice, so the task just raised is retracted.
-    await recordPaymentOrRetractTask(
-      () =>
-        tunnelsatsMeta.merge(effects, {
-          pendingRenewal: {
-            paymentHash: renewal.paymentHash,
-            renewalId: renewal.renewalId,
-            oldExpiry: renewal.oldExpiry,
-            newExpiry: renewal.newExpiry,
-            createdAt: new Date().toISOString(),
-            publicKey,
-            targetNode,
-            // merge() is a deep merge: without these, a backoff left by an
-            // earlier renewal would delay settling this one.
-            lastError: undefined,
-            nextAttemptAt: undefined,
-          },
-        }),
-      () => sdk.action.clearTask(effects, replayId),
-    )
-    await clearReplacedPayTask(
-      effects,
-      replacedPayTaskId('renewal', meta?.pendingRenewal, renewal.paymentHash),
     )
 
     return {

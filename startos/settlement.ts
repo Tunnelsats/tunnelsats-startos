@@ -53,31 +53,20 @@ export function replacedPayTaskId(
 }
 
 /**
- * Records a payment whose pay task was already raised. If recording fails,
- * the task is retracted so the node is never asked to pay an invoice the
- * settlement watcher cannot track; the record error is rethrown either way.
- * A failed retract is logged, as it must not mask the record error.
+ * The metadata patch a Buy/Renew merges together with its new pending entry:
+ * it queues the replaced payment's pay task in payTasksToClear, so the
+ * settlement health check clears it (retrying until acknowledged) and the
+ * node never keeps offering an invoice this package no longer tracks.
+ * Returns an empty patch when nothing is replaced; the key is omitted rather
+ * than set to undefined, because merge() deletes undefined keys.
  */
-export async function recordPaymentOrRetractTask(
-  record: () => Promise<unknown>,
-  retractTask: () => Promise<unknown>,
-): Promise<void> {
-  try {
-    await record()
-  } catch (recordError) {
-    try {
-      await retractTask()
-    } catch (retractError) {
-      console.warn(
-        `Could not retract the untracked pay task: ${
-          retractError instanceof Error
-            ? retractError.message
-            : String(retractError)
-        }`,
-      )
-    }
-    throw recordError
-  }
+export function replacedPayTaskPatch(
+  kind: PaymentKind,
+  previous: { paymentHash?: string; targetNode?: string } | null | undefined,
+  newHash: string,
+): { payTasksToClear?: string[] } {
+  const replayId = replacedPayTaskId(kind, previous, newHash)
+  return replayId ? { payTasksToClear: [replayId] } : {}
 }
 
 const TERMINAL_RESULTS = [

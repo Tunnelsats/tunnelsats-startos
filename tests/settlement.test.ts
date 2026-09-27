@@ -2,7 +2,7 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import {
   payTaskReplayId,
-  recordPaymentOrRetractTask,
+  replacedPayTaskPatch,
   replacedPayTaskId,
   runSettlementTick,
   type ExecResult,
@@ -251,48 +251,26 @@ for (const [name, stdout] of [
   })
 }
 
-test('recordPaymentOrRetractTask: records the payment and keeps the task', async () => {
-  const calls: string[] = []
-  await recordPaymentOrRetractTask(
-    async () => {
-      calls.push('record')
-    },
-    async () => {
-      calls.push('retract')
-    },
-  )
-  assert.deepEqual(calls, ['record'])
+test('replacedPayTaskPatch: queues the replaced payment task for the settlement tick', () => {
+  const previous = { paymentHash: 'b'.repeat(64), targetNode: 'cln' }
+  assert.deepEqual(replacedPayTaskPatch('renewal', previous, 'c'.repeat(64)), {
+    payTasksToClear: [payTaskReplayId('renewal', 'cln', 'b'.repeat(64))],
+  })
 })
 
-test('recordPaymentOrRetractTask: a failed record retracts the task and rethrows', async () => {
-  const calls: string[] = []
-  const recordError = new Error('disk full')
-  await assert.rejects(
-    recordPaymentOrRetractTask(
-      async () => {
-        calls.push('record')
-        throw recordError
-      },
-      async () => {
-        calls.push('retract')
-      },
-    ),
-    (e) => e === recordError,
-  )
-  assert.deepEqual(calls, ['record', 'retract'])
-})
-
-test('recordPaymentOrRetractTask: a failed retract still surfaces the record error', async () => {
-  const recordError = new Error('disk full')
-  await assert.rejects(
-    recordPaymentOrRetractTask(
-      async () => {
-        throw recordError
-      },
-      async () => {
-        throw new Error('clearTasks unavailable')
-      },
-    ),
-    (e) => e === recordError,
-  )
+test('replacedPayTaskPatch: adds no key when nothing is replaced', () => {
+  // merge() deletes keys set to undefined, so the patch must omit the key
+  // entirely or it would wipe tasks already queued for clearing.
+  for (const previous of [
+    null,
+    undefined,
+    {},
+    { paymentHash: 'c'.repeat(64), targetNode: 'lnd' },
+    { paymentHash: 'b'.repeat(64) },
+    { paymentHash: 'b'.repeat(64), targetNode: 'bogus' },
+  ]) {
+    const patch = replacedPayTaskPatch('order', previous, 'c'.repeat(64))
+    assert.deepEqual(patch, {})
+    assert.equal('payTasksToClear' in patch, false)
+  }
 })
