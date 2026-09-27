@@ -74,6 +74,7 @@ fi
 log_step "2. TunnelSats configuration"
 TARGET_NODE="lnd"
 ENABLED=""
+APP_CONFIG=""
 if [ -f "$CONF_PATH" ]; then
     log_ok "Stored WireGuard configuration found."
 else
@@ -150,7 +151,7 @@ if [ -n "$(json_field "$API_DATA" "configured")" ]; then
     ALLOW_IPV6=$(json_field "$API_DATA" "allow_ipv6")
     if [ "$(json_field "$API_DATA" "configured")" == "True" ] && [ -n "$SERVER" ] &&
         [ "$SERVER" != "Unknown" ] && [ -n "$VPN_PORT" ]; then
-        log_ok "Configured TunnelSats server and forwarded port: ${SERVER}:${VPN_PORT}"
+        log_ok "Configured TunnelSats server: ${SERVER}, forwarded port: ${VPN_PORT}"
     else
         log_fail "The service reports no usable server/forwarded port."
     fi
@@ -170,10 +171,26 @@ echo "    curl -4 -s https://ifconfig.me # must print the TunnelSats server IP, 
 if [ "$ALLOW_IPV6" == "True" ]; then
     echo "    (Allow Home IPv6 Coexistence is ON: IPv6 leaves via your home ISP by design.)"
 else
-    echo "    curl -6 -s --max-time 5 https://ifconfig.me  # must fail: no clearnet IPv6 egress"
+    echo "    ip -6 route show table 51820   # 'blackhole default': IPv6 cannot leave outside the tunnel"
+    echo "    curl -6 -sS --max-time 5 https://ifconfig.me; echo \" curl exit \$?\""
+    echo "      # prints an IP address: IPv6 LEAKS past the tunnel."
+    echo "      # 'Failed to connect' / 'Network is unreachable' (exit 7): no IPv6 egress."
+    echo "      # 'Could not resolve host' (exit 6), a timeout (exit 28) or any other error: NOT verified, the probe itself did not run."
 fi
-if [ -n "$SERVER" ] && [ -n "$VPN_PORT" ]; then
-    echo "  The node should announce ${SERVER}:${VPN_PORT} (or the server's IP with that port)."
+# The node task announces the Endpoint host of the stored config with the
+# forwarded port (getAnnounceEndpoint), not the `# Server:` comment that
+# /api/status reports as the server.
+ENDPOINT=$(json_field "$APP_CONFIG" "tunnelsats-conf" | python3 -c '
+import re, sys
+m = re.search(r"^\s*Endpoint\s*=\s*([^\s#]+)", sys.stdin.read(), re.IGNORECASE | re.MULTILINE)
+if m:
+    print(m.group(1))
+' 2>/dev/null || true)
+if [ -n "$ENDPOINT" ] && [ -n "$VPN_PORT" ]; then
+    echo "  Public address: the node should announce the host of your WireGuard Endpoint (${ENDPOINT}) with the forwarded port ${VPN_PORT}."
+    echo "  The exact value TunnelSats requested is the 'Public Address' field of the ${TARGET_PKG} Clearnet VPN action."
+else
+    echo "  Public address: compare what the node announces with the 'Public Address' field of the ${TARGET_PKG} Clearnet VPN action."
 fi
 
 # Summary

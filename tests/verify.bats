@@ -95,7 +95,7 @@ healthy_service() {
     run "$REPO_ROOT/verify.sh"
     [ "$status" -eq 0 ]
     [[ "$output" =~ "Active until 2026-12-31" ]]
-    [[ "$output" =~ "de2.tunnelsats.com:24556" ]]
+    [[ "$output" =~ "server: de2.tunnelsats.com, forwarded port: 24556" ]]
     [[ "$output" =~ "TunnelSats service checks passed" ]]
 }
 
@@ -121,6 +121,49 @@ healthy_service() {
     healthy_service cln
     run "$REPO_ROOT/verify.sh"
     [[ "$output" =~ "start-cli package attach c-lightning" ]]
+}
+
+@test "verify.sh never lets a failed IPv6 probe pass as isolation" {
+    # A DNS failure or an unreachable probe service also makes curl fail;
+    # only a refused connect (or the kernel's blackhole route) shows that
+    # IPv6 cannot leave outside the tunnel.
+    healthy_service lnd
+    run "$REPO_ROOT/verify.sh"
+    [[ "$output" =~ "ip -6 route show table 51820" ]]
+    [[ "$output" =~ "blackhole default" ]]
+    [[ "$output" =~ "curl -6 -sS --max-time 5 https://ifconfig.me" ]]
+    [[ "$output" =~ "Could not resolve host" ]]
+    [[ "$output" =~ "any other error: NOT verified" ]]
+    refute_match 'curl -6 -s --max-time|must fail'
+}
+
+# Config as the handoff reads it: config.json's tunnelsats-conf, whose
+# `# Server:` comment differs from the Endpoint host.
+fake_config_with_endpoint() {
+    local conf
+    conf=$'[Interface]\nPrivateKey = x\n# VPNPort: 24556\n# Server: de2.tunnelsats.com\n\n[Peer]\nEndpoint = 198.51.100.1:51820\n'
+    printf '%s' "$conf" > "$DATA_DIR/tunnelsatsv3.conf"
+    python3 -c 'import json, sys; print(json.dumps({"enabled": True, "target-node": "lnd", "tunnelsats-conf": sys.argv[1]}))' "$conf" > "$DATA_DIR/config.json"
+}
+
+@test "verify.sh names the Endpoint host, not the # Server: name, as the public address" {
+    # The node task announces the Endpoint host with the forwarded port;
+    # /api/status.server prefers the `# Server:` comment.
+    fake_bridge '{"result": "ok", "message": "Active until 2026-12-31"}' 0
+    fake_config_with_endpoint
+    serve_status "$STATUS_OK"
+    run "$REPO_ROOT/verify.sh"
+    [ "$status" -eq 0 ]
+    [[ "$output" =~ "host of your WireGuard Endpoint (198.51.100.1:51820) with the forwarded port 24556" ]]
+    [[ "$output" =~ "'Public Address' field of the lnd Clearnet VPN action" ]]
+    refute_match 'de2\.tunnelsats\.com:24556|should announce de2'
+}
+
+@test "verify.sh points to the node's Public Address when the Endpoint is unknown" {
+    healthy_service lnd
+    run "$REPO_ROOT/verify.sh"
+    [[ "$output" =~ "'Public Address' field of the lnd Clearnet VPN action" ]]
+    refute_match 'should announce de2'
 }
 
 @test "verify.sh reads the health result from stdout despite log noise" {
