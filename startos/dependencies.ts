@@ -279,7 +279,7 @@ export function getSubscriptionExpiryTask(
         shouldCreateTask: true,
         severity: 'important',
         reason: i18n(
-          'Your TunnelSats subscription has expired, and your node holds its clearnet traffic until it is renewed. Run Renew Subscription to restore it.',
+          "Your TunnelSats subscription has expired. The TunnelSats server disables your tunnel, so your node's clearnet peer connections through TunnelSats stop working. Run Renew Subscription to restore them.",
         ),
         clearTaskKey,
       }

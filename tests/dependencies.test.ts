@@ -227,7 +227,7 @@ test('getSubscriptionExpiryTask raises an important Renew task at <= 3 days', ()
   assert.match(res.reason || '', /Renew Subscription/)
 })
 
-test('getSubscriptionExpiryTask raises a lapse task, saying traffic is held', () => {
+test('getSubscriptionExpiryTask raises a lapse task that does not overclaim a kill switch', () => {
   const res = getSubscriptionExpiryTask(
     { enabled: true, 'tunnelsats-conf': confWith(null) },
     confirmed('2026-08-15T12:00:00Z'),
@@ -236,7 +236,9 @@ test('getSubscriptionExpiryTask raises a lapse task, saying traffic is held', ()
   assert.equal(res.shouldCreateTask, true)
   assert.equal(res.severity, 'important')
   assert.match(res.reason || '', /expired/i)
-  assert.match(res.reason || '', /holds its clearnet traffic/i)
+  assert.match(res.reason || '', /disables your tunnel/i)
+  // The kill switch belongs to the node package and is not guaranteed.
+  assert.doesNotMatch(res.reason || '', /\bholds?\b|fail.closed|cannot leak/i)
   assert.match(res.reason || '', /Renew Subscription/)
 })
 
