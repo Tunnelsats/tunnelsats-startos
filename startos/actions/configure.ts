@@ -1,7 +1,7 @@
 import { sdk } from '../sdk'
 import { configJson } from '../fileModels/config.json'
 import { tunnelsatsConf } from '../fileModels/tunnelsatsConf'
-import { validateWireguardConfig, ensureInboundMarker } from '../utils'
+import { validateWireguardConfig } from '../utils'
 import { i18n } from '../i18n'
 import { rm } from 'node:fs/promises'
 
@@ -64,7 +64,7 @@ export const configure = sdk.Action.withInput(
     }
   },
   async ({ effects, input }) => {
-    let processedConf = input['tunnelsats-conf']?.trim()
+    const processedConf = input['tunnelsats-conf']?.trim()
       ? input['tunnelsats-conf']
       : undefined
     if (input.enabled && !processedConf) {
@@ -76,7 +76,6 @@ export const configure = sdk.Action.withInput(
       if (!validation.valid) {
         throw new Error(validation.error || 'Invalid WireGuard configuration')
       }
-      processedConf = ensureInboundMarker(processedConf)
     }
 
     await configJson.merge(effects, {
