@@ -23,10 +23,13 @@ function inputs(over: Partial<NoticeInputs> = {}): NoticeInputs {
 
 test('expiryStage follows the reminder thresholds', () => {
   assert.equal(expiryStage(at(30), NOW), null)
-  assert.equal(expiryStage(at(8), NOW), null)
-  assert.equal(expiryStage(at(7.9), NOW), '7d')
-  assert.equal(expiryStage(at(4), NOW), '7d')
-  assert.equal(expiryStage(at(3.9), NOW), '3d')
+  // Never early: "within 7 days" means at most 7 days left.
+  assert.equal(expiryStage(at(7.9), NOW), null)
+  assert.equal(expiryStage(at(7.01), NOW), null)
+  assert.equal(expiryStage(at(7), NOW), '7d')
+  assert.equal(expiryStage(at(3.9), NOW), '7d')
+  assert.equal(expiryStage(at(3.01), NOW), '7d')
+  assert.equal(expiryStage(at(3), NOW), '3d')
   assert.equal(expiryStage(at(0.1), NOW), '3d')
   assert.equal(expiryStage(at(0), NOW), 'lapsed')
   assert.equal(expiryStage(at(-5), NOW), 'lapsed')
@@ -56,11 +59,7 @@ test('each threshold is announced once per period', () => {
   const again = planNotifications(inputs({ expiry: at(6) }), first.next, NOW)
   assert.deepEqual(again.steps, [])
 
-  const three = planNotifications(
-    inputs({ expiry: at(6) }),
-    first.next,
-    at(3.5),
-  )
+  const three = planNotifications(inputs({ expiry: at(6) }), first.next, at(3))
   assert.deepEqual(
     three.steps.map((s) => s.notice.kind),
     ['3d'],

@@ -39,16 +39,16 @@ const DAY_MS = 24 * 60 * 60 * 1000
 export const NOTICE_RETRY_MS = 15 * 60 * 1000
 
 /**
- * The reminder stage for an expiry: 'lapsed' at or after it, '3d' with
- * fewer than 4 whole days left, '7d' with fewer than 8, else null. Shared
- * with the Renew task (getSubscriptionExpiryTask).
+ * The reminder stage for an expiry: 'lapsed' at or after it, '3d' with at
+ * most 3 days left, '7d' with at most 7, else null. Compared on the exact
+ * remaining time, so a reminder is never early. Shared with the Renew task
+ * (getSubscriptionExpiryTask).
  */
 export function expiryStage(expiry: Date, now: Date): ExpiryStage | null {
   const diff = expiry.getTime() - now.getTime()
   if (diff <= 0) return 'lapsed'
-  const days = Math.floor(diff / DAY_MS)
-  if (days <= 3) return '3d'
-  if (days <= 7) return '7d'
+  if (diff <= 3 * DAY_MS) return '3d'
+  if (diff <= 7 * DAY_MS) return '7d'
   return null
 }
 
