@@ -17,7 +17,9 @@ const PSK = 'cHJlc2hhcmVkLXByZXNoYXJlZC1wcmVzaGFyZWQtcHM='
 const HASH = 'b'.repeat(64)
 
 type Json = Record<string, any>
-type Route = (body: Json | null) => { status: number; body: Json }
+type Route = (
+  body: Json | null,
+) => { status: number; body: Json } | Promise<{ status: number; body: Json }>
 
 function claim(overrides: Json = {}): Json {
   return {
@@ -37,6 +39,7 @@ function claim(overrides: Json = {}): Json {
 
 function loadCheckout(routes: Record<string, Route>) {
   const requests: { url: string; body: Json | null }[] = []
+  const alerts: string[] = []
   const timeouts: (() => unknown)[] = []
   const intervals: (() => unknown)[] = []
   const delays: number[] = []
@@ -65,7 +68,7 @@ function loadCheckout(routes: Record<string, Route>) {
       addEventListener() {},
     },
     window: { addEventListener() {} },
-    alert() {},
+    alert: (message: string) => alerts.push(message),
     setInterval: (fn: () => unknown) => {
       intervals.push(fn)
       return 0
@@ -84,7 +87,7 @@ function loadCheckout(routes: Record<string, Route>) {
       const route = routes[url]
       // Status and pricing polls at load time never answer.
       if (!route) return new Promise(() => {})
-      const res = route(body)
+      const res = await route(body)
       return {
         ok: res.status >= 200 && res.status < 300,
         status: res.status,
@@ -95,6 +98,7 @@ function loadCheckout(routes: Record<string, Route>) {
   vm.runInContext(SCRIPT, context)
   return {
     context: context as Json,
+    alerts,
     requests,
     timeouts,
     intervals,
@@ -355,4 +359,99 @@ test('a claim without a chosen node fails closed and saves nothing', async () =>
   assert.deepEqual(web.saved(), [])
   assert.equal(web.timeouts.length, 0)
   assert.match(web.status(), new RegExp(HASH))
+})
+
+const PUB_A = 'QUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUE='
+const PUB_B = 'QkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkI='
+const HASH_A = 'a'.repeat(64)
+const HASH_B = 'c'.repeat(64)
+const STATUS_URL = (hash: string) =>
+  `https://tunnelsats.com/api/public/v1/subscription/${hash}`
+const pill = { classList: { add() {}, remove() {} } }
+
+/** Two checkouts: key generation and /create answer per call, in order. */
+function twoCheckouts(extra: Record<string, Route> = {}) {
+  const keys = [PUB_A, PUB_B]
+  const hashes = [HASH_A, HASH_B]
+  let releaseA!: () => void
+  const aCreated = new Promise<void>((resolve) => (releaseA = resolve))
+  let creates = 0
+  const web = loadCheckout({
+    '/api/keys/generate': () => {
+      const pub = keys.shift()!
+      return { status: 200, body: { private_key: PRIV, public_key: pub } }
+    },
+    [CREATE_URL]: async () => {
+      const first = creates++ === 0
+      if (first) await aCreated
+      return {
+        status: 200,
+        body: { invoice: 'lnbc1', paymentHash: hashes.shift(), amountSats: 1 },
+      }
+    },
+    [STATUS_URL(HASH_A)]: () => ({ status: 200, body: { status: 'paid' } }),
+    [STATUS_URL(HASH_B)]: () => ({ status: 200, body: { status: 'paid' } }),
+    ...extra,
+  })
+  return { web, releaseA }
+}
+
+test('overlapping checkouts keep their own key; a superseded one never polls', async () => {
+  const claimKeys: string[] = []
+  const { web, releaseA } = twoCheckouts({
+    [CLAIM_URL]: (body) => {
+      claimKeys.push(body?.wgPublicKey)
+      return {
+        status: 200,
+        body: claim({
+          peer: { ...claim().peer, publicKey: body?.wgPublicKey },
+        }),
+      }
+    },
+    '/api/config/save': SAVE_OK,
+  })
+  web.context.selectNode('lnd', pill)
+  const pageTimers = web.intervals.length
+  const a = web.context.startCheckout()
+  await new Promise((r) => setImmediate(r))
+  await web.context.startCheckout() // B, while A's /create is outstanding
+  releaseA()
+  await a
+
+  // Only B polls, and it claims with B's key; A's invoice was never shown.
+  assert.equal(web.intervals.length, pageTimers + 1)
+  await web.intervals.at(-1)!()
+  assert.deepEqual(claimKeys, [PUB_B])
+  assert.equal(web.saved().length, 1)
+})
+
+test('a new checkout is refused while a paid claim is still retrying', async () => {
+  let apiDown = true
+  const web = loadCheckout({
+    '/api/keys/generate': () => ({
+      status: 200,
+      body: { private_key: PRIV, public_key: PUB },
+    }),
+    [CREATE_URL]: () => ({
+      status: 200,
+      body: { invoice: 'lnbc1', paymentHash: HASH, amountSats: 1 },
+    }),
+    [STATUS_URL(HASH)]: () => ({ status: 200, body: { status: 'paid' } }),
+    [CLAIM_URL]: () =>
+      apiDown ? { status: 503, body: {} } : { status: 200, body: claim() },
+    '/api/config/save': SAVE_OK,
+  })
+  await web.context.startCheckout()
+  await web.intervals.at(-1)!() // paid; the claim hits an outage and retries
+  const creates = () => web.requests.filter((r) => r.url === CREATE_URL).length
+
+  await web.context.startCheckout()
+  assert.equal(creates(), 1, 'no second order while the paid one is unsaved')
+  assert.match(web.alerts.at(-1) ?? '', new RegExp(HASH))
+
+  apiDown = false
+  await web.timeouts.at(-1)!() // the retry saves the paid order
+  assert.equal(web.saved().length, 1)
+  await web.context.startCheckout()
+  assert.equal(creates(), 2, 'checkout is available again once saved')
 })

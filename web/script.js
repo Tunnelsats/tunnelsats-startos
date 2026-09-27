@@ -7,6 +7,11 @@ let selectedRenewalDuration = 3
 let activePaymentHash = null
 let activePollingInterval = null
 let currentKeypair = null
+// Each checkout gets a number; a response for a superseded one is dropped.
+let checkoutSeq = 0
+// Payment hash of a paid order whose claim is still being saved. Its key
+// exists only in this page, so no new checkout may start until it is done.
+let paidClaimInFlight = null
 let serversList = []
 
 // ─────────────────────────────────────────────
@@ -463,6 +468,12 @@ async function startCheckout() {
   // The claim is saved for the node chosen now: the operator may change the
   // selection while a paid claim is still retrying.
   const targetNode = selectedNode
+  if (paidClaimInFlight) {
+    alert(
+      `A paid order is still being provisioned (payment hash ${paidClaimInFlight}). Keep this page open until it is saved before starting another checkout.`,
+    )
+    return
+  }
   const serverSelect = document.getElementById('select-server')
   const serverId = serverSelect ? serverSelect.value : ''
   if (!serverId) {
@@ -470,11 +481,18 @@ async function startCheckout() {
     return
   }
 
+  const seq = ++checkoutSeq
+  // A newer checkout started while this one awaited: drop this one. Its
+  // invoice, if created, was never shown and cannot have been paid.
+  const superseded = () => seq !== checkoutSeq
+
   openPaymentModal()
   setPaymentStatus('Generating WireGuard keypair...', 'pulse-amber')
 
   try {
-    currentKeypair = await generateKeys()
+    const keypair = await generateKeys()
+    if (superseded()) return
+    currentKeypair = keypair
     setPaymentStatus('Creating Lightning invoice...', 'pulse-amber')
 
     const orderRes = await fetch(
@@ -485,7 +503,7 @@ async function startCheckout() {
         body: JSON.stringify({
           serverId,
           duration: selectedDuration,
-          wgPublicKey: currentKeypair.publicKey,
+          wgPublicKey: keypair.publicKey,
         }),
       },
     )
@@ -495,14 +513,16 @@ async function startCheckout() {
     }
 
     const order = await orderRes.json()
+    if (superseded()) return
     renderPaymentDetails(
       order.invoice,
       order.amountSats ||
         calculatePlanPrice(selectedDuration, currentSatsPerDollar),
       `${selectedDuration} Month${selectedDuration > 1 ? 's' : ''} Subscription`,
     )
-    pollOrderSettlement(order.paymentHash, currentKeypair, serverId, targetNode)
+    pollOrderSettlement(order.paymentHash, keypair, serverId, targetNode)
   } catch (err) {
+    if (superseded()) return
     console.error('Checkout error:', err)
     setPaymentStatus(`Error: ${err.message}`, 'pulse-amber')
   }
@@ -556,6 +576,7 @@ function pollOrderSettlement(paymentHash, keypair, serverId, targetNode) {
         if (data.status === 'paid') {
           clearInterval(activePollingInterval)
           activePollingInterval = null
+          paidClaimInFlight = paymentHash
           setPaymentStatus(
             'Payment confirmed! Provisioning tunnel...',
             'pulse-green',
@@ -813,6 +834,7 @@ async function claimAndSaveConfig(
       )
     }
 
+    if (paidClaimInFlight === paymentHash) paidClaimInFlight = null
     setPaymentStatus(
       'Configuration provisioned! Accept the routing prompt on your Lightning node.',
       'pulse-green',
@@ -827,6 +849,9 @@ async function claimAndSaveConfig(
     }, 1600)
   } catch (err) {
     console.error('Claim error:', err)
+    // A permanent failure: retrying cannot save this claim, so a new
+    // checkout is allowed again.
+    if (paidClaimInFlight === paymentHash) paidClaimInFlight = null
     // Nothing was saved. The payment hash lets support recover the paid
     // order; keep this page open, the private key only exists here.
     setPaymentStatus(
