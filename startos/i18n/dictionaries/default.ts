@@ -94,6 +94,13 @@ const dict = {
   'Current Usage': 91,
   'Resets Confirmed This Month': 92,
   'TunnelSats has no subscription for the WireGuard key in your configuration. Import a valid configuration here, or run Buy Subscription to get a new one.': 93,
+  'TunnelSats subscription expires within 7 days': 94,
+  'TunnelSats subscription expires within 3 days': 95,
+  'Your TunnelSats subscription expires on ${date}. Run Renew Subscription in TunnelSats to keep your node reachable over clearnet.': 96,
+  'TunnelSats subscription expired': 97,
+  "Your TunnelSats subscription expired on ${date}. The TunnelSats server disables your tunnel, so your node's clearnet peer connections through TunnelSats stop working. Run Renew Subscription in TunnelSats, or turn off the clearnet VPN on your Lightning node.": 98,
+  'TunnelSats does not know your WireGuard key': 99,
+  'TunnelSats has no subscription for the WireGuard key in your configuration. Run Import Subscription in TunnelSats with a valid configuration, or Buy Subscription to get a new one.': 100,
 } as const
 
 /**

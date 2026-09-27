@@ -6,6 +6,7 @@ import { handoffRecheck } from './fileModels/handoffRecheck'
 import { readNodeVpnStates } from './handoffIO'
 import { i18n } from './i18n'
 import { getAnnounceEndpoint, parseWireguardTunnelInfo } from './utils'
+import { expiryStage, type NoticeInputs } from './notifications'
 export { getAnnounceEndpoint } from './utils'
 import { derivePublicKey } from './keygen'
 import { renewSubscription } from './actions/renewSubscription'
@@ -221,6 +222,30 @@ export function getUnknownKeyTask(
 }
 
 /**
+ * What the subscription notices (see notifications.ts) act on, or null while
+ * TunnelSats is disabled or unconfigured: the same confirmed expiry and
+ * unknown-key verdict as the tasks, bound to the stored key.
+ */
+export function noticeInputsFor(
+  config:
+    | {
+        enabled?: boolean
+        'tunnelsats-conf'?: string | null
+      }
+    | null
+    | undefined,
+  meta: SubscriptionMeta | null | undefined,
+): NoticeInputs | null {
+  if (!config?.enabled || !config['tunnelsats-conf']) return null
+  const wgConf = config['tunnelsats-conf']
+  return {
+    publicKey: currentPublicKey(wgConf),
+    expiry: getConfirmedExpiry(wgConf, meta),
+    keyUnknown: isKeyUnknown(wgConf, meta),
+  }
+}
+
+/**
  * Every expiry task is 'important'. An expiry task is an own task, and
  * StartOS stops the owning service while an own task is active and critical.
  * That would halt the subscription sync that confirms a renewal and clears
@@ -248,40 +273,34 @@ export function getSubscriptionExpiryTask(
     return { shouldCreateTask: false, clearTaskKey }
   }
 
-  const timeDiffMs = expiryDate.getTime() - currentDate.getTime()
-  const daysRemaining = Math.floor(timeDiffMs / (1000 * 60 * 60 * 24))
-
-  if (timeDiffMs <= 0) {
-    return {
-      shouldCreateTask: true,
-      severity: 'important',
-      reason: i18n(
-        'Your TunnelSats subscription has expired, and your node holds its clearnet traffic until it is renewed. Run Renew Subscription to restore it.',
-      ),
-      clearTaskKey,
-    }
-  }
-
-  if (daysRemaining <= 3) {
-    return {
-      shouldCreateTask: true,
-      severity: 'important',
-      reason: i18n(
-        'Your TunnelSats subscription expires in 3 days or less. Run Renew Subscription to keep your node reachable over clearnet.',
-      ),
-      clearTaskKey,
-    }
-  }
-
-  if (daysRemaining <= 7) {
-    return {
-      shouldCreateTask: true,
-      severity: 'important',
-      reason: i18n(
-        'Your TunnelSats subscription expires in 7 days or less. Run Renew Subscription to keep your node reachable over clearnet.',
-      ),
-      clearTaskKey,
-    }
+  switch (expiryStage(expiryDate, currentDate)) {
+    case 'lapsed':
+      return {
+        shouldCreateTask: true,
+        severity: 'important',
+        reason: i18n(
+          'Your TunnelSats subscription has expired, and your node holds its clearnet traffic until it is renewed. Run Renew Subscription to restore it.',
+        ),
+        clearTaskKey,
+      }
+    case '3d':
+      return {
+        shouldCreateTask: true,
+        severity: 'important',
+        reason: i18n(
+          'Your TunnelSats subscription expires in 3 days or less. Run Renew Subscription to keep your node reachable over clearnet.',
+        ),
+        clearTaskKey,
+      }
+    case '7d':
+      return {
+        shouldCreateTask: true,
+        severity: 'important',
+        reason: i18n(
+          'Your TunnelSats subscription expires in 7 days or less. Run Renew Subscription to keep your node reachable over clearnet.',
+        ),
+        clearTaskKey,
+      }
   }
 
   return { shouldCreateTask: false, clearTaskKey }

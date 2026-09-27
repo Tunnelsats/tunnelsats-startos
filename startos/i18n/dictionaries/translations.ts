@@ -94,6 +94,13 @@ export const es_ES: LangDict = {
   91: 'Consumo actual',
   92: 'Restablecimientos confirmados este mes',
   93: 'TunnelSats no tiene ninguna suscripción para la clave WireGuard de tu configuración. Importa aquí una configuración válida o ejecuta Comprar Suscripción para obtener una nueva.',
+  94: 'La suscripción a TunnelSats caduca en 7 días o menos',
+  95: 'La suscripción a TunnelSats caduca en 3 días o menos',
+  96: 'Tu suscripción a TunnelSats caduca el ${date}. Ejecuta Renovar Suscripción en TunnelSats para que tu nodo siga accesible por clearnet.',
+  97: 'La suscripción a TunnelSats ha caducado',
+  98: 'Tu suscripción a TunnelSats caducó el ${date}. El servidor de TunnelSats desactiva tu túnel, por lo que las conexiones clearnet de tu nodo con sus pares a través de TunnelSats dejan de funcionar. Ejecuta Renovar Suscripción en TunnelSats o desactiva la VPN clearnet en tu nodo Lightning.',
+  99: 'TunnelSats no reconoce tu clave WireGuard',
+  100: 'TunnelSats no tiene ninguna suscripción para la clave WireGuard de tu configuración. Ejecuta Importar Suscripción en TunnelSats con una configuración válida, o Comprar Suscripción para obtener una nueva.',
 }
 
 export const de_DE: LangDict = {
@@ -190,6 +197,13 @@ export const de_DE: LangDict = {
   91: 'Aktueller Verbrauch',
   92: 'Bestätigte Zurücksetzungen in diesem Monat',
   93: 'TunnelSats hat kein Abonnement für den WireGuard-Schlüssel in Ihrer Konfiguration. Importieren Sie hier eine gültige Konfiguration oder führen Sie „Abonnement kaufen“ aus, um ein neues zu erhalten.',
+  94: 'TunnelSats-Abonnement läuft in 7 Tagen oder weniger ab',
+  95: 'TunnelSats-Abonnement läuft in 3 Tagen oder weniger ab',
+  96: 'Ihr TunnelSats-Abonnement läuft am ${date} ab. Führen Sie in TunnelSats „Abonnement erneuern“ aus, damit Ihr Knoten über Clearnet erreichbar bleibt.',
+  97: 'TunnelSats-Abonnement abgelaufen',
+  98: 'Ihr TunnelSats-Abonnement ist am ${date} abgelaufen. Der TunnelSats-Server deaktiviert Ihren Tunnel, daher funktionieren die Clearnet-Verbindungen Ihres Knotens zu seinen Peers über TunnelSats nicht mehr. Führen Sie in TunnelSats „Abonnement erneuern“ aus oder schalten Sie das Clearnet-VPN auf Ihrem Lightning-Knoten aus.',
+  99: 'TunnelSats kennt Ihren WireGuard-Schlüssel nicht',
+  100: 'TunnelSats hat kein Abonnement für den WireGuard-Schlüssel in Ihrer Konfiguration. Führen Sie in TunnelSats „Abonnement importieren“ mit einer gültigen Konfiguration aus oder „Abonnement kaufen“, um ein neues zu erhalten.',
 }
 
 export const pl_PL: LangDict = {
@@ -286,6 +300,13 @@ export const pl_PL: LangDict = {
   91: 'Bieżące zużycie',
   92: 'Potwierdzone resety w tym miesiącu',
   93: 'TunnelSats nie ma subskrypcji dla klucza WireGuard z Twojej konfiguracji. Zaimportuj tutaj prawidłową konfigurację lub uruchom Kup subskrypcję, aby uzyskać nową.',
+  94: 'Subskrypcja TunnelSats wygasa w ciągu 7 dni',
+  95: 'Subskrypcja TunnelSats wygasa w ciągu 3 dni',
+  96: 'Twoja subskrypcja TunnelSats wygasa ${date}. Uruchom Odnów subskrypcję w TunnelSats, aby węzeł pozostał dostępny przez clearnet.',
+  97: 'Subskrypcja TunnelSats wygasła',
+  98: 'Twoja subskrypcja TunnelSats wygasła ${date}. Serwer TunnelSats wyłącza Twój tunel, więc połączenia clearnet węzła z peerami przez TunnelSats przestają działać. Uruchom Odnów subskrypcję w TunnelSats lub wyłącz VPN clearnet w swoim węźle Lightning.',
+  99: 'TunnelSats nie rozpoznaje Twojego klucza WireGuard',
+  100: 'TunnelSats nie ma subskrypcji dla klucza WireGuard z Twojej konfiguracji. Uruchom Importuj subskrypcję w TunnelSats z prawidłową konfiguracją lub Kup subskrypcję, aby uzyskać nową.',
 }
 
 export const fr_FR: LangDict = {
@@ -382,6 +403,13 @@ export const fr_FR: LangDict = {
   91: 'Consommation actuelle',
   92: 'Réinitialisations confirmées ce mois-ci',
   93: "TunnelSats n'a aucun abonnement pour la clé WireGuard de votre configuration. Importez ici une configuration valide, ou lancez « Acheter un abonnement » pour en obtenir un nouveau.",
+  94: "L'abonnement TunnelSats expire dans 7 jours ou moins",
+  95: "L'abonnement TunnelSats expire dans 3 jours ou moins",
+  96: "Votre abonnement TunnelSats expire le ${date}. Lancez « Renouveler l'abonnement » dans TunnelSats pour que votre nœud reste joignable en clearnet.",
+  97: "L'abonnement TunnelSats a expiré",
+  98: "Votre abonnement TunnelSats a expiré le ${date}. Le serveur TunnelSats désactive votre tunnel, donc les connexions clearnet de votre nœud avec ses pairs via TunnelSats ne fonctionnent plus. Lancez « Renouveler l'abonnement » dans TunnelSats, ou désactivez le VPN clearnet sur votre nœud Lightning.",
+  99: 'TunnelSats ne reconnaît pas votre clé WireGuard',
+  100: "TunnelSats n'a aucun abonnement pour la clé WireGuard de votre configuration. Lancez « Importer un abonnement » dans TunnelSats avec une configuration valide, ou « Acheter un abonnement » pour en obtenir un nouveau.",
 }
 
 export default {
