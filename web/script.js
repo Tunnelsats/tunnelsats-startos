@@ -460,6 +460,9 @@ async function generateKeys() {
 }
 
 async function startCheckout() {
+  // The claim is saved for the node chosen now: the operator may change the
+  // selection while a paid claim is still retrying.
+  const targetNode = selectedNode
   const serverSelect = document.getElementById('select-server')
   const serverId = serverSelect ? serverSelect.value : ''
   if (!serverId) {
@@ -498,7 +501,7 @@ async function startCheckout() {
         calculatePlanPrice(selectedDuration, currentSatsPerDollar),
       `${selectedDuration} Month${selectedDuration > 1 ? 's' : ''} Subscription`,
     )
-    pollOrderSettlement(order.paymentHash, currentKeypair, serverId)
+    pollOrderSettlement(order.paymentHash, currentKeypair, serverId, targetNode)
   } catch (err) {
     console.error('Checkout error:', err)
     setPaymentStatus(`Error: ${err.message}`, 'pulse-amber')
@@ -539,7 +542,7 @@ function renderPaymentDetails(invoice, sats, planDesc) {
   setPaymentStatus('Waiting for payment settlement...', 'pulse-amber')
 }
 
-function pollOrderSettlement(paymentHash, keypair, serverId) {
+function pollOrderSettlement(paymentHash, keypair, serverId, targetNode) {
   if (activePollingInterval) clearInterval(activePollingInterval)
   activePaymentHash = paymentHash
 
@@ -557,7 +560,7 @@ function pollOrderSettlement(paymentHash, keypair, serverId) {
             'Payment confirmed! Provisioning tunnel...',
             'pulse-green',
           )
-          await claimAndSaveConfig(paymentHash, keypair)
+          await claimAndSaveConfig(paymentHash, keypair, targetNode)
         }
       }
     } catch (err) {
@@ -690,7 +693,7 @@ function isTransientStatus(status) {
   return status === 429 || status >= 500
 }
 
-function retryClaim(paymentHash, keypair, attempt, reason) {
+function retryClaim(paymentHash, keypair, targetNode, attempt, reason) {
   const delay = Math.min(
     CLAIM_RETRY_BASE_MS * 2 ** (attempt - 1),
     CLAIM_RETRY_MAX_MS,
@@ -699,11 +702,22 @@ function retryClaim(paymentHash, keypair, attempt, reason) {
     `${reason} Retrying in ${Math.round(delay / 1000)} s. Keep this page open (payment hash ${paymentHash}).`,
     'pulse-amber',
   )
-  setTimeout(() => claimAndSaveConfig(paymentHash, keypair, attempt + 1), delay)
+  setTimeout(
+    () => claimAndSaveConfig(paymentHash, keypair, targetNode, attempt + 1),
+    delay,
+  )
 }
 
-async function claimAndSaveConfig(paymentHash, keypair, attempt = 1) {
+async function claimAndSaveConfig(
+  paymentHash,
+  keypair,
+  targetNode,
+  attempt = 1,
+) {
   try {
+    if (targetNode !== 'lnd' && targetNode !== 'cln') {
+      throw new Error('No Lightning node was chosen for this checkout.')
+    }
     let claimRes
     try {
       claimRes = await fetch(
@@ -721,6 +735,7 @@ async function claimAndSaveConfig(paymentHash, keypair, attempt = 1) {
       retryClaim(
         paymentHash,
         keypair,
+        targetNode,
         attempt,
         `Network error: ${err.message}.`,
       )
@@ -731,6 +746,7 @@ async function claimAndSaveConfig(paymentHash, keypair, attempt = 1) {
       retryClaim(
         paymentHash,
         keypair,
+        targetNode,
         attempt,
         `The TunnelSats API is unavailable (HTTP ${claimRes.status}).`,
       )
@@ -745,6 +761,7 @@ async function claimAndSaveConfig(paymentHash, keypair, attempt = 1) {
       retryClaim(
         paymentHash,
         keypair,
+        targetNode,
         attempt,
         'Payment confirmed! The tunnel is being provisioned.',
       )
@@ -765,13 +782,14 @@ async function claimAndSaveConfig(paymentHash, keypair, attempt = 1) {
         },
         body: JSON.stringify({
           config: fullConfig,
-          target_node: selectedNode,
+          target_node: targetNode,
         }),
       })
     } catch (err) {
       retryClaim(
         paymentHash,
         keypair,
+        targetNode,
         attempt,
         `Could not reach StartOS to save the configuration: ${err.message}.`,
       )
@@ -782,6 +800,7 @@ async function claimAndSaveConfig(paymentHash, keypair, attempt = 1) {
       retryClaim(
         paymentHash,
         keypair,
+        targetNode,
         attempt,
         `Saving the configuration failed (HTTP ${saveRes.status}).`,
       )

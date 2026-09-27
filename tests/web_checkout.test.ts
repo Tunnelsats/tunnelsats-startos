@@ -38,6 +38,7 @@ function claim(overrides: Json = {}): Json {
 function loadCheckout(routes: Record<string, Route>) {
   const requests: { url: string; body: Json | null }[] = []
   const timeouts: (() => unknown)[] = []
+  const intervals: (() => unknown)[] = []
   const delays: number[] = []
   const elements: Record<string, Json> = {
     'select-server': { value: 'eu-de' },
@@ -65,7 +66,10 @@ function loadCheckout(routes: Record<string, Route>) {
     },
     window: { addEventListener() {} },
     alert() {},
-    setInterval: () => 0,
+    setInterval: (fn: () => unknown) => {
+      intervals.push(fn)
+      return 0
+    },
     clearInterval() {},
     setTimeout: (fn: () => unknown, ms: number) => {
       timeouts.push(fn)
@@ -93,6 +97,7 @@ function loadCheckout(routes: Record<string, Route>) {
     context: context as Json,
     requests,
     timeouts,
+    intervals,
     delays,
     status: () => element('payment-status-text').textContent as string,
     saved: () =>
@@ -130,10 +135,11 @@ test('a claim is assembled with the local key; fullConfig is never used', async 
     }),
     '/api/config/save': SAVE_OK,
   })
-  await web.context.claimAndSaveConfig(HASH, {
-    privateKey: PRIV,
-    publicKey: PUB,
-  })
+  await web.context.claimAndSaveConfig(
+    HASH,
+    { privateKey: PRIV, publicKey: PUB },
+    'lnd',
+  )
   const [saved] = web.saved()
   assert.ok(saved, web.status())
   assert.match(saved.config, new RegExp(`PrivateKey = ${PRIV}`))
@@ -217,10 +223,11 @@ for (const [name, body, error] of [
           : { status: 200, body },
       '/api/config/save': SAVE_OK,
     })
-    await web.context.claimAndSaveConfig(HASH, {
-      privateKey: PRIV,
-      publicKey: PUB,
-    })
+    await web.context.claimAndSaveConfig(
+      HASH,
+      { privateKey: PRIV, publicKey: PUB },
+      'lnd',
+    )
     assert.deepEqual(web.saved(), [])
     // A permanent failure: retrying cannot make this claim acceptable.
     assert.equal(web.timeouts.length, 0)
@@ -238,10 +245,11 @@ test('a claim still being provisioned is retried, not saved', async () => {
         : { status: 200, body: claim() },
     '/api/config/save': SAVE_OK,
   })
-  await web.context.claimAndSaveConfig(HASH, {
-    privateKey: PRIV,
-    publicKey: PUB,
-  })
+  await web.context.claimAndSaveConfig(
+    HASH,
+    { privateKey: PRIV, publicKey: PUB },
+    'lnd',
+  )
   assert.deepEqual(web.saved(), [])
   assert.equal(web.timeouts.length, 1)
 
@@ -259,10 +267,11 @@ test('provisioning is retried until it completes, with a capped backoff', async 
         : { status: 200, body: claim() },
     '/api/config/save': SAVE_OK,
   })
-  await web.context.claimAndSaveConfig(HASH, {
-    privateKey: PRIV,
-    publicKey: PUB,
-  })
+  await web.context.claimAndSaveConfig(
+    HASH,
+    { privateKey: PRIV, publicKey: PUB },
+    'lnd',
+  )
   for (let i = 0; i < web.timeouts.length; i++) await web.timeouts[i]()
   // 60 provisioning retries, then the success path's own close timer.
   assert.equal(web.delays.filter((d) => d >= 3500).length, 60)
@@ -285,12 +294,65 @@ for (const [name, route] of [
       [CLAIM_URL]: route,
       '/api/config/save': SAVE_OK,
     })
-    await web.context.claimAndSaveConfig(HASH, {
-      privateKey: PRIV,
-      publicKey: PUB,
-    })
+    await web.context.claimAndSaveConfig(
+      HASH,
+      { privateKey: PRIV, publicKey: PUB },
+      'lnd',
+    )
     assert.equal(web.timeouts.length, 1)
     assert.deepEqual(web.saved(), [])
     assert.match(web.status(), new RegExp(HASH))
   })
 }
+
+test('a paid claim saves for the node chosen at checkout, not the current selection', async () => {
+  let apiDown = true
+  const web = loadCheckout({
+    '/api/keys/generate': () => ({
+      status: 200,
+      body: { private_key: PRIV, public_key: PUB },
+    }),
+    [CREATE_URL]: () => ({
+      status: 200,
+      body: { invoice: 'lnbc1', paymentHash: HASH, amountSats: 1000 },
+    }),
+    [`https://tunnelsats.com/api/public/v1/subscription/${HASH}`]: () => ({
+      status: 200,
+      body: { status: 'paid' },
+    }),
+    [CLAIM_URL]: () =>
+      apiDown ? { status: 503, body: {} } : { status: 200, body: claim() },
+    '/api/config/save': SAVE_OK,
+  })
+  const pill = { classList: { add() {}, remove() {} } }
+  web.context.selectNode('cln', pill)
+  await web.context.startCheckout()
+  const poll = web.intervals.at(-1)
+  assert.ok(poll, 'checkout polls the order')
+  await poll()
+
+  // The operator closes the modal and picks another node while the paid
+  // claim is still retrying.
+  web.context.selectNode('lnd', pill)
+  apiDown = false
+  await web.timeouts.at(-1)!()
+
+  assert.deepEqual(
+    web.saved().map((b) => b?.target_node),
+    ['cln'],
+  )
+})
+
+test('a claim without a chosen node fails closed and saves nothing', async () => {
+  const web = loadCheckout({
+    [CLAIM_URL]: () => ({ status: 200, body: claim() }),
+    '/api/config/save': SAVE_OK,
+  })
+  await web.context.claimAndSaveConfig(HASH, {
+    privateKey: PRIV,
+    publicKey: PUB,
+  })
+  assert.deepEqual(web.saved(), [])
+  assert.equal(web.timeouts.length, 0)
+  assert.match(web.status(), new RegExp(HASH))
+})
