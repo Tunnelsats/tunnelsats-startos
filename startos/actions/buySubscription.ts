@@ -3,7 +3,8 @@ import { tunnelsatsMeta } from '../fileModels/tunnelsatsMeta'
 import { i18n } from '../i18n'
 import { generateWireguardKeypair } from '../keygen'
 import { createSubscriptionOrder } from '../apiClient'
-import { payTaskReplayId } from '../settlement'
+import { payTaskReplayId, replacedPayTaskId } from '../settlement'
+import { clearReplacedPayTask } from '../payTasks'
 import { payInvoice as lndPayInvoice } from 'lnd-startos/startos/actions/payInvoice'
 import { payInvoice as clnPayInvoice } from 'cln-startos/startos/actions/payInvoice'
 import { payInvoice as eclairPayInvoice } from 'eclair-startos/startos/actions/payInvoice'
@@ -72,6 +73,10 @@ export const buySubscription = sdk.Action.withInput(
       wgPublicKey: keypair.publicKey,
     })
 
+    const previous = await tunnelsatsMeta
+      .read((m) => m.pendingOrder)
+      .once()
+      .catch(() => null)
     await tunnelsatsMeta.merge(effects, {
       pendingOrder: {
         paymentHash: order.paymentHash,
@@ -119,7 +124,7 @@ export const buySubscription = sdk.Action.withInput(
       {
         // The settlement health check clears the task under this ID once the
         // order is settled or expired.
-        replayId: payTaskReplayId('order', targetNode),
+        replayId: payTaskReplayId('order', targetNode, order.paymentHash),
         input: {
           kind: 'partial',
           accept: [],
@@ -137,6 +142,10 @@ export const buySubscription = sdk.Action.withInput(
           },
         ),
       },
+    )
+    await clearReplacedPayTask(
+      effects,
+      replacedPayTaskId('order', previous, order.paymentHash),
     )
 
     return {

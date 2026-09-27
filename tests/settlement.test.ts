@@ -2,6 +2,7 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import {
   payTaskReplayId,
+  replacedPayTaskId,
   runSettlementTick,
   type ExecResult,
   type SettlementOps,
@@ -42,10 +43,37 @@ function fakeOps(
   return { ops, calls }
 }
 
-test('payTaskReplayId matches the IDs bridge.py queues for clearing', () => {
-  assert.equal(payTaskReplayId('order', 'lnd'), 'tunnelsats-order:lnd')
-  assert.equal(payTaskReplayId('renewal', 'cln'), 'tunnelsats-renewal:cln')
-  assert.equal(payTaskReplayId('order', 'eclair'), 'tunnelsats-order:eclair')
+const H1 = 'a'.repeat(64)
+const H2 = 'b'.repeat(64)
+
+test('payTaskReplayId matches the per-payment IDs bridge.py queues for clearing', () => {
+  assert.equal(
+    payTaskReplayId('order', 'lnd', H1),
+    `tunnelsats-order:lnd:${H1.slice(0, 16)}`,
+  )
+  assert.equal(
+    payTaskReplayId('renewal', 'cln', H2),
+    `tunnelsats-renewal:cln:${H2.slice(0, 16)}`,
+  )
+  assert.notEqual(
+    payTaskReplayId('order', 'eclair', H1),
+    payTaskReplayId('order', 'eclair', H2),
+  )
+})
+
+test('replacedPayTaskId names the task of a pending entry a new payment replaces', () => {
+  assert.equal(
+    replacedPayTaskId('order', { paymentHash: H1, targetNode: 'eclair' }, H2),
+    payTaskReplayId('order', 'eclair', H1),
+  )
+  // Nothing replaced: no entry, the same payment, or no known node.
+  assert.equal(replacedPayTaskId('order', null, H2), null)
+  assert.equal(replacedPayTaskId('order', undefined, H2), null)
+  assert.equal(
+    replacedPayTaskId('renewal', { paymentHash: H2, targetNode: 'lnd' }, H2),
+    null,
+  )
+  assert.equal(replacedPayTaskId('renewal', { paymentHash: H1 }, H2), null)
 })
 
 test('nothing pending is idle and touches no task', async () => {

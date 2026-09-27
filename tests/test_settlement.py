@@ -27,6 +27,8 @@ import bridge
 NOW = datetime(2026, 9, 26, 12, 0, 0, tzinfo=timezone.utc)
 HASH = "a" * 64
 RENEW_HASH = "b" * 64
+ORDER_TASK = "tunnelsats-order:eclair:" + HASH[:16]
+RENEW_TASK = "tunnelsats-renewal:cln:" + RENEW_HASH[:16]
 SERVER_PUB = "c2VydmVyLXB1YmtleS1zZXJ2ZXItcHVia2V5LXNlcnY="
 PSK = "cHNrLXBzay1wc2stcHNrLXBzay1wc2stcHNrLXBzay0="
 OTHER_PUB = "7v4SSOfHG0qjHArLrDucmKCpkgHE+hH6DzZFSoq5JVk="
@@ -188,8 +190,8 @@ class TestOrderSettlement(SettlementTestBase):
         meta = self.read_meta()
         self.assertNotIn("pendingOrder", meta)
         self.assertEqual(meta["vpnPort"], 24556)
-        self.assertEqual(meta["payTasksToClear"], ["tunnelsats-order:eclair"])
-        self.assertEqual(result["clearPayTasks"], ["tunnelsats-order:eclair"])
+        self.assertEqual(meta["payTasksToClear"], [ORDER_TASK])
+        self.assertEqual(result["clearPayTasks"], [ORDER_TASK])
 
     def test_server_supplied_config_and_private_keys_are_never_used(self):
         self.write_meta({"pendingOrder": self.pending_order()})
@@ -310,7 +312,7 @@ class TestOrderSettlement(SettlementTestBase):
         self.assertEqual(self.only(result)["result"], "expired")
         meta = self.read_meta()
         self.assertNotIn("pendingOrder", meta)
-        self.assertEqual(result["clearPayTasks"], ["tunnelsats-order:eclair"])
+        self.assertEqual(result["clearPayTasks"], [ORDER_TASK])
 
     def test_unknown_order_expires_only_after_24_hours(self):
         self.write_meta({"pendingOrder": self.pending_order()})
@@ -387,7 +389,7 @@ class TestRenewalSettlement(SettlementTestBase):
         meta = self.read_meta()
         self.assertNotIn("pendingRenewal", meta)
         self.assertEqual((meta["expiresAt"], meta["expirySource"]), ("2026-11-01T00:00:00.000Z", "api"))
-        self.assertEqual(result["clearPayTasks"], ["tunnelsats-renewal:cln"])
+        self.assertEqual(result["clearPayTasks"], [RENEW_TASK])
 
     def test_paid_renewal_waits_until_the_confirmed_expiry_moved(self):
         self.write_meta({"pendingRenewal": self.pending_renewal()})
@@ -402,7 +404,7 @@ class TestRenewalSettlement(SettlementTestBase):
         result = self.settle()
         self.assertEqual(self.only(result)["result"], "superseded")
         self.assertNotIn("pendingRenewal", self.read_meta())
-        self.assertEqual(result["clearPayTasks"], ["tunnelsats-renewal:cln"])
+        self.assertEqual(result["clearPayTasks"], [RENEW_TASK])
         self.assertNotIn(("POST", "/subscription/status"), [(m, p) for m, p, _ in self.api.requests])
 
     def test_unpaid_renewal_expires_after_24_hours(self):
@@ -441,19 +443,12 @@ class TestPayTaskAcknowledgement(SettlementTestBase):
         bridge.ack_pay_tasks(["tunnelsats-renewal:cln"])
         self.assertEqual(self.read_meta(), {"vpnPort": 1})
 
-    def test_a_new_pay_task_under_the_same_replay_id_is_never_cleared(self):
-        # A Buy on eclair after the previous eclair order settled raised its
-        # task under the same replay ID, replacing the settled one. Clearing
-        # the queued ID now would remove the new, unpaid task.
-        retry_at = iso(NOW + timedelta(minutes=1))
-        self.write_meta({
-            "payTasksToClear": ["tunnelsats-order:eclair", "tunnelsats-renewal:cln"],
-            "pendingOrder": self.pending_order(nextAttemptAt=retry_at, lastError="x"),
-        })
-        result = self.settle()
-        self.assertEqual(result["clearPayTasks"], ["tunnelsats-renewal:cln"])
-        self.assertEqual(self.read_meta()["payTasksToClear"], ["tunnelsats-renewal:cln"])
-        self.assertEqual(self.api.requests, [])
+    def test_replay_ids_are_unique_per_payment(self):
+        # A new Buy on the same node raises its task under its own ID, so
+        # clearing a settled payment's task can never remove the new one.
+        self.assertEqual(bridge.pay_task_replay_id("order", "lnd", HASH), "tunnelsats-order:lnd:" + HASH[:16])
+        self.assertNotEqual(bridge.pay_task_replay_id("order", "lnd", HASH),
+                            bridge.pay_task_replay_id("order", "lnd", RENEW_HASH))
 
     def test_cli_settle_prints_the_outcome_and_ack_clears(self):
         self.write_meta({"payTasksToClear": ["tunnelsats-order:lnd"]})
@@ -493,7 +488,7 @@ class TestSaveConfigurationSettlement(SettlementTestBase):
         bridge.save_configuration(self.CONF, "lnd", clear_pending_order=HASH)
         meta = self.read_meta()
         self.assertNotIn("pendingOrder", meta)
-        self.assertEqual(meta["payTasksToClear"], ["tunnelsats-order:eclair"])
+        self.assertEqual(meta["payTasksToClear"], [ORDER_TASK])
 
     def test_plain_save_keeps_the_pending_order(self):
         order = self.pending_order()

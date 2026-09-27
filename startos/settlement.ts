@@ -11,14 +11,45 @@
 export type TargetNode = 'lnd' | 'cln' | 'eclair'
 export type PaymentKind = 'order' | 'renewal'
 
+const TARGET_NODES: readonly string[] = ['lnd', 'cln', 'eclair']
+
 /**
  * Replay ID of the Pay Invoice task a Buy (order) or Renew (renewal) raises
- * on `node`. One per kind and node, so a new Buy replaces an older unpaid
- * task instead of stacking a second one. Must match pay_task_replay_id() in
- * bridge.py, which queues these IDs for clearing.
+ * on `node` for one payment. Unique per payment, so clearing a settled
+ * payment's task can never remove a newer payment's task. Must match
+ * pay_task_replay_id() in bridge.py, which queues these IDs for clearing.
  */
-export function payTaskReplayId(kind: PaymentKind, node: TargetNode): string {
-  return `tunnelsats-${kind}:${node}`
+export function payTaskReplayId(
+  kind: PaymentKind,
+  node: TargetNode,
+  paymentHash: string,
+): string {
+  return `tunnelsats-${kind}:${node}:${paymentHash.slice(0, 16)}`
+}
+
+/**
+ * The pay task of the pending entry that a new payment (`newHash`) is about
+ * to replace, or null. A Buy/Renew clears it: the replaced payment is no
+ * longer tracked, so its invoice must not stay on the node as a task.
+ */
+export function replacedPayTaskId(
+  kind: PaymentKind,
+  previous: { paymentHash?: string; targetNode?: string } | null | undefined,
+  newHash: string,
+): string | null {
+  if (
+    !previous?.paymentHash ||
+    previous.paymentHash === newHash ||
+    !previous.targetNode ||
+    !TARGET_NODES.includes(previous.targetNode)
+  ) {
+    return null
+  }
+  return payTaskReplayId(
+    kind,
+    previous.targetNode as TargetNode,
+    previous.paymentHash,
+  )
 }
 
 const TERMINAL_RESULTS = [

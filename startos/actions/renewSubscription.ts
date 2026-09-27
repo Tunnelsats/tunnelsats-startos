@@ -5,7 +5,8 @@ import { i18n } from '../i18n'
 import { parseWireguardTunnelInfo } from '../utils'
 import { derivePublicKey } from '../keygen'
 import { requestRenewal } from '../apiClient'
-import { payTaskReplayId } from '../settlement'
+import { payTaskReplayId, replacedPayTaskId } from '../settlement'
+import { clearReplacedPayTask } from '../payTasks'
 import { payInvoice as lndPayInvoice } from 'lnd-startos/startos/actions/payInvoice'
 import { payInvoice as clnPayInvoice } from 'cln-startos/startos/actions/payInvoice'
 import { payInvoice as eclairPayInvoice } from 'eclair-startos/startos/actions/payInvoice'
@@ -88,9 +89,8 @@ export const renewSubscription = sdk.Action.withInput(
     const targetNode = config['target-node'] || 'lnd'
     const { packageId, payInvoiceAction } = resolvePayInvoice(targetNode)
 
-    // Recorded before the task exists: the settlement tick never clears the
-    // pay task of a live pending entry, so the new task is safe from a
-    // settled renewal's queued replay ID.
+    // Recorded before the task exists, like Buy: the settlement tick tracks
+    // the renewal from the moment its invoice can be paid.
     await tunnelsatsMeta.merge(effects, {
       pendingRenewal: {
         paymentHash: renewal.paymentHash,
@@ -113,7 +113,7 @@ export const renewSubscription = sdk.Action.withInput(
       payInvoiceAction,
       'important',
       {
-        replayId: payTaskReplayId('renewal', targetNode),
+        replayId: payTaskReplayId('renewal', targetNode, renewal.paymentHash),
         input: {
           kind: 'partial',
           accept: [],
@@ -126,6 +126,10 @@ export const renewSubscription = sdk.Action.withInput(
         },
         reason: i18n('Pay TunnelSats VPN subscription renewal invoice'),
       },
+    )
+    await clearReplacedPayTask(
+      effects,
+      replacedPayTaskId('renewal', meta?.pendingRenewal, renewal.paymentHash),
     )
 
     return {

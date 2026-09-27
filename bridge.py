@@ -485,7 +485,7 @@ def subscription_sync_loop():
 
 PENDING_KINDS = (("order", "pendingOrder"), ("renewal", "pendingRenewal"))
 # Replay IDs of the Pay Invoice tasks the Buy/Renew actions raise on the node.
-# Must match payTaskReplayId() in startos/settlement.ts.
+# Must match payTaskReplayId() in startos/settlement.ts (see pay_task_replay_id).
 PAY_TASK_REPLAY_PREFIX = {"order": "tunnelsats-order", "renewal": "tunnelsats-renewal"}
 # Lightning invoices from TunnelSats expire after an hour; a day without
 # payment means the pending state can go.
@@ -510,8 +510,10 @@ class _ApiHttpError(SettlementError):
         self.code = code
 
 
-def pay_task_replay_id(kind, node):
-    return f"{PAY_TASK_REPLAY_PREFIX[kind]}:{node}"
+def pay_task_replay_id(kind, node, payment_hash):
+    """Unique per payment, so clearing a settled payment's task can never
+    remove the task of a newer Buy/Renew on the same node."""
+    return f"{PAY_TASK_REPLAY_PREFIX[kind]}:{node}:{payment_hash[:16]}"
 
 
 def _iso(dt):
@@ -710,7 +712,7 @@ def _clear_pending(meta, key, payment_hash):
     meta.pop(key, None)
     if node in TARGET_NODES:
         tasks = [t for t in meta.get("payTasksToClear") or [] if isinstance(t, str)]
-        replay_id = pay_task_replay_id(kind, node)
+        replay_id = pay_task_replay_id(kind, node, payment_hash)
         if replay_id not in tasks:
             tasks.append(replay_id)
         meta["payTasksToClear"] = tasks
@@ -768,6 +770,11 @@ def _settle_order(pending, now):
     if status == 202 or claim.get("status") == "processing":
         return _outcome("order", "waiting", "Payment received; the tunnel is being provisioned.", payment_hash)
     conf = assemble_claimed_config(claim, pending)
+    # Applied even if a newer Buy replaced pendingOrder meanwhile: this order
+    # is paid and its private key exists only in this tick, while the newer
+    # one is at best unpaid. Skipping it would lose a paid tunnel for good.
+    # save_configuration's hash check keeps the newer pendingOrder, which
+    # the next tick settles (and applies) once it is paid.
     save_configuration(conf, pending.get("targetNode"), clear_pending_order=payment_hash)
     return _outcome("order", "provisioned", "The new tunnel was configured.", payment_hash)
 
@@ -826,42 +833,15 @@ def _pay_tasks_to_clear(meta):
     return [t for t in meta.get("payTasksToClear") or [] if isinstance(t, str)]
 
 
-def _live_pay_tasks(meta):
-    """Replay IDs of the pay tasks of the current pending entries."""
-    live = set()
-    for kind, key in PENDING_KINDS:
-        pending = meta.get(key)
-        if isinstance(pending, dict) and pending.get("targetNode") in TARGET_NODES:
-            live.add(pay_task_replay_id(kind, pending["targetNode"]))
-    return live
-
-
-def _drain_pay_tasks():
-    """The queued replay IDs that are safe to clear. A Buy/Renew after the
-    settlement raised its task under the same replay ID, which replaced the
-    settled task; such IDs are dropped instead, or clearing them would remove
-    the new, unpaid task."""
-    with meta_lock():
-        meta = read_meta()
-        tasks = _pay_tasks_to_clear(meta)
-        live = _live_pay_tasks(meta)
-        clearable = [t for t in tasks if t not in live]
-        if len(clearable) != len(tasks):
-            if clearable:
-                meta["payTasksToClear"] = clearable
-            else:
-                meta.pop("payTasksToClear", None)
-            atomic_write_json(META_FILE_PATH, meta)
-        return clearable
-
-
 def settle_pending(now=None):
     """One settlement tick. Returns {"outcomes": [...], "clearPayTasks": [...],
     "busy": bool}. Each outcome's result is one of "waiting", "provisioned",
     "renewed", "superseded", "expired" or "failed". clearPayTasks lists the
     replay IDs of pay tasks whose payment is settled or expired; they stay
     listed until acknowledged with ack_pay_tasks, so a restart between
-    settling and clearing the task cannot leave the task behind."""
+    settling and clearing the task cannot leave the task behind. The IDs are
+    unique per payment, so clearing them never touches a newer payment's
+    task."""
     now = now or datetime.now(timezone.utc)
     with settle_lock() as acquired:
         if not acquired:
@@ -873,7 +853,9 @@ def settle_pending(now=None):
             pending = meta.get(key)
             if isinstance(pending, dict) and isinstance(pending.get("paymentHash"), str) and pending["paymentHash"]:
                 outcomes.append(_settle_one(kind, key, pending, now))
-        return {"outcomes": outcomes, "clearPayTasks": _drain_pay_tasks(), "busy": False}
+        with meta_lock():
+            tasks = _pay_tasks_to_clear(read_meta())
+        return {"outcomes": outcomes, "clearPayTasks": tasks, "busy": False}
 
 
 def ack_pay_tasks(replay_ids):
