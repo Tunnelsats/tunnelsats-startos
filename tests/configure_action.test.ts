@@ -5,6 +5,7 @@ import { configJson } from '../startos/fileModels/config.json'
 import { tunnelsatsConf } from '../startos/fileModels/tunnelsatsConf'
 import { getTargetVpnConfig } from '../startos/dependencies'
 import { buildOnTaskInput } from '../startos/vpnHandoff'
+import defaultDict from '../startos/i18n/dictionaries/default'
 
 const CLEAN_CONF = `[Interface]
 PrivateKey = DUMMY_TEST_PRIVATE_KEY_FOR_TESTING_123456=
@@ -30,8 +31,12 @@ PublicKey = DUMMY_TEST_PUBLIC_KEY_FOR_TESTING_123456=
 Endpoint = ch1.tunnelsats.com:51820
 `
 
-/** Runs the production Configure handler with the file writes captured. */
-async function runConfigure(conf: string) {
+/**
+ * Runs the production Configure handler with the file writes captured. With
+ * enabled=false the handler removes tunnelsatsv3.conf with rm({force:true}),
+ * a no-op outside StartOS where the volume path does not exist.
+ */
+async function runConfigure(conf: string, enabled = true) {
   const origMerge = configJson.merge
   const origWrite = tunnelsatsConf.write
   let merged: any = null
@@ -46,7 +51,7 @@ async function runConfigure(conf: string) {
     const response = await (configure as any).runFn({
       effects: {},
       input: {
-        enabled: true,
+        enabled,
         'target-node': 'lnd',
         'tunnelsats-conf': conf,
         'allow-ipv6': false,
@@ -90,4 +95,49 @@ test('the node task accepts an already-marked stored config byte-identical', () 
   assert.deepEqual(input.accept, [
     { config: LEGACY_MARKED_CONF, announce: 'ch1.tunnelsats.com:24556' },
   ])
+})
+
+// ---------------------------------------------------------------------------
+// Configure speaks the node-owned clearnet-vpn model, not the retired
+// StartOS gateway model.
+// ---------------------------------------------------------------------------
+
+const RETIRED_GATEWAY_GUIDANCE =
+  /System → Gateways|Outbound Gateway|Peer interface|external host/i
+
+test('Configure metadata describes enable/disable, node choice and config replacement', () => {
+  const metadata = (configure as any).metadataFn
+  assert.equal(configure.id, 'configure')
+  assert.equal(
+    metadata.description,
+    'Enable/disable TunnelSats, pick the target node, and replace the WireGuard configuration',
+  )
+  assert.doesNotMatch(metadata.description, RETIRED_GATEWAY_GUIDANCE)
+})
+
+test('Configure success explains the clearnet-vpn task flow, like Import', async () => {
+  const { response } = await runConfigure(CLEAN_CONF)
+  assert.equal(
+    response.message,
+    'WireGuard configuration saved. Your Lightning node will ask you to activate the VPN tunnel. If TunnelSats routed a different node before, that node first asks you to turn its tunnel off.',
+  )
+  assert.doesNotMatch(response.message, RETIRED_GATEWAY_GUIDANCE)
+})
+
+test('Configure with TunnelSats switched off says the node will be asked to turn its tunnel off', async () => {
+  const { response, merged, written } = await runConfigure(CLEAN_CONF, false)
+  assert.equal(merged.enabled, false)
+  assert.equal(merged['tunnelsats-conf'], CLEAN_CONF)
+  assert.equal(written, null)
+  assert.equal(
+    response.message,
+    'TunnelSats is switched off and your WireGuard configuration is kept. If a Lightning node used the tunnel, it will ask you to turn it off.',
+  )
+  assert.doesNotMatch(response.message, RETIRED_GATEWAY_GUIDANCE)
+})
+
+test('no user-facing string still carries retired gateway guidance', () => {
+  for (const key of Object.keys(defaultDict)) {
+    assert.doesNotMatch(key, RETIRED_GATEWAY_GUIDANCE, key)
+  }
 })

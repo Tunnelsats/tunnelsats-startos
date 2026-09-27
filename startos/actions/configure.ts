@@ -11,7 +11,7 @@ export const inputSpec = InputSpec.of({
   enabled: Value.toggle({
     name: i18n('Enable TunnelSats'),
     description: i18n(
-      'Enable subscription monitoring and automated external host announcement for TunnelSats.',
+      'Route the selected Lightning node through the TunnelSats tunnel. Turning this off asks the node to switch its tunnel off.',
     ),
     default: false,
   }),
@@ -47,7 +47,9 @@ export const configure = sdk.Action.withInput(
   'configure',
   {
     name: i18n('Configure'),
-    description: i18n('Adjust TunnelSats settings and WireGuard configuration'),
+    description: i18n(
+      'Enable/disable TunnelSats, pick the target node, and replace the WireGuard configuration',
+    ),
     warning: null,
     allowedStatuses: 'any',
     group: null,
@@ -96,9 +98,15 @@ export const configure = sdk.Action.withInput(
       return {
         version: '1' as const,
         title: i18n('Configuration Saved'),
-        message: i18n(
-          "Add this as a new gateway under System → Gateways (delete any existing TunnelSats gateway first). Then open your node's Peer interface to enable the address and assign the Outbound Gateway (see Instructions).",
-        ),
+        // The clearnet-vpn on/off tasks are raised by setDependencies,
+        // which reacts to this config write.
+        message: input.enabled
+          ? i18n(
+              'WireGuard configuration saved. Your Lightning node will ask you to activate the VPN tunnel. If TunnelSats routed a different node before, that node first asks you to turn its tunnel off.',
+            )
+          : i18n(
+              'TunnelSats is switched off and your WireGuard configuration is kept. If a Lightning node used the tunnel, it will ask you to turn it off.',
+            ),
         result: {
           type: 'single' as const,
           value: processedConf,
