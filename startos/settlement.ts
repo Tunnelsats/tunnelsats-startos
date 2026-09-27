@@ -57,16 +57,25 @@ export function replacedPayTaskId(
  * it queues the replaced payment's pay task in payTasksToClear, so the
  * settlement health check clears it (retrying until acknowledged) and the
  * node never keeps offering an invoice this package no longer tracks.
- * Returns an empty patch when nothing is replaced; the key is omitted rather
- * than set to undefined, because merge() deletes undefined keys.
+ *
+ * FileHelper.merge replaces arrays instead of merging them, so the patch
+ * carries the whole queue: `queued` must come from the same fresh read as
+ * `previous`, taken right before the merge. Returns an empty patch when
+ * nothing is replaced, omitting the key, because merge() writes undefined
+ * values as deletions.
  */
 export function replacedPayTaskPatch(
   kind: PaymentKind,
   previous: { paymentHash?: string; targetNode?: string } | null | undefined,
+  queued: readonly string[] | null | undefined,
   newHash: string,
 ): { payTasksToClear?: string[] } {
   const replayId = replacedPayTaskId(kind, previous, newHash)
-  return replayId ? { payTasksToClear: [replayId] } : {}
+  if (!replayId) return {}
+  const tasks = (queued ?? []).filter((t) => typeof t === 'string')
+  return {
+    payTasksToClear: tasks.includes(replayId) ? tasks : [...tasks, replayId],
+  }
 }
 
 const TERMINAL_RESULTS = [

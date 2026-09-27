@@ -1,5 +1,10 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
+import { mkdtempSync, rmSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import { FileHelper } from '@start9labs/start-sdk'
+import { metaShape } from '../startos/fileModels/tunnelsatsMeta'
 import {
   payTaskReplayId,
   replacedPayTaskPatch,
@@ -251,16 +256,33 @@ for (const [name, stdout] of [
   })
 }
 
-test('replacedPayTaskPatch: queues the replaced payment task for the settlement tick', () => {
+const QUEUED = 'tunnelsats-order:lnd:' + 'd'.repeat(16)
+
+test('replacedPayTaskPatch: queues the replaced payment task after those already queued', () => {
   const previous = { paymentHash: 'b'.repeat(64), targetNode: 'cln' }
-  assert.deepEqual(replacedPayTaskPatch('renewal', previous, 'c'.repeat(64)), {
-    payTasksToClear: [payTaskReplayId('renewal', 'cln', 'b'.repeat(64))],
-  })
+  assert.deepEqual(
+    replacedPayTaskPatch('renewal', previous, [QUEUED], 'c'.repeat(64)),
+    {
+      payTasksToClear: [
+        QUEUED,
+        payTaskReplayId('renewal', 'cln', 'b'.repeat(64)),
+      ],
+    },
+  )
+})
+
+test('replacedPayTaskPatch: never queues an ID twice', () => {
+  const previous = { paymentHash: 'b'.repeat(64), targetNode: 'cln' }
+  const id = payTaskReplayId('renewal', 'cln', 'b'.repeat(64))
+  assert.deepEqual(
+    replacedPayTaskPatch('renewal', previous, [id], 'c'.repeat(64)),
+    { payTasksToClear: [id] },
+  )
 })
 
 test('replacedPayTaskPatch: adds no key when nothing is replaced', () => {
-  // merge() deletes keys set to undefined, so the patch must omit the key
-  // entirely or it would wipe tasks already queued for clearing.
+  // The queue already on disk is kept as is; merge() deletes keys set to
+  // undefined, so the patch must omit the key entirely.
   for (const previous of [
     null,
     undefined,
@@ -269,8 +291,50 @@ test('replacedPayTaskPatch: adds no key when nothing is replaced', () => {
     { paymentHash: 'b'.repeat(64) },
     { paymentHash: 'b'.repeat(64), targetNode: 'bogus' },
   ]) {
-    const patch = replacedPayTaskPatch('order', previous, 'c'.repeat(64))
+    const patch = replacedPayTaskPatch(
+      'order',
+      previous,
+      [QUEUED],
+      'c'.repeat(64),
+    )
     assert.deepEqual(patch, {})
     assert.equal('payTasksToClear' in patch, false)
+  }
+})
+
+test('replacedPayTaskPatch: the real metadata merge keeps tasks already queued', async () => {
+  // FileHelper.merge replaces arrays rather than merging them, so the patch
+  // must carry the whole queue. This runs the SDK merge on the real schema.
+  const dir = mkdtempSync(join(tmpdir(), 'meta-'))
+  try {
+    const meta = FileHelper.json(join(dir, 'meta.json'), metaShape)
+    const previous = {
+      paymentHash: 'b'.repeat(64),
+      renewalId: 'r1',
+      oldExpiry: '2026-10-01T00:00:00.000Z',
+      newExpiry: '2026-11-01T00:00:00.000Z',
+      createdAt: '2026-09-27T00:00:00.000Z',
+      targetNode: 'cln' as const,
+    }
+    await meta.write({} as never, {
+      pendingRenewal: previous,
+      payTasksToClear: [QUEUED],
+    })
+    const current = await meta.read().once()
+    await meta.merge({} as never, {
+      pendingRenewal: { ...previous, paymentHash: 'c'.repeat(64) },
+      ...replacedPayTaskPatch(
+        'renewal',
+        current?.pendingRenewal,
+        current?.payTasksToClear,
+        'c'.repeat(64),
+      ),
+    })
+    assert.deepEqual((await meta.read().once())?.payTasksToClear, [
+      QUEUED,
+      payTaskReplayId('renewal', 'cln', 'b'.repeat(64)),
+    ])
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
   }
 })

@@ -93,6 +93,15 @@ export const renewSubscription = sdk.Action.withInput(
     // only after that, so it always belongs to a tracked payment: if the
     // write fails nothing changed, and if raising the task fails the renewal
     // is tracked without a task and expires unpaid.
+    //
+    // The replaced renewal and the queue are re-read right before the merge,
+    // not taken from the snapshot read before the API request: another
+    // Renew or a settlement tick may have changed them meanwhile, and the
+    // patch replaces the whole queue.
+    const current = await tunnelsatsMeta
+      .read()
+      .once()
+      .catch(() => null)
     await tunnelsatsMeta.merge(effects, {
       pendingRenewal: {
         paymentHash: renewal.paymentHash,
@@ -109,7 +118,8 @@ export const renewSubscription = sdk.Action.withInput(
       },
       ...replacedPayTaskPatch(
         'renewal',
-        meta?.pendingRenewal,
+        current?.pendingRenewal,
+        current?.payTasksToClear,
         renewal.paymentHash,
       ),
     })

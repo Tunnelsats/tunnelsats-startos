@@ -72,8 +72,10 @@ export const buySubscription = sdk.Action.withInput(
       wgPublicKey: keypair.publicKey,
     })
 
-    const previous = await tunnelsatsMeta
-      .read((m) => m.pendingOrder)
+    // Read right before the merge: the patch below replaces the whole
+    // payTasksToClear queue and must start from the latest one.
+    const current = await tunnelsatsMeta
+      .read()
       .once()
       .catch(() => null)
     await tunnelsatsMeta.merge(effects, {
@@ -92,7 +94,12 @@ export const buySubscription = sdk.Action.withInput(
       },
       // Queues the replaced order's pay task for the settlement health check
       // to clear, in the same write that stops tracking that order.
-      ...replacedPayTaskPatch('order', previous, order.paymentHash),
+      ...replacedPayTaskPatch(
+        'order',
+        current?.pendingOrder,
+        current?.payTasksToClear,
+        order.paymentHash,
+      ),
     })
 
     let packageId: string
