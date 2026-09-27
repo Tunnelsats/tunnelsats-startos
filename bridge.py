@@ -24,6 +24,21 @@ META_FILE_PATH = os.path.join(DATA_DIR, "tunnelsats-meta.json")
 TUNNELSATS_API_URL = "https://tunnelsats.com/api/public/v1"
 # Fields that only hold for the key they were confirmed for (see lazy_sync).
 CONFIRMED_META_FIELDS = ("expiresAt", "expirySource", "lastSync", "syncSuccess", "bandwidth_used_gb")
+# The unknown-key state (see _record_not_found) belongs to one key as well.
+KEY_BOUND_META_FIELDS = CONFIRMED_META_FIELDS + ("keyUnknown", "notFoundSince")
+# The status endpoint's error code for "no subscription for this key".
+STATUS_NOT_FOUND_CODE = "ERR_RESOURCE_NOT_FOUND"
+# How long a key the API confirmed before must keep answering "not found"
+# before it counts as unknown. The endpoint also answers 404 while one of
+# its servers is unreachable, so a single answer proves nothing for it.
+UNKNOWN_KEY_CONFIRM_AFTER = timedelta(hours=24)
+UNKNOWN_KEY_MESSAGE = (
+    "TunnelSats has no subscription for the WireGuard key in this configuration. "
+    "Import a valid configuration or buy a subscription."
+)
+NOT_FOUND_PENDING_MESSAGE = (
+    "TunnelSats did not find this WireGuard key. This can be a temporary server problem; checking again."
+)
 
 os.umask(0o077)
 
@@ -212,7 +227,7 @@ def save_configuration(conf_content, target_node="lnd", clear_pending_order=None
         # stay, above all pendingOrder, which holds the private key of an
         # order that may not be claimed yet.
         meta = read_meta()
-        for stale in CONFIRMED_META_FIELDS + ("publicKey", "syncError", "lastSyncAttempt",
+        for stale in KEY_BOUND_META_FIELDS + ("publicKey", "syncError", "lastSyncAttempt",
                                               "serverDomain", "vpnPort"):
             meta.pop(stale, None)
         meta.update(hints)
@@ -280,10 +295,11 @@ def _superseded(wg_pubkey):
     return get_wg_pubkey() != wg_pubkey
 
 def _bind_meta_to_key(meta, wg_pubkey):
-    """A confirmation belongs to the key it was confirmed for. A new key
-    (e.g. a freshly imported config) starts unconfirmed."""
+    """A confirmation (or an unknown-key verdict) belongs to the key it was
+    recorded for. A new key (e.g. a freshly imported config) starts
+    unconfirmed."""
     if meta.get("publicKey") != wg_pubkey:
-        for stale in CONFIRMED_META_FIELDS:
+        for stale in KEY_BOUND_META_FIELDS:
             meta.pop(stale, None)
         meta["publicKey"] = wg_pubkey
 
@@ -300,13 +316,35 @@ def _confirmed_since(meta, wg_pubkey, since):
         last = last.replace(tzinfo=timezone.utc)
     return last >= since
 
+class _KeyNotFound(Exception):
+    """The status endpoint answered that it has no subscription for the key."""
+
+
+def _is_not_found_answer(http_error):
+    """True only for the status endpoint's own "no subscription for this key"
+    answer: HTTP 404 with the ERR_RESOURCE_NOT_FOUND code. A 404 from a
+    proxy, a CDN or a removed route carries no such body and stays an
+    operational failure."""
+    if http_error.code != 404:
+        return False
+    try:
+        body = json.loads(http_error.read().decode("utf-8"))
+    except Exception:
+        return False
+    return isinstance(body, dict) and body.get("error") == STATUS_NOT_FOUND_CODE
+
+
 def lazy_sync(wg_pubkey, require_usage=False):
     """Refreshes the confirmed subscription state for wg_pubkey.
 
     Returns an explicit outcome: "confirmed" (API answered with a valid
-    expiry), "failed" (no confirmation; the last confirmed value for this key
-    is kept), "superseded" (the configured key changed while the request was
-    in flight; nothing written) or "skipped" (no usable key)."""
+    expiry), "unknown-key" (the API has no subscription for this key; see
+    _record_not_found), "not-found" (the API answered "not found" for a key
+    it confirmed before, not yet long enough to count as unknown), "failed"
+    (operational failure: no answer about the key; the last confirmed value
+    for this key is kept), "superseded" (the configured key changed while
+    the request was in flight; nothing written) or "skipped" (no usable
+    key)."""
     if not wg_pubkey or wg_pubkey == "Unknown" or wg_pubkey == "Not available":
         return "skipped"
 
@@ -333,6 +371,8 @@ def lazy_sync(wg_pubkey, require_usage=False):
                     response_data = json.loads(response.read().decode("utf-8"))
                     break
             except urllib.error.HTTPError as e:
+                if _is_not_found_answer(e):
+                    raise _KeyNotFound() from e
                 if 400 <= e.code < 500:
                     raise e
                 if attempt == 4:
@@ -384,12 +424,18 @@ def lazy_sync(wg_pubkey, require_usage=False):
             meta["lastSync"] = datetime.now(timezone.utc).isoformat()
             meta["syncSuccess"] = True
             meta["syncError"] = None
+            meta.pop("keyUnknown", None)
+            meta.pop("notFoundSince", None)
             atomic_write_json(META_FILE_PATH, meta)
         return "confirmed"
 
+    except _KeyNotFound:
+        return _record_not_found(wg_pubkey, started_at)
+
     except Exception as e:
         # Keep the last confirmed value for this key; never extend it and
-        # never substitute the comment.
+        # never substitute the comment. An unknown-key verdict stays too: a
+        # failure says nothing new about the key.
         err_msg = str(e)
         print(f"Error during lazy subscription sync: {err_msg}", file=sys.stderr)
         try:
@@ -411,15 +457,69 @@ def lazy_sync(wg_pubkey, require_usage=False):
             print(f"Could not record the subscription sync failure: {write_error}", file=sys.stderr)
         return "failed"
 
+
+def _record_not_found(wg_pubkey, started_at):
+    """Records the API's "no subscription for this key" answer.
+
+    `notFoundSince` marks the first such answer since the last confirmation.
+    A key the API never confirmed is declared unknown at once (e.g. an
+    imported config whose key TunnelSats does not know). A key it confirmed
+    before is declared unknown only once the answers have persisted for
+    UNKNOWN_KEY_CONFIRM_AFTER, because the endpoint also answers 404 while
+    one of its servers is unreachable; until then its last confirmed expiry
+    is kept. Declaring drops the confirmation: the API's latest definitive
+    answer is that the key has no subscription."""
+    try:
+        with meta_lock():
+            if _superseded(wg_pubkey):
+                return "superseded"
+            meta = read_meta()
+            if _confirmed_since(meta, wg_pubkey, started_at):
+                print("Subscription not-found answer not recorded: a concurrent sync confirmed this key",
+                      file=sys.stderr)
+                return "not-found"
+            _bind_meta_to_key(meta, wg_pubkey)
+            now = datetime.now(timezone.utc)
+            since = _parse_iso(meta.get("notFoundSince")) or now
+            declared = (
+                meta.get("keyUnknown") is True
+                or meta.get("expirySource") != "api"
+                or now - since >= UNKNOWN_KEY_CONFIRM_AFTER
+            )
+            meta["notFoundSince"] = _iso(since)
+            meta["lastSyncAttempt"] = now.isoformat()
+            if declared:
+                for field in CONFIRMED_META_FIELDS:
+                    meta.pop(field, None)
+                meta["keyUnknown"] = True
+                meta["syncError"] = UNKNOWN_KEY_MESSAGE
+            else:
+                meta["syncError"] = NOT_FOUND_PENDING_MESSAGE
+            meta["syncSuccess"] = False
+            atomic_write_json(META_FILE_PATH, meta)
+    except Exception as write_error:
+        print(f"Could not record the subscription not-found answer: {write_error}", file=sys.stderr)
+        return "failed"
+    if declared:
+        print("TunnelSats has no subscription for the configured key", file=sys.stderr)
+        return "unknown-key"
+    print(f"TunnelSats did not find the configured key (since {_iso(since)}); checking again", file=sys.stderr)
+    return "not-found"
+
 SYNC_POLL_STEP = 30
 
 def next_sync_delay(outcome):
     """Seconds until the next background sync. Only a confirmation earns
-    the long wait; a superseded sync re-runs almost at once for the new key."""
+    the long wait; a superseded sync re-runs almost at once for the new key.
+    A not-found answer is checked again hourly: a server outage behind it
+    then clears soon, and a real unknown key is not polled every few
+    minutes."""
     if outcome == "confirmed":
         return 86400
     if outcome == "superseded":
         return 5
+    if outcome in ("unknown-key", "not-found"):
+        return 3600
     return 300
 
 def wait_for_next_sync(outcome, synced_key, sleep=time.sleep, current_key=None):
@@ -1385,6 +1485,7 @@ def get_subscription_info(current_pubkey=None):
         last_sync = meta.get("lastSync") if confirmed else None
         sync_error = meta.get("syncError") if same_key else None
         sync_success = meta.get("syncSuccess", False) if same_key else False
+        key_unknown = same_key and meta.get("keyUnknown") is True
 
         has_synced = bool(sync_success or (last_sync is not None and not sync_error))
 
@@ -1397,7 +1498,8 @@ def get_subscription_info(current_pubkey=None):
                 "isExpired": False,
                 "lastSync": last_sync,
                 "syncError": sync_error,
-                "syncSuccess": sync_success
+                "syncSuccess": sync_success,
+                "keyUnknown": key_unknown,
             }
 
         expiry_dt = datetime.fromisoformat(expires_at.replace("Z", "+00:00"))
@@ -1416,7 +1518,7 @@ def get_subscription_info(current_pubkey=None):
             formatted = f"Active (Expires in {delta.seconds // 3600}h {(delta.seconds % 3600) // 60}m)"
 
         return {
-            "linked": has_synced,
+            "linked": has_synced and not key_unknown,
             "expiresAt": expires_at,
             "daysRemaining": max(0, days) if not is_expired else 0,
             "formatted": formatted if has_synced else (f"Sync failed: {sync_error}" if sync_error else "Pending subscription synchronization"),
@@ -1425,6 +1527,7 @@ def get_subscription_info(current_pubkey=None):
             "syncError": sync_error,
             "syncSuccess": sync_success,
             "bandwidthUsedGb": meta.get("bandwidth_used_gb", 0.0),
+            "keyUnknown": key_unknown,
         }
     except Exception as e:
         return {
@@ -1573,7 +1676,11 @@ def main():
                     print(json.dumps({"result": "failure", "message": f"Subscription synchronization failed: {e}"}))
                     sys.exit(1)
 
-        if sub_info.get("syncError"):
+        if sub_info.get("keyUnknown"):
+            # A definitive answer, not a failed sync: the key has no subscription.
+            print(json.dumps({"result": "failure", "message": UNKNOWN_KEY_MESSAGE}))
+            sys.exit(1)
+        elif sub_info.get("syncError"):
             print(json.dumps({"result": "failure", "message": f"Subscription synchronization failed: {sub_info['syncError']}"}))
             sys.exit(1)
         elif sub_info.get("isExpired"):

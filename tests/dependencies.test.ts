@@ -8,6 +8,9 @@ import {
   EXPIRY_TASK_KEY,
   RETIRED_TASK_KEYS,
   updateOwnTasks,
+  UNKNOWN_KEY_TASK_KEY,
+  isKeyUnknown,
+  getUnknownKeyTask,
 } from '../startos/dependencies'
 import { clearnetVpnReplayId } from '../startos/vpnHandoff'
 import { generateWireguardKeypair } from '../startos/keygen'
@@ -315,6 +318,7 @@ test('every task key raised by released versions is retired, and no live key is'
   }
   for (const live of [
     EXPIRY_TASK_KEY,
+    UNKNOWN_KEY_TASK_KEY,
     clearnetVpnReplayId('lnd'),
     clearnetVpnReplayId('c-lightning'),
     clearnetVpnReplayId('eclair'),
@@ -340,12 +344,19 @@ test('updateOwnTasks never throws and still clears retired tasks when the expiry
         calls.push('raise')
         throw new Error('boom')
       },
+      raiseUnknownKey: async () => {
+        throw new Error('must not raise')
+      },
       clear: async (...keys) => {
         calls.push(`clear:${keys.join(',')}`)
       },
     },
   )
-  assert.deepEqual(calls, ['raise', `clear:${RETIRED_TASK_KEYS.join(',')}`])
+  assert.deepEqual(calls, [
+    'raise',
+    `clear:${UNKNOWN_KEY_TASK_KEY}`,
+    `clear:${RETIRED_TASK_KEYS.join(',')}`,
+  ])
   assert.deepEqual(failures, [{ op: 'expiry', error: 'boom' }])
 
   const cleared: string[] = []
@@ -355,12 +366,107 @@ test('updateOwnTasks never throws and still clears retired tasks when the expiry
       raiseExpiry: async () => {
         throw new Error('must not raise')
       },
+      raiseUnknownKey: async () => {
+        throw new Error('must not raise')
+      },
       clear: async (...keys) => {
         cleared.push(keys.join(','))
         if (keys.includes(RETIRED_TASK_KEYS[0])) throw new Error('down')
       },
     },
   )
-  assert.deepEqual(cleared, [EXPIRY_TASK_KEY, RETIRED_TASK_KEYS.join(',')])
+  assert.deepEqual(cleared, [
+    EXPIRY_TASK_KEY,
+    UNKNOWN_KEY_TASK_KEY,
+    RETIRED_TASK_KEYS.join(','),
+  ])
   assert.deepEqual(none, [{ op: 'retired', error: 'down' }])
+})
+
+// ---------------------------------------------------------------------------
+// Unknown key (G6): bridge.py records `keyUnknown` for the key the API has no
+// subscription for; only that key's verdict raises the Import/Buy task.
+// ---------------------------------------------------------------------------
+
+function unknownFor(publicKey = keys.publicKey) {
+  return { publicKey, keyUnknown: true, syncSuccess: false }
+}
+
+test('isKeyUnknown only trusts a verdict recorded for the configured key', () => {
+  const conf = confWith(null)
+  assert.equal(isKeyUnknown(conf, unknownFor()), true)
+  assert.equal(isKeyUnknown(conf, unknownFor(otherKeys.publicKey)), false)
+  assert.equal(isKeyUnknown(conf, { publicKey: keys.publicKey }), false)
+  assert.equal(isKeyUnknown(conf, { keyUnknown: true }), false)
+  assert.equal(isKeyUnknown('[Interface]\n', unknownFor()), false)
+  assert.equal(isKeyUnknown(conf, null), false)
+})
+
+test('getUnknownKeyTask raises an important Import task naming Buy as the alternative', () => {
+  const task = getUnknownKeyTask(
+    { enabled: true, 'tunnelsats-conf': confWith(null) },
+    unknownFor(),
+  )
+  assert.equal(task.shouldCreateTask, true)
+  assert.equal(task.clearTaskKey, UNKNOWN_KEY_TASK_KEY)
+  assert.match(task.reason || '', /no subscription/i)
+  assert.match(task.reason || '', /Import/)
+  assert.match(task.reason || '', /Buy Subscription/)
+})
+
+test('getUnknownKeyTask stays clear when disabled, unconfigured, known or for another key', () => {
+  const conf = confWith(null)
+  for (const [config, meta] of [
+    [{ enabled: false, 'tunnelsats-conf': conf }, unknownFor()],
+    [{ enabled: true }, unknownFor()],
+    [
+      { enabled: true, 'tunnelsats-conf': conf },
+      confirmed('2099-01-01T00:00:00Z'),
+    ],
+    [
+      { enabled: true, 'tunnelsats-conf': conf },
+      unknownFor(otherKeys.publicKey),
+    ],
+    [{ enabled: true, 'tunnelsats-conf': conf }, null],
+  ] as const) {
+    const task = getUnknownKeyTask(config, meta)
+    assert.equal(task.shouldCreateTask, false)
+    assert.equal(task.clearTaskKey, UNKNOWN_KEY_TASK_KEY)
+  }
+})
+
+test('the unknown-key task has its own replay key, not the retired Import default', () => {
+  // createOwnTask would default to `tunnelsats:import-subscription`, which is
+  // retired and cleared on every run.
+  assert.notEqual(UNKNOWN_KEY_TASK_KEY, 'tunnelsats:import-subscription')
+  assert.ok(!RETIRED_TASK_KEYS.includes(UNKNOWN_KEY_TASK_KEY))
+})
+
+test('updateOwnTasks raises the unknown-key task and isolates its failure', async () => {
+  const raised: string[] = []
+  const cleared: string[] = []
+  const failures = await updateOwnTasks(
+    { shouldCreateTask: false, clearTaskKey: EXPIRY_TASK_KEY },
+    {
+      raiseExpiry: async () => {
+        throw new Error('must not raise')
+      },
+      raiseUnknownKey: async (reason) => {
+        raised.push(reason)
+        throw new Error('down')
+      },
+      clear: async (...k) => {
+        cleared.push(k.join(','))
+      },
+    },
+    {
+      shouldCreateTask: true,
+      reason: 'import',
+      clearTaskKey: UNKNOWN_KEY_TASK_KEY,
+    },
+  )
+  assert.deepEqual(raised, ['import'])
+  // The retired keys are still cleared after the failure.
+  assert.deepEqual(cleared, [EXPIRY_TASK_KEY, RETIRED_TASK_KEYS.join(',')])
+  assert.deepEqual(failures, [{ op: 'unknown-key', error: 'down' }])
 })

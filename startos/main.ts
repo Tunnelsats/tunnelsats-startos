@@ -155,7 +155,7 @@ export const main = sdk.setupMain(async ({ effects }) => {
               return {
                 result: 'waiting',
                 message: i18n(
-                  'Updating the TunnelSats renewal reminder failed; retrying automatically.',
+                  'Updating the TunnelSats reminder tasks failed; retrying automatically.',
                 ),
               }
             }

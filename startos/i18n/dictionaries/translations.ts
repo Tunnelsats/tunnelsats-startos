@@ -73,7 +73,7 @@ export const es_ES: LangDict = {
   70: 'No hay ningún traspaso de nodo pendiente',
   71: 'No se pudo comprobar el traspaso de VPN: ${error}',
   72: 'No se pudo ofrecer la tarea de TunnelSats a ${nodes}; se reintenta automáticamente.',
-  73: 'No se pudo actualizar el recordatorio de renovación de TunnelSats; se reintenta automáticamente.',
+  73: 'No se pudieron actualizar las tareas de recordatorio de TunnelSats; se reintenta automáticamente.',
   74: 'Liquidación de pagos',
   75: 'No hay ningún pago pendiente',
   76: 'Comprobando los pagos pendientes',
@@ -93,6 +93,7 @@ export const es_ES: LangDict = {
   90: 'La factura caduca',
   91: 'Consumo actual',
   92: 'Restablecimientos confirmados este mes',
+  93: 'TunnelSats no tiene ninguna suscripción para la clave WireGuard de tu configuración. Importa aquí una configuración válida o ejecuta Comprar Suscripción para obtener una nueva.',
 }
 
 export const de_DE: LangDict = {
@@ -168,7 +169,7 @@ export const de_DE: LangDict = {
   70: 'Keine Knotenübergabe ausstehend',
   71: 'Die VPN-Übergabe konnte nicht geprüft werden: ${error}',
   72: 'Die TunnelSats-Aufgabe konnte ${nodes} nicht angeboten werden; wird automatisch erneut versucht.',
-  73: 'Die TunnelSats-Verlängerungserinnerung konnte nicht aktualisiert werden; wird automatisch erneut versucht.',
+  73: 'Die TunnelSats-Erinnerungsaufgaben konnten nicht aktualisiert werden; wird automatisch erneut versucht.',
   74: 'Zahlungsabwicklung',
   75: 'Keine Zahlung ausstehend',
   76: 'Ausstehende Zahlungen werden geprüft',
@@ -188,6 +189,7 @@ export const de_DE: LangDict = {
   90: 'Rechnung läuft ab',
   91: 'Aktueller Verbrauch',
   92: 'Bestätigte Zurücksetzungen in diesem Monat',
+  93: 'TunnelSats hat kein Abonnement für den WireGuard-Schlüssel in Ihrer Konfiguration. Importieren Sie hier eine gültige Konfiguration oder führen Sie „Abonnement kaufen“ aus, um ein neues zu erhalten.',
 }
 
 export const pl_PL: LangDict = {
@@ -263,7 +265,7 @@ export const pl_PL: LangDict = {
   70: 'Brak oczekującego przekazania węzła',
   71: 'Nie udało się sprawdzić przekazania VPN: ${error}',
   72: 'Nie udało się zaoferować zadania TunnelSats dla ${nodes}; ponawianie automatyczne.',
-  73: 'Nie udało się zaktualizować przypomnienia o odnowieniu TunnelSats; ponawianie automatyczne.',
+  73: 'Nie udało się zaktualizować zadań przypominających TunnelSats; ponawianie automatyczne.',
   74: 'Rozliczanie płatności',
   75: 'Brak oczekujących płatności',
   76: 'Sprawdzanie oczekujących płatności',
@@ -283,6 +285,7 @@ export const pl_PL: LangDict = {
   90: 'Faktura wygasa',
   91: 'Bieżące zużycie',
   92: 'Potwierdzone resety w tym miesiącu',
+  93: 'TunnelSats nie ma subskrypcji dla klucza WireGuard z Twojej konfiguracji. Zaimportuj tutaj prawidłową konfigurację lub uruchom Kup subskrypcję, aby uzyskać nową.',
 }
 
 export const fr_FR: LangDict = {
@@ -358,7 +361,7 @@ export const fr_FR: LangDict = {
   70: 'Aucun transfert de nœud en attente',
   71: 'Impossible de vérifier le transfert VPN : ${error}',
   72: 'Impossible de proposer la tâche TunnelSats à ${nodes} ; nouvelle tentative automatique.',
-  73: 'Impossible de mettre à jour le rappel de renouvellement TunnelSats ; nouvelle tentative automatique.',
+  73: 'Impossible de mettre à jour les tâches de rappel TunnelSats ; nouvelle tentative automatique.',
   74: 'Règlement des paiements',
   75: 'Aucun paiement en attente',
   76: 'Vérification des paiements en attente',
@@ -378,6 +381,7 @@ export const fr_FR: LangDict = {
   90: 'Expiration de la facture',
   91: 'Consommation actuelle',
   92: 'Réinitialisations confirmées ce mois-ci',
+  93: "TunnelSats n'a aucun abonnement pour la clé WireGuard de votre configuration. Importez ici une configuration valide, ou lancez « Acheter un abonnement » pour en obtenir un nouveau.",
 }
 
 export default {

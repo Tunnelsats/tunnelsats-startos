@@ -9,6 +9,7 @@ import { getAnnounceEndpoint, parseWireguardTunnelInfo } from './utils'
 export { getAnnounceEndpoint } from './utils'
 import { derivePublicKey } from './keygen'
 import { renewSubscription } from './actions/renewSubscription'
+import { importSubscription } from './actions/importSubscription'
 import {
   type PackageId,
   planClearnetVpnTasks,
@@ -38,6 +39,12 @@ const clearnetVpnActions = {
 
 /** Replay key of the expiry task. */
 export const EXPIRY_TASK_KEY = 'tunnelsats:renew-subscription'
+/**
+ * Replay key of the unknown-key task. Set explicitly: the default for an
+ * Import Subscription task would be `tunnelsats:import-subscription`, a
+ * retired key that is cleared on every run.
+ */
+export const UNKNOWN_KEY_TASK_KEY = 'tunnelsats:unknown-key'
 /**
  * Task keys raised by earlier versions: expiry tasks that pointed at
  * Configure / Import Subscription, and the external-host announcement tasks
@@ -69,11 +76,18 @@ export interface SubscriptionMeta {
   serverDomain?: string
   vpnPort?: number
   bandwidth_used_gb?: number
+  keyUnknown?: boolean
 }
 
 export interface SubscriptionExpiryTask {
   shouldCreateTask: boolean
   severity?: 'important'
+  reason?: string
+  clearTaskKey: string
+}
+
+export interface UnknownKeyTask {
+  shouldCreateTask: boolean
   reason?: string
   clearTaskKey: string
 }
@@ -130,6 +144,19 @@ export function getTargetVpnConfig(
   }
 }
 
+/** The public key of the stored config, or null when it has none. */
+export function currentPublicKey(
+  wgConf: string | null | undefined,
+): string | null {
+  const privateKey = parseWireguardTunnelInfo(wgConf).privateKey
+  if (!privateKey) return null
+  try {
+    return derivePublicKey(privateKey)
+  } catch {
+    return null
+  }
+}
+
 /**
  * The subscription expiry this package may act on: the value the TunnelSats
  * API returned for the key in the stored config. The `# Valid Until` comment
@@ -143,17 +170,54 @@ export function getConfirmedExpiry(
   if (!meta?.expiresAt || meta.expirySource !== 'api' || !meta.publicKey) {
     return null
   }
-  const privateKey = parseWireguardTunnelInfo(wgConf).privateKey
-  if (!privateKey) return null
-  let currentPublicKey: string
-  try {
-    currentPublicKey = derivePublicKey(privateKey)
-  } catch {
-    return null
-  }
-  if (currentPublicKey !== meta.publicKey) return null
+  if (currentPublicKey(wgConf) !== meta.publicKey) return null
   const expiry = new Date(meta.expiresAt.trim())
   return isNaN(expiry.getTime()) ? null : expiry
+}
+
+/**
+ * Whether the TunnelSats API has no subscription for the key in the stored
+ * config (bridge.py records the verdict, bound to the key it was given for).
+ */
+export function isKeyUnknown(
+  wgConf: string | null | undefined,
+  meta: SubscriptionMeta | null | undefined,
+): boolean {
+  if (meta?.keyUnknown !== true || !meta.publicKey) return false
+  return currentPublicKey(wgConf) === meta.publicKey
+}
+
+/**
+ * The task raised while the configured key is unknown to TunnelSats: it
+ * points at Import Subscription, and its reason names Buy Subscription as
+ * the other way out. 'important' like every own task (see
+ * getSubscriptionExpiryTask).
+ */
+export function getUnknownKeyTask(
+  config:
+    | {
+        enabled?: boolean
+        'tunnelsats-conf'?: string | null
+      }
+    | null
+    | undefined,
+  meta?: SubscriptionMeta | null,
+): UnknownKeyTask {
+  const clearTaskKey = UNKNOWN_KEY_TASK_KEY
+  if (
+    !config?.enabled ||
+    !config['tunnelsats-conf'] ||
+    !isKeyUnknown(config['tunnelsats-conf'], meta)
+  ) {
+    return { shouldCreateTask: false, clearTaskKey }
+  }
+  return {
+    shouldCreateTask: true,
+    reason: i18n(
+      'TunnelSats has no subscription for the WireGuard key in your configuration. Import a valid configuration here, or run Buy Subscription to get a new one.',
+    ),
+    clearTaskKey,
+  }
 }
 
 /**
@@ -307,22 +371,30 @@ export interface OwnTaskOps {
     severity: NonNullable<SubscriptionExpiryTask['severity']>,
     reason: string,
   ) => Promise<unknown>
+  raiseUnknownKey: (reason: string) => Promise<unknown>
   clear: (...keys: string[]) => Promise<unknown>
 }
 
 export interface OwnTaskFailure {
-  op: 'expiry' | 'retired'
+  op: 'expiry' | 'unknown-key' | 'retired'
   error: string
 }
 
+const NO_UNKNOWN_KEY_TASK: UnknownKeyTask = {
+  shouldCreateTask: false,
+  clearTaskKey: UNKNOWN_KEY_TASK_KEY,
+}
+
 /**
- * Raises or clears the Renew reminder and clears retired task keys. Never
- * throws: a failure here must not keep the clearnet-vpn handoff from
- * running. Failures are returned so the caller records them for a retry.
+ * Raises or clears the Renew reminder and the unknown-key task, and clears
+ * retired task keys. Never throws: a failure here must not keep the
+ * clearnet-vpn handoff from running. Failures are returned so the caller
+ * records them for a retry.
  */
 export async function updateOwnTasks(
   expiryTask: SubscriptionExpiryTask,
   ops: OwnTaskOps,
+  unknownKeyTask: UnknownKeyTask = NO_UNKNOWN_KEY_TASK,
 ): Promise<OwnTaskFailure[]> {
   const failures: OwnTaskFailure[] = []
   const attempt = async (
@@ -339,6 +411,11 @@ export async function updateOwnTasks(
     expiryTask.shouldCreateTask && expiryTask.severity && expiryTask.reason
       ? ops.raiseExpiry(expiryTask.severity, expiryTask.reason)
       : ops.clear(expiryTask.clearTaskKey),
+  )
+  await attempt('unknown-key', () =>
+    unknownKeyTask.shouldCreateTask && unknownKeyTask.reason
+      ? ops.raiseUnknownKey(unknownKeyTask.reason)
+      : ops.clear(unknownKeyTask.clearTaskKey),
   )
   await attempt('retired', () => ops.clear(...RETIRED_TASK_KEYS))
   return failures
@@ -454,8 +531,9 @@ export const setDependencies = sdk.setupDependencies(async ({ effects }) => {
     }),
     async ({ config, meta }) => {
       // 1. Own tasks: the Renew reminder, driven only by the API-confirmed
-      // expiry, and retired task keys. Guarded so a failure never skips the
-      // handoff; it is recorded and retried via the handoff health check.
+      // expiry, the unknown-key task, and retired task keys. Guarded so a
+      // failure never skips the handoff; it is recorded and retried via the
+      // handoff health check.
       const ownTaskFailures = await updateOwnTasks(
         getSubscriptionExpiryTask(config, meta),
         {
@@ -463,8 +541,14 @@ export const setDependencies = sdk.setupDependencies(async ({ effects }) => {
             sdk.action.createOwnTask(effects, renewSubscription, severity, {
               reason,
             }),
+          raiseUnknownKey: (reason) =>
+            sdk.action.createOwnTask(effects, importSubscription, 'important', {
+              reason,
+              replayId: UNKNOWN_KEY_TASK_KEY,
+            }),
           clear: (...keys) => sdk.action.clearTask(effects, ...keys),
         },
+        getUnknownKeyTask(config, meta),
       )
       for (const f of ownTaskFailures) {
         console.error(

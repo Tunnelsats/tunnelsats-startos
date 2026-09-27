@@ -73,7 +73,7 @@ const dict = {
   'No node handoff pending': 70,
   'Could not check the VPN handoff: ${error}': 71,
   'Offering the TunnelSats task to ${nodes} failed; retrying automatically.': 72,
-  'Updating the TunnelSats renewal reminder failed; retrying automatically.': 73,
+  'Updating the TunnelSats reminder tasks failed; retrying automatically.': 73,
   'Payment Settlement': 74,
   'No payment pending': 75,
   'Checking pending payments': 76,
@@ -93,6 +93,7 @@ const dict = {
   'Invoice Expires': 90,
   'Current Usage': 91,
   'Resets Confirmed This Month': 92,
+  'TunnelSats has no subscription for the WireGuard key in your configuration. Import a valid configuration here, or run Buy Subscription to get a new one.': 93,
 } as const
 
 /**
