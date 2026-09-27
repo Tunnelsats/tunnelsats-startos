@@ -12,6 +12,9 @@ import {
   MONTHLY_BANDWIDTH_LIMIT_GB,
 } from '../startos/apiClient'
 
+/** A well-formed WireGuard key (32 bytes, base64). */
+const VALID_KEY = 'dmFsaWQta2V5LXZhbGlkLWtleS12YWxpZC1rZXktdmE='
+
 /** The last body POSTed to subscription/create. */
 let lastCreateBody: Record<string, unknown> | null = null
 
@@ -119,13 +122,13 @@ function startMockApiServer(): Promise<{ server: Server; url: string }> {
             subscriptionEnd: '2026-10-15T00:00:00.000Z',
             server: {
               endpoint: 'de2.tunnelsats.com:51820',
-              publicKey: 'serverPubkeyBase6412345678901234567890123456=',
+              publicKey: 'c2VydmVyLXB1Yi1zZXJ2ZXItcHViLXNlcnZlci1wdWI=',
               allowedIPs: '0.0.0.0/0',
             },
             peer: {
               address: '10.9.0.102/32',
               publicKey: parsed.wgPublicKey,
-              presharedKey: 'pskBase64Key12345678901234567890123456789012=',
+              presharedKey: 'cHJlc2hhcmVkLXByZXNoYXJlZC1wcmVzaGFyZWQtcHM=',
             },
             vpnPort: 24556,
           }
@@ -455,3 +458,48 @@ test('assembleWireguardConfig rejects values that would add config lines', () =>
     /malformed/,
   )
 })
+
+for (const [name, patch] of [
+  ['an invalid address', { peer: { address: 'not-an-ip' } }],
+  [
+    'an invalid server key',
+    { server: { endpoint: 'de2.tunnelsats.com:51820', publicKey: 'bogus' } },
+  ],
+  [
+    'an endpoint without a port',
+    { server: { endpoint: 'de2.tunnelsats.com', publicKey: VALID_KEY } },
+  ],
+  [
+    'invalid allowed IPs',
+    {
+      server: {
+        endpoint: 'de2.tunnelsats.com:51820',
+        publicKey: VALID_KEY,
+        allowedIPs: 'everything',
+      },
+    },
+  ],
+  [
+    'an invalid preshared key',
+    { peer: { address: '10.9.0.55/32', presharedKey: 'x' } },
+  ],
+] as const) {
+  test(`assembleWireguardConfig rejects ${name}`, () => {
+    assert.throws(
+      () =>
+        assembleWireguardConfig(
+          {
+            server: {
+              endpoint: 'de2.tunnelsats.com:51820',
+              publicKey: VALID_KEY,
+            },
+            peer: { address: '10.9.0.55/32' },
+            vpnPort: 24556,
+            ...patch,
+          },
+          VALID_KEY,
+        ),
+      /malformed/,
+    )
+  })
+}

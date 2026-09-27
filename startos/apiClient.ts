@@ -1,3 +1,4 @@
+import { isIP } from 'node:net'
 export const DEFAULT_API_BASE = 'https://tunnelsats.com'
 export const MONTHLY_BANDWIDTH_LIMIT_GB = 100
 
@@ -135,11 +136,43 @@ export async function pollInvoiceSettlement(
   return await fetchJson<OrderStatus>(url, { method: 'GET' })
 }
 
+// Claim field validation, mirroring bridge.py (assemble_claimed_config).
+const WG_KEY_RE = /^[A-Za-z0-9+/]{43}=$/
+const HOSTNAME_RE =
+  /^(?=.{1,253}$)[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?(?:\.[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?)*$/
+
+const isWgKey = (v: unknown): v is string =>
+  typeof v === 'string' && WG_KEY_RE.test(v)
+
+function isEndpoint(v: unknown): v is string {
+  if (typeof v !== 'string') return false
+  const parts = v.split(':')
+  if (parts.length !== 2) return false
+  const [host, port] = parts
+  return (
+    HOSTNAME_RE.test(host) &&
+    /^\d{1,5}$/.test(port) &&
+    Number(port) >= 1 &&
+    Number(port) <= 65535
+  )
+}
+
+/** An IP address or network with an optional prefix length. */
+function isIpWithPrefix(v: unknown): v is string {
+  if (typeof v !== 'string') return false
+  const [ip, prefix, ...rest] = v.split('/')
+  const family = isIP(ip)
+  if (rest.length || family === 0) return false
+  if (prefix === undefined) return true
+  return /^\d{1,3}$/.test(prefix) && Number(prefix) <= (family === 4 ? 32 : 128)
+}
+
 /**
  * Assembles a standard WireGuard .conf file from server claim data and the
  * local private key. Throws instead of guessing: vpnPort must be an integer
- * port (no endpoint fallback), and no value may add lines to the config
- * (a response must not be able to inject a PostUp).
+ * port (no endpoint fallback), and every value must be well-formed, so a
+ * response can neither inject lines (a PostUp) nor yield a config that
+ * cannot form a tunnel.
  */
 export function assembleWireguardConfig(
   claimData: {
@@ -170,17 +203,18 @@ export function assembleWireguardConfig(
   const server = claimData.server ?? ({} as Partial<typeof claimData.server>)
   const peer = claimData.peer ?? ({} as Partial<typeof claimData.peer>)
   const allowedIPs = server.allowedIPs ?? '0.0.0.0/0'
-  const values: unknown[] = [
-    server.endpoint,
-    server.publicKey,
-    peer.address,
-    allowedIPs,
-  ]
-  if (peer.presharedKey != null) values.push(peer.presharedKey)
-  if (claimData.subscriptionEnd != null) values.push(claimData.subscriptionEnd)
-  if (
-    values.some((v) => typeof v !== 'string' || !v.trim() || /[\r\n]/.test(v))
-  ) {
+  const valid =
+    isEndpoint(server.endpoint) &&
+    isWgKey(server.publicKey) &&
+    isIpWithPrefix(peer.address) &&
+    typeof allowedIPs === 'string' &&
+    allowedIPs.split(',').every((n) => isIpWithPrefix(n.trim())) &&
+    (peer.presharedKey == null || isWgKey(peer.presharedKey)) &&
+    (claimData.subscriptionEnd == null ||
+      (typeof claimData.subscriptionEnd === 'string' &&
+        !/[\r\n]/.test(claimData.subscriptionEnd) &&
+        !Number.isNaN(Date.parse(claimData.subscriptionEnd))))
+  if (!valid) {
     throw new Error('The claim is incomplete or malformed.')
   }
   const endpoint = server.endpoint as string

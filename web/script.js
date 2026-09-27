@@ -566,10 +566,56 @@ function pollOrderSettlement(paymentHash, keypair, serverId) {
   }, 3500)
 }
 
+// Claim field validation, mirroring bridge.py (assemble_claimed_config).
+const WG_KEY_RE = /^[A-Za-z0-9+/]{43}=$/
+const HOSTNAME_RE =
+  /^(?=.{1,253}$)[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?(?:\.[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?)*$/
+
+function isIPv4(value) {
+  const parts = value.split('.')
+  return (
+    parts.length === 4 &&
+    parts.every((p) => /^(0|[1-9]\d{0,2})$/.test(p) && Number(p) <= 255)
+  )
+}
+
+function isIPv6(value) {
+  if (!value.includes(':') || !/^[0-9A-Fa-f:.]+$/.test(value)) return false
+  try {
+    new URL(`http://[${value}]/`)
+    return true
+  } catch {
+    return false
+  }
+}
+
+// An address or network with an optional prefix length.
+function isIpWithPrefix(value) {
+  const [ip, prefix, ...rest] = value.split('/')
+  if (rest.length) return false
+  const v4 = isIPv4(ip)
+  if (!v4 && !isIPv6(ip)) return false
+  if (prefix === undefined) return true
+  return /^\d{1,3}$/.test(prefix) && Number(prefix) <= (v4 ? 32 : 128)
+}
+
+function isEndpoint(value) {
+  const parts = value.split(':')
+  if (parts.length !== 2) return false
+  const [host, port] = parts
+  return (
+    HOSTNAME_RE.test(host) &&
+    /^\d{1,5}$/.test(port) &&
+    Number(port) >= 1 &&
+    Number(port) <= 65535
+  )
+}
+
 // A claim is only accepted for the key generated here; its config is built
 // from the structured fields and the local private key. fullConfig, config
 // and any private key in the response are never used, and every value is
-// checked so the response cannot add lines (a PostUp) to the config.
+// validated so the response cannot add lines (a PostUp) to the config or
+// save a config that cannot form a tunnel.
 function assembleWireguardConfig(claimData, keypair) {
   const server = claimData.server || {}
   const peer = claimData.peer || {}
@@ -582,13 +628,27 @@ function assembleWireguardConfig(claimData, keypair) {
   if (!Number.isInteger(vpnPort) || vpnPort < 1 || vpnPort > 65535) {
     throw new Error('The claim has no valid VPN port.')
   }
-  const allowedIPs = server.allowedIPs ?? '0.0.0.0/0, ::/0'
-  const values = [server.endpoint, server.publicKey, peer.address, allowedIPs]
-  if (peer.presharedKey != null) values.push(peer.presharedKey)
-  if (claimData.subscriptionEnd != null) values.push(claimData.subscriptionEnd)
-  if (
-    values.some((v) => typeof v !== 'string' || !v.trim() || /[\r\n]/.test(v))
-  ) {
+  const str = (v) => typeof v === 'string' && v === v.trim() && v !== ''
+  const allowedIPs =
+    server.allowedIPs === undefined || server.allowedIPs === null
+      ? '0.0.0.0/0, ::/0'
+      : server.allowedIPs
+  const valid =
+    str(server.endpoint) &&
+    isEndpoint(server.endpoint) &&
+    str(server.publicKey) &&
+    WG_KEY_RE.test(server.publicKey) &&
+    str(peer.address) &&
+    isIpWithPrefix(peer.address) &&
+    typeof allowedIPs === 'string' &&
+    allowedIPs.split(',').every((n) => isIpWithPrefix(n.trim())) &&
+    (peer.presharedKey == null ||
+      (typeof peer.presharedKey === 'string' &&
+        WG_KEY_RE.test(peer.presharedKey))) &&
+    (claimData.subscriptionEnd == null ||
+      (str(claimData.subscriptionEnd) &&
+        !Number.isNaN(Date.parse(claimData.subscriptionEnd))))
+  if (!valid) {
     throw new Error('The claim is incomplete or malformed.')
   }
 
@@ -598,7 +658,9 @@ function assembleWireguardConfig(claimData, keypair) {
     `Address = ${peer.address}`,
   ]
   if (claimData.subscriptionEnd) {
-    lines.push(`# Valid Until: ${claimData.subscriptionEnd}`)
+    lines.push(
+      `# Valid Until: ${new Date(claimData.subscriptionEnd).toISOString()}`,
+    )
   }
   lines.push(`# VPNPort: ${vpnPort}`)
   lines.push(`# Server: ${server.endpoint.split(':')[0]}`)
@@ -606,66 +668,125 @@ function assembleWireguardConfig(claimData, keypair) {
   lines.push('[Peer]')
   lines.push(`PublicKey = ${server.publicKey}`)
   lines.push(`Endpoint = ${server.endpoint}`)
-  lines.push(`AllowedIPs = ${allowedIPs}`)
+  lines.push(
+    `AllowedIPs = ${allowedIPs
+      .split(',')
+      .map((n) => n.trim())
+      .join(', ')}`,
+  )
   if (peer.presharedKey != null) {
     lines.push(`PresharedKey = ${peer.presharedKey}`)
   }
   return lines.join('\n') + '\n'
 }
 
-// ~2 minutes of provisioning retries at 3.5 s each.
-const MAX_CLAIM_ATTEMPTS = 35
+// A paid claim is retried for as long as the page is open while the outcome
+// is transient: the private key only exists in this page, so giving up would
+// strand the payment. Only a claim that can never be accepted stops it.
+const CLAIM_RETRY_BASE_MS = 3500
+const CLAIM_RETRY_MAX_MS = 60000
+
+function isTransientStatus(status) {
+  return status === 429 || status >= 500
+}
+
+function retryClaim(paymentHash, keypair, attempt, reason) {
+  const delay = Math.min(
+    CLAIM_RETRY_BASE_MS * 2 ** (attempt - 1),
+    CLAIM_RETRY_MAX_MS,
+  )
+  setPaymentStatus(
+    `${reason} Retrying in ${Math.round(delay / 1000)} s. Keep this page open (payment hash ${paymentHash}).`,
+    'pulse-amber',
+  )
+  setTimeout(() => claimAndSaveConfig(paymentHash, keypair, attempt + 1), delay)
+}
 
 async function claimAndSaveConfig(paymentHash, keypair, attempt = 1) {
   try {
-    const claimRes = await fetch(
-      'https://tunnelsats.com/api/public/v1/subscription/claim',
-      {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          paymentHash: paymentHash,
-          wgPublicKey: keypair.publicKey,
-        }),
-      },
-    )
+    let claimRes
+    try {
+      claimRes = await fetch(
+        'https://tunnelsats.com/api/public/v1/subscription/claim',
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            paymentHash: paymentHash,
+            wgPublicKey: keypair.publicKey,
+          }),
+        },
+      )
+    } catch (err) {
+      retryClaim(
+        paymentHash,
+        keypair,
+        attempt,
+        `Network error: ${err.message}.`,
+      )
+      return
+    }
 
+    if (isTransientStatus(claimRes.status)) {
+      retryClaim(
+        paymentHash,
+        keypair,
+        attempt,
+        `The TunnelSats API is unavailable (HTTP ${claimRes.status}).`,
+      )
+      return
+    }
     if (!claimRes.ok) {
       throw new Error(`Failed to claim configuration (HTTP ${claimRes.status})`)
     }
 
     const claimData = await claimRes.json()
     if (claimRes.status === 202 || claimData.status === 'processing') {
-      if (attempt >= MAX_CLAIM_ATTEMPTS) {
-        throw new Error('The tunnel is still being provisioned.')
-      }
-      setPaymentStatus(
-        'Payment confirmed! The tunnel is being provisioned...',
-        'pulse-green',
-      )
-      setTimeout(
-        () => claimAndSaveConfig(paymentHash, keypair, attempt + 1),
-        3500,
+      retryClaim(
+        paymentHash,
+        keypair,
+        attempt,
+        'Payment confirmed! The tunnel is being provisioned.',
       )
       return
     }
     const fullConfig = assembleWireguardConfig(claimData, keypair)
 
     // Save to local container bridge
-    const saveRes = await fetch('/api/config/save', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'X-Requested-With': 'XMLHttpRequest',
-        'X-TunnelSats-CSRF': getCsrfToken(),
-        'X-CSRF-Token': getCsrfToken(),
-      },
-      body: JSON.stringify({
-        config: fullConfig,
-        target_node: selectedNode,
-      }),
-    })
+    let saveRes
+    try {
+      saveRes = await fetch('/api/config/save', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Requested-With': 'XMLHttpRequest',
+          'X-TunnelSats-CSRF': getCsrfToken(),
+          'X-CSRF-Token': getCsrfToken(),
+        },
+        body: JSON.stringify({
+          config: fullConfig,
+          target_node: selectedNode,
+        }),
+      })
+    } catch (err) {
+      retryClaim(
+        paymentHash,
+        keypair,
+        attempt,
+        `Could not reach StartOS to save the configuration: ${err.message}.`,
+      )
+      return
+    }
 
+    if (isTransientStatus(saveRes.status)) {
+      retryClaim(
+        paymentHash,
+        keypair,
+        attempt,
+        `Saving the configuration failed (HTTP ${saveRes.status}).`,
+      )
+      return
+    }
     if (!saveRes.ok) {
       const errJson = await saveRes.json().catch(() => ({}))
       throw new Error(
