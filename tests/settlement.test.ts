@@ -2,6 +2,7 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import {
   payTaskReplayId,
+  recordPaymentOrRetractTask,
   replacedPayTaskId,
   runSettlementTick,
   type ExecResult,
@@ -249,3 +250,49 @@ for (const [name, stdout] of [
     assert.deepEqual(calls, { cleared: [], acked: [] })
   })
 }
+
+test('recordPaymentOrRetractTask: records the payment and keeps the task', async () => {
+  const calls: string[] = []
+  await recordPaymentOrRetractTask(
+    async () => {
+      calls.push('record')
+    },
+    async () => {
+      calls.push('retract')
+    },
+  )
+  assert.deepEqual(calls, ['record'])
+})
+
+test('recordPaymentOrRetractTask: a failed record retracts the task and rethrows', async () => {
+  const calls: string[] = []
+  const recordError = new Error('disk full')
+  await assert.rejects(
+    recordPaymentOrRetractTask(
+      async () => {
+        calls.push('record')
+        throw recordError
+      },
+      async () => {
+        calls.push('retract')
+      },
+    ),
+    (e) => e === recordError,
+  )
+  assert.deepEqual(calls, ['record', 'retract'])
+})
+
+test('recordPaymentOrRetractTask: a failed retract still surfaces the record error', async () => {
+  const recordError = new Error('disk full')
+  await assert.rejects(
+    recordPaymentOrRetractTask(
+      async () => {
+        throw recordError
+      },
+      async () => {
+        throw new Error('clearTasks unavailable')
+      },
+    ),
+    (e) => e === recordError,
+  )
+})

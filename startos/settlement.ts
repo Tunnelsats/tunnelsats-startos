@@ -52,6 +52,34 @@ export function replacedPayTaskId(
   )
 }
 
+/**
+ * Records a payment whose pay task was already raised. If recording fails,
+ * the task is retracted so the node is never asked to pay an invoice the
+ * settlement watcher cannot track; the record error is rethrown either way.
+ * A failed retract is logged, as it must not mask the record error.
+ */
+export async function recordPaymentOrRetractTask(
+  record: () => Promise<unknown>,
+  retractTask: () => Promise<unknown>,
+): Promise<void> {
+  try {
+    await record()
+  } catch (recordError) {
+    try {
+      await retractTask()
+    } catch (retractError) {
+      console.warn(
+        `Could not retract the untracked pay task: ${
+          retractError instanceof Error
+            ? retractError.message
+            : String(retractError)
+        }`,
+      )
+    }
+    throw recordError
+  }
+}
+
 const TERMINAL_RESULTS = [
   'provisioned',
   'renewed',
