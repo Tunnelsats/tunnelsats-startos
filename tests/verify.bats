@@ -176,6 +176,17 @@ EOF
     [[ "$output" =~ "TunnelSats is switched off" ]]
 }
 
+@test "verify.sh explains legacy settings without an enabled flag" {
+    fake_bridge '{"result": "ok", "message": "Active until 2026-12-31"}' 0
+    printf '[Interface]\nPrivateKey = x\n# VPNPort: 24556\n' > "$DATA_DIR/tunnelsatsv3.conf"
+    printf '{"target-node": "lnd"}' > "$DATA_DIR/config.json"
+    serve_status "$STATUS_OK"
+    run "$REPO_ROOT/verify.sh"
+    [ "$status" -eq 1 ]
+    [[ "$output" =~ "no 'enabled' flag" ]]
+    [[ "$output" =~ "StartOS treats this as switched off" ]]
+}
+
 @test "verify.sh carries no guidance from the retired StartOS gateway model" {
     healthy_service lnd
     run "$REPO_ROOT/verify.sh"

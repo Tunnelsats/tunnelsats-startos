@@ -86,8 +86,13 @@ if [ -f "$APP_CONFIG_PATH" ]; then
     case "$STORED_TARGET" in
         lnd | cln | eclair) TARGET_NODE="$STORED_TARGET" ;;
     esac
+    # Mirrors the package's config.json model (enabled: z.boolean().catch(false)),
+    # which drives the node task and the health check. bridge.py's legacy
+    # "enabled when a config file exists" default does not route anything.
     if [ "$ENABLED" == "True" ]; then
         log_ok "TunnelSats is enabled for target node: $TARGET_NODE."
+    elif [ -z "$ENABLED" ]; then
+        log_fail "TunnelSats settings have no 'enabled' flag (settings from an older version). StartOS treats this as switched off, so no node is asked to run the tunnel. Run Configure → Enable TunnelSats."
     else
         log_fail "TunnelSats is switched off (Configure → Enable TunnelSats)."
     fi
