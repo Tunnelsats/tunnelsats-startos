@@ -1,7 +1,7 @@
 import { sdk } from '../sdk'
 import { configJson } from '../fileModels/config.json'
 import { tunnelsatsConf } from '../fileModels/tunnelsatsConf'
-import { validateWireguardConfig } from '../utils'
+import { getAnnounceEndpoint, validateWireguardConfig } from '../utils'
 import { i18n } from '../i18n'
 import { rm } from 'node:fs/promises'
 
@@ -78,6 +78,20 @@ export const configure = sdk.Action.withInput(
       if (!validation.valid) {
         throw new Error(validation.error || 'Invalid WireGuard configuration')
       }
+    }
+
+    // Same rule as Import Subscription: the handoff raises the activation
+    // task only for a config it can announce (see handedOverTarget).
+    if (
+      input.enabled &&
+      processedConf &&
+      !getAnnounceEndpoint(processedConf, input['allow-ipv6'])
+    ) {
+      throw new Error(
+        i18n(
+          'This configuration has no endpoint that can be announced to the Lightning Network (an IPv6 endpoint needs Allow Home IPv6 Coexistence).',
+        ),
+      )
     }
 
     await configJson.merge(effects, {

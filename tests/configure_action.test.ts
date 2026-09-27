@@ -36,7 +36,7 @@ Endpoint = ch1.tunnelsats.com:51820
  * enabled=false the handler removes tunnelsatsv3.conf with rm({force:true}),
  * a no-op outside StartOS where the volume path does not exist.
  */
-async function runConfigure(conf: string, enabled = true) {
+async function runConfigure(conf: string, enabled = true, allowIpv6 = false) {
   const origMerge = configJson.merge
   const origWrite = tunnelsatsConf.write
   let merged: any = null
@@ -54,7 +54,7 @@ async function runConfigure(conf: string, enabled = true) {
         enabled,
         'target-node': 'lnd',
         'tunnelsats-conf': conf,
-        'allow-ipv6': false,
+        'allow-ipv6': allowIpv6,
       },
     })
     return { response, merged, written }
@@ -140,4 +140,80 @@ test('no user-facing string still carries retired gateway guidance', () => {
   for (const key of Object.keys(defaultDict)) {
     assert.doesNotMatch(key, RETIRED_GATEWAY_GUIDANCE, key)
   }
+})
+
+// ---------------------------------------------------------------------------
+// An enabled config must be announceable, as in Import Subscription: the
+// handoff raises no activation task without an announce endpoint, so the
+// success message would promise a prompt that never appears.
+// ---------------------------------------------------------------------------
+
+const IPV6_CONF = `[Interface]
+PrivateKey = DUMMY_TEST_PRIVATE_KEY_FOR_TESTING_123456=
+Address = 10.9.0.102/32
+# VPNPort: 24556
+
+[Peer]
+PublicKey = DUMMY_TEST_PUBLIC_KEY_FOR_TESTING_123456=
+Endpoint = [2001:db8::1]:51820
+`
+
+const NOT_ANNOUNCEABLE =
+  'This configuration has no endpoint that can be announced to the Lightning Network (an IPv6 endpoint needs Allow Home IPv6 Coexistence).'
+
+test('Configure rejects enabling an IPv6-only endpoint without IPv6 coexistence, like Import', async () => {
+  const origMerge = configJson.merge
+  const origWrite = tunnelsatsConf.write
+  let touched = false
+  configJson.merge = (async () => {
+    touched = true
+  }) as any
+  tunnelsatsConf.write = (async () => {
+    touched = true
+  }) as any
+  try {
+    await assert.rejects(
+      (configure as any).runFn({
+        effects: {},
+        input: {
+          enabled: true,
+          'target-node': 'lnd',
+          'tunnelsats-conf': IPV6_CONF,
+          'allow-ipv6': false,
+        },
+      }),
+      { message: NOT_ANNOUNCEABLE },
+    )
+  } finally {
+    configJson.merge = origMerge
+    tunnelsatsConf.write = origWrite
+  }
+  assert.equal(touched, false, 'nothing may be stored for a rejected config')
+})
+
+test('Configure enables an IPv6 endpoint when IPv6 coexistence is allowed', async () => {
+  const { response, merged, written } = await runConfigure(
+    IPV6_CONF,
+    true,
+    true,
+  )
+  assert.equal(merged.enabled, true)
+  assert.equal(written, IPV6_CONF)
+  assert.match(response.message, /ask you to activate the VPN tunnel/)
+  assert.ok(
+    getTargetVpnConfig({
+      enabled: true,
+      'target-node': 'lnd',
+      'tunnelsats-conf': IPV6_CONF,
+      'allow-ipv6': true,
+    })?.announceEndpoint,
+  )
+})
+
+test('Configure keeps an IPv6-only config while TunnelSats is switched off', async () => {
+  // Switched off promises no activation, so the config is simply kept.
+  const { merged, written } = await runConfigure(IPV6_CONF, false)
+  assert.equal(merged.enabled, false)
+  assert.equal(merged['tunnelsats-conf'], IPV6_CONF)
+  assert.equal(written, null)
 })
