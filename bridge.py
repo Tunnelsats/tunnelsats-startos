@@ -199,29 +199,35 @@ def save_configuration(conf_content, target_node="lnd", clear_pending_order=None
 
     The configuration is stored exactly as given: the node's clearnet-vpn
     task accepts this string verbatim, so rewriting it (e.g. stripping the
-    markers earlier versions added) would re-raise that task."""
+    markers earlier versions added) would re-raise that task. The one
+    exception is the port marker, which apply_vpn_port keeps in line with
+    the port TunnelSats reports.
+
+    Every write happens under meta_lock, so a port rewrite never interleaves
+    with a save. No caller holds meta_lock (flock is not reentrant)."""
     if target_node not in TARGET_NODES:
         target_node = "lnd"
     validate_config(conf_content)
-    atomic_write_file(CONFIG_PATH, conf_content)
-
-    app_config = {}
-    if os.path.exists(APP_CONFIG_PATH):
-        try:
-            with open(APP_CONFIG_PATH, "r") as f:
-                app_config = json.load(f)
-        except Exception:
-            pass
-    app_config["enabled"] = True
-    app_config["target-node"] = target_node
-    app_config["tunnelsats-conf"] = conf_content
-    atomic_write_json(APP_CONFIG_PATH, app_config)
 
     # The comment's expiry is a hint only; the confirmed expiry comes from
     # lazy_sync. Port and server stay as display hints.
     hints = parse_config_comments(conf_content)
     hints.pop("expiresAt", None)
     with meta_lock():
+        atomic_write_file(CONFIG_PATH, conf_content)
+
+        app_config = {}
+        if os.path.exists(APP_CONFIG_PATH):
+            try:
+                with open(APP_CONFIG_PATH, "r") as f:
+                    app_config = json.load(f)
+            except Exception:
+                pass
+        app_config["enabled"] = True
+        app_config["target-node"] = target_node
+        app_config["tunnelsats-conf"] = conf_content
+        atomic_write_json(APP_CONFIG_PATH, app_config)
+
         # The new configuration starts unconfirmed: everything bound to the
         # previous key or configuration goes. Fields owned by other writers
         # stay, above all pendingOrder, which holds the private key of an
@@ -293,6 +299,69 @@ def _superseded(wg_pubkey):
     takes the lock for its reset, so either this check sees the new key or
     the save's reset lands after the write."""
     return get_wg_pubkey() != wg_pubkey
+
+VPN_PORT_MARKER_RE = re.compile(r"(#\s*(?:VPNPort|Port Forwarding):\s*)(\d+)", re.IGNORECASE)
+
+def valid_vpn_port(value):
+    """The port as an int when it is a usable TCP port, else None. JSON
+    booleans, strings and floats are rejected rather than coerced."""
+    if type(value) is int and 1 <= value <= 65535:
+        return value
+    return None
+
+def rewrite_vpn_port(conf, port):
+    """conf with every port marker set to port, keeping each label and its
+    spacing; everything else stays byte for byte. None when conf has no
+    marker or every marker already holds port."""
+    if not VPN_PORT_MARKER_RE.search(conf):
+        return None
+    rewritten = VPN_PORT_MARKER_RE.sub(lambda m: f"{m.group(1)}{port}", conf)
+    return None if rewritten == conf else rewritten
+
+def apply_vpn_port(port):
+    """Brings the stored configuration's port marker in line with the port
+    TunnelSats reports for the key, so the node's clearnet-vpn task is
+    re-raised with the new announce address. Caller holds meta_lock and has
+    checked the key is still current (_superseded).
+
+    Returns "unchanged", "updated", "conflict" (config.json holds another
+    configuration: the TypeScript actions write it without meta_lock, first
+    config.json, then the conf file, so a save is in flight and wins),
+    "no-config" or "no-marker". Raises OSError when a write fails.
+
+    config.json is written first: after an interruption it holds the
+    rewritten configuration while the conf file does not, and the next call
+    completes the rewrite. The reverse order would strand config.json.
+
+    Residual window: an import that writes config.json between the read
+    below and the replace is overwritten with the rewritten old
+    configuration; its own conf file write then changes the key, so the next
+    sync is superseded and the import's config.json content is lost until
+    the operator saves again. Same class and size as the TypeScript
+    merge-into-fresh-read window documented on meta_lock."""
+    try:
+        with open(CONFIG_PATH, "r") as f:
+            stored = f.read()
+    except OSError:
+        return "no-config"
+    rewritten = rewrite_vpn_port(stored, port)
+    if rewritten is None:
+        return "no-marker" if not VPN_PORT_MARKER_RE.search(stored) else "unchanged"
+    try:
+        with open(APP_CONFIG_PATH, "r") as f:
+            app_config = json.load(f)
+    except (OSError, ValueError):
+        return "conflict"
+    if not isinstance(app_config, dict):
+        return "conflict"
+    current = app_config.get("tunnelsats-conf")
+    if current == stored:
+        app_config["tunnelsats-conf"] = rewritten
+        atomic_write_json(APP_CONFIG_PATH, app_config)
+    elif current != rewritten:
+        return "conflict"
+    atomic_write_file(CONFIG_PATH, rewritten)
+    return "updated"
 
 def _bind_meta_to_key(meta, wg_pubkey):
     """A confirmation (or an unknown-key verdict) belongs to the key it was
@@ -397,8 +466,8 @@ def lazy_sync(wg_pubkey, require_usage=False):
         if server_domain:
             fields["serverDomain"] = server_domain
 
-        vpn_port = response_data.get("vpn_port")
-        if vpn_port:
+        vpn_port = valid_vpn_port(response_data.get("vpn_port"))
+        if vpn_port is not None:
             fields["vpnPort"] = vpn_port
 
         raw_usage = response_data.get("bandwidth_used_gb")
@@ -427,6 +496,21 @@ def lazy_sync(wg_pubkey, require_usage=False):
             meta.pop("keyUnknown", None)
             meta.pop("notFoundSince", None)
             atomic_write_json(META_FILE_PATH, meta)
+            if vpn_port is not None:
+                # Still under the lock and after the key check, so a save
+                # cannot interleave. Driven by the stored file, not by meta:
+                # a rewrite that failed here is retried on the next sync.
+                try:
+                    port_result = apply_vpn_port(vpn_port)
+                except OSError as e:
+                    port_result = "error"
+                    print(f"Could not update the VPN port marker: {e}", file=sys.stderr)
+                if port_result == "updated":
+                    print(f"VPN port marker updated to {vpn_port}; the node's clearnet VPN task is raised again", file=sys.stderr)
+                elif port_result == "conflict":
+                    print("VPN port marker not updated: the configuration is being replaced", file=sys.stderr)
+                elif port_result in ("no-config", "no-marker"):
+                    print(f"VPN port marker not updated ({port_result})", file=sys.stderr)
         return "confirmed"
 
     except _KeyNotFound:
