@@ -9,7 +9,8 @@
  */
 
 export type TargetNode = 'lnd' | 'cln' | 'eclair'
-export type PaymentKind = 'order' | 'renewal'
+export type PaymentKind = 'order' | 'renewal' | 'reset'
+const PAYMENT_KINDS: readonly string[] = ['order', 'renewal', 'reset']
 
 const TARGET_NODES: readonly string[] = ['lnd', 'cln', 'eclair']
 
@@ -129,6 +130,7 @@ export function recordPaymentThenRaiseTask(
 const TERMINAL_RESULTS = [
   'provisioned',
   'renewed',
+  'reset',
   'superseded',
   'expired',
 ] as const
@@ -189,7 +191,7 @@ function isOutcome(value: unknown): value is SettlementOutcome {
   if (typeof value !== 'object' || value === null) return false
   const o = value as Record<string, unknown>
   return (
-    (o.kind === 'order' || o.kind === 'renewal') &&
+    PAYMENT_KINDS.includes(o.kind as string) &&
     RESULTS.includes(o.result as SettlementOutcome['result']) &&
     typeof o.message === 'string' &&
     typeof o.paymentHash === 'string'
