@@ -7,6 +7,7 @@ import { FileHelper } from '@start9labs/start-sdk'
 import { metaShape } from '../startos/fileModels/tunnelsatsMeta'
 import {
   payTaskReplayId,
+  recordPaymentThenRaiseTask,
   replacedPayTaskPatch,
   replacedPayTaskId,
   runSettlementTick,
@@ -337,4 +338,100 @@ test('replacedPayTaskPatch: the real metadata merge keeps tasks already queued',
   } finally {
     rmSync(dir, { recursive: true, force: true })
   }
+})
+
+/** A metadata store shared by concurrent purchases, as on the device. */
+function fakeMetaStore(initial: {
+  pending?: { paymentHash: string; targetNode: string } | null
+  payTasksToClear?: string[]
+}) {
+  let meta = { ...initial }
+  const tasks = new Set<string>()
+  const log: string[] = []
+  return {
+    tasks,
+    log,
+    meta: () => meta,
+    purchase(hash: string, gate?: Promise<void>) {
+      return recordPaymentThenRaiseTask('order', hash, {
+        readCurrent: async () => {
+          log.push(`read ${hash[0]}`)
+          return {
+            pending: meta.pending,
+            payTasksToClear: meta.payTasksToClear,
+          }
+        },
+        record: async (patch) => {
+          await gate
+          meta = {
+            ...meta,
+            pending: { paymentHash: hash, targetNode: 'lnd' },
+            ...patch,
+          }
+          log.push(`record ${hash[0]}`)
+        },
+        raiseTask: async () => {
+          tasks.add(payTaskReplayId('order', 'lnd', hash))
+          log.push(`raise ${hash[0]}`)
+        },
+      })
+    },
+  }
+}
+
+test('recordPaymentThenRaiseTask: overlapping purchases never interleave', async () => {
+  const store = fakeMetaStore({})
+  let open!: () => void
+  const gate = new Promise<void>((resolve) => (open = resolve))
+  const first = store.purchase('1'.repeat(64), gate)
+  const second = store.purchase('2'.repeat(64))
+  await new Promise((r) => setImmediate(r))
+  open()
+  await Promise.all([first, second])
+
+  // The second purchase reads only after the first raised its task, so it
+  // queues that task for clearing instead of racing its creation.
+  assert.deepEqual(store.log, [
+    'read 1',
+    'record 1',
+    'raise 1',
+    'read 2',
+    'record 2',
+    'raise 2',
+  ])
+  assert.deepEqual(store.meta().payTasksToClear, [
+    payTaskReplayId('order', 'lnd', '1'.repeat(64)),
+  ])
+})
+
+test('recordPaymentThenRaiseTask: a failed record raises no task and frees the queue', async () => {
+  const raised: string[] = []
+  await assert.rejects(
+    recordPaymentThenRaiseTask('renewal', 'e'.repeat(64), {
+      readCurrent: async () => null,
+      record: async () => {
+        throw new Error('disk full')
+      },
+      raiseTask: async () => {
+        raised.push('e')
+      },
+    }),
+    /disk full/,
+  )
+  assert.deepEqual(raised, [])
+  const store = fakeMetaStore({})
+  await store.purchase('3'.repeat(64))
+  assert.equal(store.tasks.size, 1)
+})
+
+test('recordPaymentThenRaiseTask: passes the replaced task with the current queue', async () => {
+  const store = fakeMetaStore({
+    pending: { paymentHash: '4'.repeat(64), targetNode: 'lnd' },
+    payTasksToClear: [QUEUED],
+  })
+  await store.purchase('5'.repeat(64))
+  assert.deepEqual(store.meta().payTasksToClear, [
+    QUEUED,
+    payTaskReplayId('order', 'lnd', '4'.repeat(64)),
+  ])
 })

@@ -78,6 +78,54 @@ export function replacedPayTaskPatch(
   }
 }
 
+/** What recordPaymentThenRaiseTask needs from the package; injected. */
+export interface PaymentRecordOps {
+  /** A fresh read of the pending entry being replaced and the queue. */
+  readCurrent(): Promise<{
+    pending?: { paymentHash?: string; targetNode?: string } | null
+    payTasksToClear?: string[]
+  } | null>
+  /** Writes the new pending entry together with the given patch. */
+  record(patch: { payTasksToClear?: string[] }): Promise<unknown>
+  /** Raises the new payment's Pay Invoice task. */
+  raiseTask(): Promise<unknown>
+}
+
+// Buy and Renew share one queue: both rewrite payTasksToClear.
+let paymentRecordTail: Promise<unknown> = Promise.resolve()
+
+/**
+ * Records a new pending payment (queueing the task of the one it replaces)
+ * and then raises its pay task, one purchase at a time. Without this, a
+ * second Buy/Renew could replace the first between its record and its
+ * task: the tick would clear and acknowledge the first task's ID before
+ * the task existed, and the task raised afterwards would never be cleared.
+ * The read happens inside the queue, so each purchase sees the previous
+ * one's record. All package procedures share one JS runtime, like the
+ * handoff queue (createHandoffQueue).
+ */
+export function recordPaymentThenRaiseTask(
+  kind: PaymentKind,
+  newHash: string,
+  ops: PaymentRecordOps,
+): Promise<void> {
+  const job = async () => {
+    const current = await ops.readCurrent()
+    await ops.record(
+      replacedPayTaskPatch(
+        kind,
+        current?.pending,
+        current?.payTasksToClear,
+        newHash,
+      ),
+    )
+    await ops.raiseTask()
+  }
+  const run = paymentRecordTail.then(job, job)
+  paymentRecordTail = run.catch(() => undefined)
+  return run
+}
+
 const TERMINAL_RESULTS = [
   'provisioned',
   'renewed',
