@@ -96,11 +96,11 @@ export const renewSubscription = sdk.Action.withInput(
     // nothing changed, and if raising the task fails the renewal is tracked
     // without a task and expires unpaid.
     await recordPaymentThenRaiseTask('renewal', renewal.paymentHash, {
+      // A read error fails the purchase: treating it as "nothing pending"
+      // would replace a pending payment without queuing its task. A missing
+      // file reads as null.
       readCurrent: async () => {
-        const current = await tunnelsatsMeta
-          .read()
-          .once()
-          .catch(() => null)
+        const current = await tunnelsatsMeta.read().once()
         return (
           current && {
             pending: current.pendingRenewal,

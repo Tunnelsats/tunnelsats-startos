@@ -101,11 +101,11 @@ export const buySubscription = sdk.Action.withInput(
     // recordPaymentThenRaiseTask). The key is stored before the invoice is
     // payable, so a paid order can always be claimed.
     await recordPaymentThenRaiseTask('order', order.paymentHash, {
+      // A read error fails the purchase: treating it as "nothing pending"
+      // would replace a pending payment without queuing its task. A missing
+      // file reads as null.
       readCurrent: async () => {
-        const current = await tunnelsatsMeta
-          .read()
-          .once()
-          .catch(() => null)
+        const current = await tunnelsatsMeta.read().once()
         return (
           current && {
             pending: current.pendingOrder,

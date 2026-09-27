@@ -435,3 +435,24 @@ test('recordPaymentThenRaiseTask: passes the replaced task with the current queu
     payTaskReplayId('order', 'lnd', '4'.repeat(64)),
   ])
 })
+
+test('recordPaymentThenRaiseTask: a failed read records nothing and raises no task', async () => {
+  // Treating an unreadable metadata file as "nothing pending" would replace
+  // a pending payment without queuing its task for clearing.
+  const calls: string[] = []
+  await assert.rejects(
+    recordPaymentThenRaiseTask('order', 'f'.repeat(64), {
+      readCurrent: async () => {
+        throw new Error('EIO')
+      },
+      record: async () => {
+        calls.push('record')
+      },
+      raiseTask: async () => {
+        calls.push('raise')
+      },
+    }),
+    /EIO/,
+  )
+  assert.deepEqual(calls, [])
+})
