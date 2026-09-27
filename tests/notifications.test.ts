@@ -130,6 +130,76 @@ test('an earlier expiry for the same key keeps what was sent', () => {
   assert.deepEqual(back.next.sent, ['7d'])
 })
 
+test('a stage records the expiry it was announced for', () => {
+  const plan = planNotifications(inputs({ expiry: at(6) }), null, NOW)
+  assert.equal(plan.steps[0].after.sentFor, at(6).toISOString())
+  assert.equal(plan.next.sentFor, at(6).toISOString())
+  // A later stage of the same period moves it along.
+  const three = planNotifications(inputs({ expiry: at(5) }), plan.next, at(2))
+  assert.deepEqual(
+    three.steps.map((s) => s.notice.kind),
+    ['3d'],
+  )
+  assert.equal(three.next.sentFor, at(5).toISOString())
+  assert.equal(three.next.expiresAt, at(6).toISOString())
+})
+
+test('a renewal after a shortened expiry starts a new period below the old high-water', () => {
+  // Confirmed at 30 days, then shortened to 5: the 7-day notice goes out
+  // for the shortened expiry.
+  const recorded = planNotifications(inputs({ expiry: at(30) }), null, NOW)
+  const shortened = planNotifications(
+    inputs({ expiry: at(5) }),
+    recorded.next,
+    NOW,
+  )
+  assert.deepEqual(
+    shortened.steps.map((s) => s.notice.kind),
+    ['7d'],
+  )
+  assert.equal(shortened.next.expiresAt, at(30).toISOString())
+
+  // A paid renewal extends the shortened expiry to 20 days: still below the
+  // old 30-day high-water, but later than what the notice was sent for.
+  const renewed = planNotifications(
+    inputs({ expiry: at(20) }),
+    shortened.next,
+    NOW,
+  )
+  assert.deepEqual(renewed.steps, [])
+  assert.deepEqual(renewed.next, {
+    publicKey: 'PK=',
+    expiresAt: at(20).toISOString(),
+    sent: [],
+  })
+  // Its own thresholds are announced again.
+  assert.deepEqual(
+    planNotifications(
+      inputs({ expiry: at(20) }),
+      renewed.next,
+      at(14),
+    ).steps.map((s) => s.notice.kind),
+    ['7d'],
+  )
+})
+
+test('a correction back to the high-water after a stage keeps what was sent', () => {
+  // The 7-day notice went out for a temporarily earlier answer; the API
+  // then returns the period's latest expiry again and later flaps back.
+  const prev: NoticeState = {
+    publicKey: 'PK=',
+    expiresAt: at(6).toISOString(),
+    sent: ['7d'],
+    sentFor: at(5).toISOString(),
+  }
+  const back = planNotifications(inputs({ expiry: at(6) }), prev, NOW)
+  assert.deepEqual(back.steps, [])
+  assert.deepEqual(back.next, prev)
+  const flap = planNotifications(inputs({ expiry: at(5) }), back.next, NOW)
+  assert.deepEqual(flap.steps, [])
+  assert.deepEqual(flap.next.sent, ['7d'])
+})
+
 test('a new key starts a new period', () => {
   const sent: NoticeState = {
     publicKey: 'OLD=',

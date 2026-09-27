@@ -62,11 +62,13 @@ export interface NoticeInputs {
 }
 
 export interface NoticeState {
-  /** Key and confirmed expiry of the current period. */
+  /** Key of the current period and the latest confirmed expiry it saw. */
   publicKey?: string
   expiresAt?: string
   /** Stages announced in the current period; unknown entries are ignored. */
   sent?: readonly string[]
+  /** The expiry the latest stage was announced for. */
+  sentFor?: string
   /** The key the unknown-key notice was sent for. */
   unknownKey?: string
 }
@@ -165,18 +167,28 @@ export function planNotifications(
 
   let stageDue: ExpiryStage | null = null
   if (expiry) {
-    const prevExpiry = prev?.expiresAt ? new Date(prev.expiresAt) : null
+    const valid = (iso: string | undefined) => {
+      const d = iso ? new Date(iso) : null
+      return d && !isNaN(d.getTime()) ? d : null
+    }
+    const prevExpiry = valid(prev?.expiresAt)
+    const prevSentFor = valid(prev?.sentFor)
+    const t = expiry.getTime()
+    // The period keeps the latest expiry it saw, so a temporarily earlier
+    // answer and its correction back to that expiry are not a renewal. An
+    // expiry later than the one the last stage was announced for is one,
+    // though: a renewal can extend a shortened expiry without passing the
+    // old latest one.
     const newPeriod =
       prev?.publicKey !== publicKey ||
       !prevExpiry ||
-      isNaN(prevExpiry.getTime()) ||
-      expiry.getTime() > prevExpiry.getTime()
+      t > prevExpiry.getTime() ||
+      (!!prevSentFor && t > prevSentFor.getTime() && t < prevExpiry.getTime())
     base.publicKey = publicKey
-    // The period keeps the latest expiry it saw: a temporarily earlier
-    // answer and its correction back must not count as a renewal.
     base.expiresAt =
       newPeriod || !prevExpiry ? expiry.toISOString() : prevExpiry.toISOString()
     base.sent = newPeriod ? [] : sentStages(prev)
+    if (newPeriod) delete base.sentFor
     const stage = expiryStage(expiry, now)
     if (stage && !base.sent.includes(stage)) stageDue = stage
   }
@@ -188,9 +200,13 @@ export function planNotifications(
     steps.push({ notice: noticeFor('unknown-key', null), before: state, after })
     state = after
   }
-  if (stageDue) {
+  if (stageDue && expiry) {
     const upTo = STAGES.indexOf(stageDue)
-    const after = { ...state, sent: STAGES.slice(0, upTo + 1) }
+    const after = {
+      ...state,
+      sent: STAGES.slice(0, upTo + 1),
+      sentFor: expiry.toISOString(),
+    }
     steps.push({ notice: noticeFor(stageDue, expiry), before: state, after })
     state = after
   }
@@ -202,6 +218,7 @@ function sameState(a: NoticeState | null | undefined, b: NoticeState) {
   return (
     a.publicKey === b.publicKey &&
     a.expiresAt === b.expiresAt &&
+    a.sentFor === b.sentFor &&
     a.unknownKey === b.unknownKey &&
     sentStages(a).join(',') === sentStages(b).join(',')
   )
