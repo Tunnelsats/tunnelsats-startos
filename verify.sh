@@ -109,7 +109,10 @@ if [ -f "$BRIDGE" ]; then
     HEALTH_EXIT=$?
     HEALTH_RESULT=$(json_field "$HEALTH_OUT" "result")
     HEALTH_MSG=$(json_field "$HEALTH_OUT" "message")
-    if [ "$HEALTH_EXIT" -eq 0 ] && [ "$HEALTH_RESULT" == "ok" ]; then
+    if [ "$HEALTH_RESULT" == "ok" ] && [ ! -f "$CONF_PATH" ]; then
+        # bridge.py answers "ok" ("Unconfigured") when no config is stored.
+        log_fail "Subscription not checked: no stored WireGuard configuration (${HEALTH_MSG})."
+    elif [ "$HEALTH_EXIT" -eq 0 ] && [ "$HEALTH_RESULT" == "ok" ]; then
         log_ok "Subscription confirmed by the TunnelSats API: ${HEALTH_MSG}"
     elif [ "$HEALTH_RESULT" == "loading" ]; then
         log_fail "Subscription not confirmed yet: ${HEALTH_MSG}"
@@ -172,9 +175,9 @@ fi
 log_step "Verification Summary"
 if [ "$FAILED_CHECKS" -gt 0 ]; then
     log_fail "Diagnostics finished: $FAILED_CHECKS check(s) failed."
-    echo "Tunnel, routing and egress are NOT verified by this script."
+    echo "Tunnel, routing and IPv4/IPv6 egress are NOT verified by this script."
     exit 1
 fi
 log_ok "TunnelSats service checks passed."
-echo "Tunnel, routing and egress are NOT verified by this script; run the manual node-side checks above."
+echo "Tunnel, routing and IPv4/IPv6 egress are NOT verified by this script; run the manual node-side checks above."
 exit 0

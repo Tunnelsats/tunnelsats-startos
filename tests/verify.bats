@@ -137,6 +137,18 @@ EOF
     [[ "$output" =~ "Subscription confirmed by the TunnelSats API: Active until 2026-12-31" ]]
 }
 
+@test "verify.sh does not report an unconfigured subscription as confirmed" {
+    # bridge.py answers "ok" with an "Unconfigured" message when no config
+    # is stored; that confirms nothing.
+    fake_bridge '{"result": "ok", "message": "Unconfigured: Add WireGuard configuration in settings"}' 0
+    printf '{"enabled": true, "target-node": "lnd"}' > "$DATA_DIR/config.json"
+    serve_status "$STATUS_OK"
+    run "$REPO_ROOT/verify.sh"
+    [ "$status" -eq 1 ]
+    [[ "$output" =~ "Subscription not checked: no stored WireGuard configuration" ]]
+    refute_match 'Subscription confirmed'
+}
+
 @test "verify.sh reports a failing subscription health check" {
     fake_bridge '{"result": "failure", "message": "Subscription expired on 2026-01-01"}' 1
     fake_config true lnd
