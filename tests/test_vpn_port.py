@@ -180,13 +180,7 @@ class TestPortChangeOnSync(VpnPortBase):
     @patch('urllib.request.urlopen')
     def test_write_failure_does_not_fail_the_confirmation(self, urlopen):
         urlopen.return_value = api_response(status(vpn_port=30111))
-        real = bridge.atomic_write_json
-
-        def failing(path, data, mode=0o600):
-            if path == self.app_path:
-                raise OSError("disk full")
-            return real(path, data, mode)
-        with patch('bridge.atomic_write_json', side_effect=failing):
+        with patch('bridge._write_json_if_unchanged', side_effect=OSError("disk full")):
             self.assertEqual(bridge.lazy_sync("pk_current"), "confirmed")
         self.assertEqual(self.read_conf(), CONF)
         self.assertIs(self.read_meta()["syncSuccess"], True)
@@ -211,13 +205,32 @@ class TestApplyVpnPortCompareAndSwap(VpnPortBase):
 
     def test_config_json_is_written_before_the_conf_file(self):
         order = []
-        real_json, real_file = bridge.atomic_write_json, bridge.atomic_write_file
-        with patch('bridge.atomic_write_json',
-                   side_effect=lambda p, d, mode=0o600: (order.append(p), real_json(p, d, mode))), \
+        real_json, real_file = bridge._write_json_if_unchanged, bridge.atomic_write_file
+        with patch('bridge._write_json_if_unchanged',
+                   side_effect=lambda p, d, st: (order.append(p), real_json(p, d, st))[1]), \
              patch('bridge.atomic_write_file',
                    side_effect=lambda p, c, mode=0o600: (order.append(p), real_file(p, c, mode))):
             self.assertEqual(bridge.apply_vpn_port(30111), "updated")
         self.assertEqual(order, [self.app_path, self.conf_path])
+
+    def test_config_json_changed_before_the_replace_is_left_alone(self):
+        # The TypeScript actions write config.json in place without
+        # meta_lock; a write that lands after the read must win.
+        with patch('bridge._write_json_if_unchanged', return_value=False):
+            self.assertEqual(bridge.apply_vpn_port(30111), "conflict")
+        self.assertEqual(self.read_conf(), CONF)
+
+    def test_write_if_unchanged_refuses_a_file_changed_since_its_stamp(self):
+        stamp = bridge._file_stamp(self.app_path)
+        other = {"enabled": True, "tunnelsats-conf": "changed"}
+        with open(self.app_path, "w") as f:
+            json.dump(other, f, indent=4)
+        self.assertFalse(bridge._write_json_if_unchanged(self.app_path, {"x": 1}, stamp))
+        self.assertEqual(self.read_app(), other)
+        self.assertFalse(os.path.exists(self.app_path + ".tmp"))
+        fresh = bridge._file_stamp(self.app_path)
+        self.assertTrue(bridge._write_json_if_unchanged(self.app_path, {"x": 1}, fresh))
+        self.assertEqual(self.read_app(), {"x": 1})
 
     def test_missing_or_unreadable_files_are_left_alone(self):
         os.remove(self.app_path)

@@ -12,7 +12,11 @@
  *
  * Delivery is at most once: a notice is recorded before it is posted and
  * the record is rolled back when posting fails. A failing state write thus
- * never turns into a notice repeated on every health check tick.
+ * never turns into a notice repeated on every health check tick. A rollback
+ * that cannot be written is kept in memory and written before the next
+ * run. What remains is a notice lost when the service stops between the
+ * record and the post, a deliberate trade against duplicate notices; the
+ * Renew and unknown-key tasks keep reminding in that case.
  *
  * Limitation: the notices are driven by the Subscription health check, so
  * nothing is sent while TunnelSats is stopped; a due notice goes out once it
@@ -228,11 +232,17 @@ export function createNoticeRunner(ops: NoticeOps) {
   const now = ops.now ?? (() => new Date())
   let tail: Promise<unknown> = Promise.resolve()
   let retryAt = 0
+  /** A rollback whose write failed; written before anything else. */
+  let unwrittenRollback: NoticeState | null = null
 
   async function once(): Promise<NoticeRunResult> {
     const posted: NoticeKind[] = []
     try {
       if (now().getTime() < retryAt) return { posted, error: null }
+      if (unwrittenRollback) {
+        await ops.writeState(unwrittenRollback)
+        unwrittenRollback = null
+      }
       const input = await ops.readInputs()
       if (!input) return { posted, error: null }
       const prev = await ops.readState()
@@ -247,7 +257,9 @@ export function createNoticeRunner(ops: NoticeOps) {
           await ops.notify(step.notice)
         } catch (e) {
           retryAt = now().getTime() + NOTICE_RETRY_MS
-          await ops.writeState(step.before).catch(() => undefined)
+          await ops.writeState(step.before).catch(() => {
+            unwrittenRollback = step.before
+          })
           return { posted, error: message(e) }
         }
         posted.push(step.notice.kind)

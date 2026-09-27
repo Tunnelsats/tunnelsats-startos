@@ -34,6 +34,10 @@ STATUS_NOT_FOUND_CODE = "ERR_RESOURCE_NOT_FOUND"
 # Once tunnelsats-v2-web#309 ships (503 when a server check errored), a 404
 # is definitive and this grace period can go.
 UNKNOWN_KEY_CONFIRM_AFTER = timedelta(hours=24)
+# The same for a key the API never confirmed (e.g. a fresh purchase that
+# meets that outage, or an import). Short, so a mistyped import is reported
+# on its second answer (next_sync_delay("not-found") waits at least this).
+NEW_KEY_UNKNOWN_AFTER = timedelta(minutes=15)
 UNKNOWN_KEY_MESSAGE = (
     "TunnelSats has no subscription for the WireGuard key in this configuration. "
     "Import a valid configuration or buy a subscription."
@@ -320,6 +324,45 @@ def rewrite_vpn_port(conf, port):
     rewritten = VPN_PORT_MARKER_RE.sub(lambda m: f"{m.group(1)}{port}", conf)
     return None if rewritten == conf else rewritten
 
+def _file_stamp(path):
+    """(mtime_ns, size, inode) of path. The TypeScript FileHelper rewrites
+    files in place, which changes mtime; bridge.py replaces them, which
+    changes the inode."""
+    st = os.stat(path)
+    return (st.st_mtime_ns, st.st_size, st.st_ino)
+
+def _write_json_if_unchanged(filepath, data, stamp, mode=0o600):
+    """atomic_write_json, but only while filepath still has `stamp`: the
+    check runs after the temporary file is written, right before the
+    rename, so a writer that does not take meta_lock can only slip into
+    the stat-to-rename gap. Returns False (and writes nothing) when the file
+    changed."""
+    tmp_path = filepath + ".tmp"
+    try:
+        fd = os.open(tmp_path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, mode)
+        with os.fdopen(fd, 'w') as f:
+            f.write(json.dumps(data, indent=2))
+        try:
+            unchanged = _file_stamp(filepath) == stamp
+        except OSError:
+            unchanged = False
+        if not unchanged:
+            os.remove(tmp_path)
+            return False
+        os.replace(tmp_path, filepath)
+        try:
+            os.chmod(filepath, mode)
+        except Exception:
+            pass
+        return True
+    except Exception:
+        if os.path.exists(tmp_path):
+            try:
+                os.remove(tmp_path)
+            except Exception:
+                pass
+        raise
+
 def apply_vpn_port(port):
     """Brings the stored configuration's port marker in line with the port
     TunnelSats reports for the key, so the node's clearnet-vpn task is
@@ -338,12 +381,12 @@ def apply_vpn_port(port):
     rewritten configuration while the conf file does not, and the next call
     completes the rewrite. The reverse order would strand config.json.
 
-    Residual window: an import that writes config.json between the read
-    below and the replace is overwritten with the rewritten old
-    configuration; its own conf file write then changes the key, so the next
-    sync is superseded and the import's config.json content is lost until
-    the operator saves again. Same class and size as the TypeScript
-    merge-into-fresh-read window documented on meta_lock."""
+    config.json is only replaced while its stamp still matches the one taken
+    before it was read (_write_json_if_unchanged). Residual window: an
+    import whose in-place write lands between that last stat and the rename
+    is overwritten with the rewritten old configuration, and the operator
+    has to save again. Closing it needs the TypeScript actions to share
+    meta_lock, which they cannot take."""
     try:
         with open(CONFIG_PATH, "r") as f:
             stored = f.read()
@@ -353,16 +396,21 @@ def apply_vpn_port(port):
     if rewritten is None:
         return "no-marker" if not VPN_PORT_MARKER_RE.search(stored) else "unchanged"
     try:
+        # Stamp first: a write between stat and read only makes the replace
+        # below refuse, never lets it overwrite newer content.
+        stamp = _file_stamp(APP_CONFIG_PATH)
         with open(APP_CONFIG_PATH, "r") as f:
             app_config = json.load(f)
     except (OSError, ValueError):
+        # Missing, or caught mid-write by an in-place TypeScript write.
         return "conflict"
     if not isinstance(app_config, dict):
         return "conflict"
     current = app_config.get("tunnelsats-conf")
     if current == stored:
         app_config["tunnelsats-conf"] = rewritten
-        atomic_write_json(APP_CONFIG_PATH, app_config)
+        if not _write_json_if_unchanged(APP_CONFIG_PATH, app_config, stamp):
+            return "conflict"
     elif current != rewritten:
         return "conflict"
     atomic_write_file(CONFIG_PATH, rewritten)
@@ -540,6 +588,10 @@ def lazy_sync(wg_pubkey, require_usage=False):
                     print("Subscription sync failure not recorded: a concurrent sync confirmed this key", file=sys.stderr)
                     return "failed"
                 _bind_meta_to_key(meta, wg_pubkey)
+                if meta.get("keyUnknown") is not True:
+                    # A failure breaks a run of not-found answers: the grace
+                    # period must be covered by answers, not by silence.
+                    meta.pop("notFoundSince", None)
                 meta["syncSuccess"] = False
                 meta["syncError"] = err_msg
                 meta["lastSyncAttempt"] = datetime.now(timezone.utc).isoformat()
@@ -552,14 +604,14 @@ def lazy_sync(wg_pubkey, require_usage=False):
 def _record_not_found(wg_pubkey, started_at):
     """Records the API's "no subscription for this key" answer.
 
-    `notFoundSince` marks the first such answer since the last confirmation.
-    A key the API never confirmed is declared unknown at once (e.g. an
-    imported config whose key TunnelSats does not know). A key it confirmed
-    before is declared unknown only once the answers have persisted for
-    UNKNOWN_KEY_CONFIRM_AFTER, because the endpoint also answers 404 while
-    one of its servers is unreachable (tunnelsats-v2-web#309 changes that
-    to a 503); until then its last confirmed expiry is kept. Declaring drops the confirmation: the API's latest definitive
-    answer is that the key has no subscription."""
+    `notFoundSince` marks the first answer of an unbroken run of them: a
+    confirmation or an operational failure ends the run. The endpoint also
+    answers 404 while one of its servers is unreachable (tunnelsats-v2-web#309
+    changes that to a 503), so a key is declared unknown only once the run
+    has lasted NEW_KEY_UNKNOWN_AFTER (a key the API never confirmed) or
+    UNKNOWN_KEY_CONFIRM_AFTER (a key it confirmed before, whose confirmed
+    expiry is kept until then). Declaring drops the confirmation: the API's
+    latest definitive answer is that the key has no subscription."""
     try:
         with meta_lock():
             if _superseded(wg_pubkey):
@@ -572,11 +624,9 @@ def _record_not_found(wg_pubkey, started_at):
             _bind_meta_to_key(meta, wg_pubkey)
             now = datetime.now(timezone.utc)
             since = _parse_iso(meta.get("notFoundSince")) or now
-            declared = (
-                meta.get("keyUnknown") is True
-                or meta.get("expirySource") != "api"
-                or now - since >= UNKNOWN_KEY_CONFIRM_AFTER
-            )
+            grace = (UNKNOWN_KEY_CONFIRM_AFTER if meta.get("expirySource") == "api"
+                     else NEW_KEY_UNKNOWN_AFTER)
+            declared = meta.get("keyUnknown") is True or now - since >= grace
             meta["notFoundSince"] = _iso(since)
             meta["lastSyncAttempt"] = now.isoformat()
             if declared:
@@ -602,14 +652,16 @@ SYNC_POLL_STEP = 30
 def next_sync_delay(outcome):
     """Seconds until the next background sync. Only a confirmation earns
     the long wait; a superseded sync re-runs almost at once for the new key.
-    A not-found answer is checked again hourly: a server outage behind it
-    then clears soon, and a real unknown key is not polled every few
-    minutes."""
+    A not-found answer is checked again after 15 minutes (at least
+    NEW_KEY_UNKNOWN_AFTER, see _record_not_found); a declared unknown key
+    hourly, so it is not polled every few minutes."""
     if outcome == "confirmed":
         return 86400
     if outcome == "superseded":
         return 5
-    if outcome in ("unknown-key", "not-found"):
+    if outcome == "not-found":
+        return 900
+    if outcome == "unknown-key":
         return 3600
     return 300
 

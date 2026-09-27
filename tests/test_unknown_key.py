@@ -93,7 +93,22 @@ class UnknownKeyBase(unittest.TestCase):
 
 class TestNotFoundAnswer(UnknownKeyBase):
     @patch('urllib.request.urlopen')
-    def test_never_confirmed_key_is_declared_unknown_at_once(self, urlopen):
+    def test_never_confirmed_key_gets_a_short_grace(self, urlopen):
+        # A freshly provisioned key can meet the same server-outage 404 as a
+        # confirmed one, so even a new key is not written off on one answer.
+        urlopen.side_effect = http_error(404, NOT_FOUND_BODY)
+        self.assertEqual(bridge.lazy_sync("pk_current"), "not-found")
+        meta = self.read_meta()
+        self.assertNotIn("keyUnknown", meta)
+        self.assertIn("notFoundSince", meta)
+        self.assertIn("checking again", meta["syncError"])
+        # A definitive answer: no retries against the API within one sync.
+        self.assertEqual(urlopen.call_count, 1)
+
+    @patch('urllib.request.urlopen')
+    def test_never_confirmed_key_is_declared_unknown_after_the_short_grace(self, urlopen):
+        since = iso(datetime.now(timezone.utc) - bridge.NEW_KEY_UNKNOWN_AFTER - timedelta(minutes=1))
+        self.write_meta({"publicKey": "pk_current", "syncSuccess": False, "notFoundSince": since})
         urlopen.side_effect = http_error(404, NOT_FOUND_BODY)
         self.assertEqual(bridge.lazy_sync("pk_current"), "unknown-key")
         meta = self.read_meta()
@@ -101,10 +116,14 @@ class TestNotFoundAnswer(UnknownKeyBase):
         self.assertEqual(meta["publicKey"], "pk_current")
         self.assertFalse(meta["syncSuccess"])
         self.assertIn("no subscription", meta["syncError"])
-        self.assertIn("notFoundSince", meta)
         self.assertNotIn("expiresAt", meta)
-        # A definitive answer: no retries against the API.
-        self.assertEqual(urlopen.call_count, 1)
+
+    def test_the_short_grace_is_shorter_than_the_confirmed_one(self):
+        self.assertLess(bridge.NEW_KEY_UNKNOWN_AFTER, bridge.UNKNOWN_KEY_CONFIRM_AFTER)
+        # The retry after a not-found answer lands after the short grace, so
+        # a new unknown key is reported on its second answer.
+        self.assertGreaterEqual(timedelta(seconds=bridge.next_sync_delay("not-found")),
+                                bridge.NEW_KEY_UNKNOWN_AFTER)
 
     @patch('urllib.request.urlopen')
     def test_confirmed_key_keeps_its_expiry_on_a_first_not_found(self, urlopen):
@@ -177,6 +196,23 @@ class TestOperationalFailuresAreNotUnknownKey(UnknownKeyBase):
             self.assertEqual(bridge.lazy_sync("pk_current"), "failed", code)
             self.assert_plain_failure(self.read_meta())
 
+    @patch('urllib.request.urlopen')
+    def test_operational_failure_restarts_the_not_found_streak(self, urlopen):
+        # "Not found" must be answered continuously for the grace period: a
+        # 404, a day of unrelated failures and another 404 is no streak.
+        since = iso(datetime.now(timezone.utc) - bridge.UNKNOWN_KEY_CONFIRM_AFTER + timedelta(minutes=5))
+        self.write_meta(self.confirmed_meta(syncSuccess=False, notFoundSince=since))
+        urlopen.side_effect = urllib.error.URLError("unreachable")
+        self.assertEqual(bridge.lazy_sync("pk_current"), "failed")
+        self.assertNotIn("notFoundSince", self.read_meta())
+        urlopen.side_effect = http_error(404, NOT_FOUND_BODY)
+        self.assertEqual(bridge.lazy_sync("pk_current"), "not-found")
+        meta = self.read_meta()
+        self.assertNotIn("keyUnknown", meta)
+        self.assertEqual(meta["expiresAt"], "2099-01-01T00:00:00Z")
+        self.assertLess(datetime.now(timezone.utc) - bridge._parse_iso(meta["notFoundSince"]),
+                        timedelta(minutes=1))
+
     @patch('urllib.request.urlopen', side_effect=urllib.error.URLError("unreachable"))
     def test_transient_failure_keeps_a_declared_unknown_key(self, _urlopen):
         self.write_meta({"publicKey": "pk_current", "keyUnknown": True, "syncSuccess": False,
@@ -242,9 +278,9 @@ class TestUnknownKeyLifecycle(UnknownKeyBase):
         self.assertTrue(meta["syncSuccess"])
         self.assertNotIn("keyUnknown", meta)
 
-    def test_not_found_and_unknown_key_retry_hourly(self):
+    def test_retry_delays_after_not_found_and_unknown_key(self):
         self.assertEqual(bridge.next_sync_delay("unknown-key"), 3600)
-        self.assertEqual(bridge.next_sync_delay("not-found"), 3600)
+        self.assertEqual(bridge.next_sync_delay("not-found"), 900)
 
 
 class TestUnknownKeyReporting(UnknownKeyBase):

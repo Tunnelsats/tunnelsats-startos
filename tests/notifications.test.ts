@@ -340,3 +340,41 @@ test('noticeInputsFor reads the key, the confirmed expiry and the unknown-key ve
   assert.equal(noticeInputsFor({ ...config, enabled: false }, meta), null)
   assert.equal(noticeInputsFor(null, meta), null)
 })
+
+test('a rollback that could not be written is retried, so the notice is not lost', async () => {
+  let failNotify = true
+  let failWrites = 0
+  let now = NOW
+  const { ops, log, stored } = fakeOps({
+    notify: async (n: Notice) => {
+      log.push(`notify:${n.kind}`)
+      if (failNotify) {
+        failNotify = false
+        failWrites = 1 // the rollback write fails too
+        throw new Error('host busy')
+      }
+    },
+    now: () => now,
+  })
+  const write = ops.writeState
+  ops.writeState = async (s: NoticeState) => {
+    if (failWrites > 0) {
+      failWrites--
+      throw new Error('disk busy')
+    }
+    await write(s)
+  }
+  const run = createNoticeRunner(ops)
+  assert.deepEqual((await run()).posted, [])
+  // The record still says sent; only the in-memory rollback remembers.
+  assert.deepEqual(stored()?.sent, ['7d'])
+  now = new Date(NOW.getTime() + 16 * 60 * 1000)
+  assert.deepEqual((await run()).posted, ['7d'])
+  assert.deepEqual(log, [
+    'write:7d',
+    'notify:7d',
+    'write:',
+    'write:7d',
+    'notify:7d',
+  ])
+})
