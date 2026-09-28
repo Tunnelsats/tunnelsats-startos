@@ -1003,11 +1003,19 @@ function renderInvoicePanel(m) {
     const svg = createInvoiceQrSvg(entry.invoice)
     if (svg) {
       qrBox.replaceChildren(svg)
-      lastRenderedInvoice = entry.invoice
+      qrBox.setAttribute('aria-label', 'Lightning invoice QR code')
     } else {
-      qrBox.replaceChildren()
-      lastRenderedInvoice = null
+      // Longer than a QR code can hold (version 40, level L): say so rather
+      // than leave an empty box; the Pay Invoice task and Copy still work.
+      const text =
+        'This invoice is too long for a QR code. Accept the Pay Invoice task or copy the invoice instead.'
+      const note = document.createElement('p')
+      note.className = 'invoice-qr-fallback'
+      note.textContent = text
+      qrBox.replaceChildren(note)
+      qrBox.setAttribute('aria-label', text)
     }
+    lastRenderedInvoice = entry.invoice
   }
 }
 

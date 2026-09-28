@@ -705,6 +705,35 @@ test('an unpaid pending invoice renders the QR panel with dual-path framing and 
   assert.equal(hPaid.el('invoice-qr').children.length, 0)
 })
 
+test('an invoice too long for any QR version shows a copy-instead note, not an empty box', async () => {
+  const invoice = 'lnbc250u1p' + 'q'.repeat(3100)
+  const h = load(
+    model({
+      pending: {
+        order: {
+          targetNode: 'lnd',
+          serverId: 'eu-de',
+          duration: '3m',
+          amountSats: 25000,
+          expiresAt: '2026-09-28T12:00:00Z',
+          paymentReceived: false,
+          invoice,
+        },
+        renewal: null,
+        reset: null,
+      },
+    }),
+  )
+  await h.settle()
+  const box = h.el('invoice-qr')
+  assert.equal(h.el('invoice-panel').hidden, false)
+  assert.equal(h.el('val-invoice').textContent, invoice)
+  assert.equal(box.children.length, 1)
+  assert.equal(box.children[0].tagName, 'P')
+  assert.match(box.children[0].textContent, /too long for a QR code/)
+  assert.equal(box.getAttribute('aria-label'), box.children[0].textContent)
+})
+
 test('every payable invoice stays reachable through the invoice switcher', async () => {
   const orderInvoice = 'lnbc250u1pjorderinvoiceorderinvoiceorderinvoice'
   const resetInvoice = 'lnbc30u1pjresetinvoiceresetinvoiceresetinvoice'

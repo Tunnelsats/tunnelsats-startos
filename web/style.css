@@ -1002,6 +1002,13 @@ code {
   color: var(--text-primary);
 }
 
+.invoice-qr-fallback {
+  max-width: 180px;
+  color: #1f2937;
+  font-size: 13px;
+  text-align: center;
+}
+
 .invoice-body {
   display: grid;
   grid-template-columns: auto minmax(0, 1fr);
