@@ -1063,6 +1063,11 @@ const TIMELINE_PHASE_TEXT = Object.freeze({
  * The expiry each plan would give: TunnelSats adds calendar months to the
  * later of the current expiry and the time of the renewal. An estimate; the
  * renewal invoice carries the exact date.
+ *
+ * Deliberately the same arithmetic as TunnelSats (JavaScript setMonth),
+ * including its month-end rollover: January 31 plus one month is March 3
+ * (March 2 in leap years), not the end of February. Clamping here would
+ * show a date TunnelSats does not grant.
  */
 function renewPreview(m, nowMs = Date.now()) {
   const end = expiryMs(m)
@@ -2217,8 +2222,20 @@ function bindEvents() {
   document.addEventListener('visibilitychange', () => {
     if (document.hidden) return
     refresh()
-    if (Date.now() - serversLoadedAt >= SERVERS_REFRESH_MS) loadServers()
+    if (serversStale()) loadServers()
   })
+}
+
+function serversStale(nowMs = Date.now()) {
+  return nowMs - serversLoadedAt >= SERVERS_REFRESH_MS
+}
+
+/** One tick of the poll loop: the dashboard state, and the server list once it is stale. */
+function pollTick(nowMs = Date.now()) {
+  if (document.hidden) return
+  const interval = hasActiveAsyncWork(model) ? FAST_POLL_MS : POLL_MS
+  if (nowMs - lastPollAt >= interval) refresh()
+  if (serversStale(nowMs)) loadServers()
 }
 
 function init() {
@@ -2229,13 +2246,7 @@ function init() {
   render()
   refresh()
   loadServers()
-  setInterval(() => {
-    if (document.hidden) return
-    const interval = hasActiveAsyncWork(model) ? FAST_POLL_MS : POLL_MS
-    if (Date.now() - lastPollAt >= interval) {
-      refresh()
-    }
-  }, FAST_POLL_MS)
+  setInterval(() => pollTick(), FAST_POLL_MS)
   if (!countdownTimer) countdownTimer = setInterval(renderCountdown, 30000)
 }
 

@@ -1158,6 +1158,39 @@ test('renewPreview adds calendar months to the later of expiry and now', () => {
     h.run(`renewPreview({ subscription: { expiresAt: null } }, ${now})`),
     [],
   )
+  // Month ends roll over exactly like TunnelSats' setMonth: never clamped
+  // to the end of February, which TunnelSats would not grant.
+  assert.equal(
+    preview('2027-01-31T12:00:00.000Z')[0].newExpiry,
+    '2027-03-03T12:00:00.000Z',
+  )
+  assert.equal(
+    preview('2028-01-31T12:00:00.000Z')[0].newExpiry,
+    '2028-03-02T12:00:00.000Z',
+  )
+})
+
+test('the poll loop refreshes a stale server list while the tab stays visible', async () => {
+  const h = load(model(), 200, undefined, {
+    '/api/servers': { status: 200, body: SERVERS },
+  })
+  await settleAll(h)
+  const serverRequests = () =>
+    h.requests.filter((r) => r.url === '/api/servers').length
+  assert.equal(serverRequests(), 1)
+  // A tick before the refresh interval leaves the list alone.
+  h.run(`pollTick(Date.now() + 60 * 1000)`)
+  assert.equal(serverRequests(), 1)
+  h.run(`pollTick(Date.now() + SERVERS_REFRESH_MS)`)
+  assert.equal(serverRequests(), 2)
+  await settleAll(h)
+  // The reload restarts the interval, so the next tick does not reload again.
+  h.run(`pollTick(Date.now() + 60 * 1000)`)
+  assert.equal(serverRequests(), 2)
+  // A hidden tab does not poll at all.
+  h.context.document.hidden = true
+  h.run(`pollTick(Date.now() + 2 * SERVERS_REFRESH_MS)`)
+  assert.equal(serverRequests(), 2)
 })
 
 test('flowSteps shows each in-flight flow and the node handoff step by step', () => {
