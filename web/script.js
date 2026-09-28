@@ -1039,18 +1039,39 @@ function activeIntentMessage(m) {
     }
   }
   if (localIntentFeedback) return localIntentFeedback
-  if (!activePayableInvoice(m)) {
-    for (const kind of ['buy', 'renew', 'reset']) {
-      const slot = intents[kind]
-      if (slot && slot.status === 'failed' && slot.error) {
-        return {
-          level: 'error',
-          text: slot.error,
-        }
-      }
+  const failure = latestIntentFailure(m)
+  if (failure) return { level: 'error', text: failure.error }
+  return null
+}
+
+/**
+ * The most recent failed dashboard request. While invoices are payable, a
+ * failure older than the newest of them is left out (a later request
+ * produced that invoice); a newer one is shown, for example a different
+ * selection refused because an invoice is still payable.
+ */
+function latestIntentFailure(m) {
+  const intents = (m && m.intents) || {}
+  const invoiceTimes = payableInvoices(m)
+    .map((item) => Date.parse(item.entry.createdAt))
+    .filter(Number.isFinite)
+  const newestInvoiceMs = invoiceTimes.length
+    ? Math.max(...invoiceTimes)
+    : -Infinity
+  let latest = null
+  let latestMs = -Infinity
+  for (const kind of ['buy', 'renew', 'reset']) {
+    const slot = intents[kind]
+    if (!slot || slot.status !== 'failed' || !slot.error) continue
+    const ms = Date.parse(slot.updatedAt || slot.createdAt)
+    const when = Number.isFinite(ms) ? ms : -Infinity
+    if (when < newestInvoiceMs) continue
+    if (!latest || when > latestMs) {
+      latest = slot
+      latestMs = when
     }
   }
-  return null
+  return latest
 }
 
 function renderIntentFeedback(m) {

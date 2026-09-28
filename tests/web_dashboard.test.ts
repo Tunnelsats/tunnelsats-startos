@@ -854,3 +854,59 @@ test('submitIntent POSTs to /api/intents with CSRF header and handles rate-limit
     /Please wait 28s/,
   )
 })
+
+test('a request refused while an invoice is payable stays visible; older failures do not', async () => {
+  const invoice = 'lnbc250u1pjorderinvoiceorderinvoiceorderinvoice'
+  const conflict =
+    'An unpaid subscription invoice (eu-de, 3 month(s), lnd) is still payable until 2026-09-28T12:00:00.000Z. Pay it, or replace it with the Buy Subscription action in StartOS.'
+  const pendingWith = (createdAt: string) => ({
+    order: {
+      targetNode: 'lnd',
+      serverId: 'eu-de',
+      duration: '3m',
+      amountSats: 25000,
+      createdAt,
+      expiresAt: '2026-09-28T12:00:00Z',
+      paymentReceived: false,
+      invoice,
+    },
+    renewal: null,
+    reset: null,
+  })
+  const failedBuy = (updatedAt: string, error: string) => ({
+    buy: {
+      id: 'intent-buy-2',
+      kind: 'buy',
+      status: 'failed',
+      createdAt: updatedAt,
+      updatedAt,
+      error,
+    },
+    renew: null,
+    reset: null,
+  })
+
+  // Refused after the invoice was created: shown next to the invoice.
+  const h = load(
+    model({
+      pending: pendingWith('2026-09-28T11:00:00Z'),
+      intents: failedBuy('2026-09-28T11:05:00Z', conflict),
+    }),
+  )
+  await h.settle()
+  assert.equal(h.el('invoice-panel').hidden, false)
+  assert.equal(h.el('intent-feedback').hidden, false)
+  assert.equal(h.el('intent-feedback').textContent, conflict)
+  assert.ok(h.el('intent-feedback').classList.contains('is-error'))
+
+  // Failed before the invoice that a later request produced: superseded.
+  const hOld = load(
+    model({
+      pending: pendingWith('2026-09-28T11:00:00Z'),
+      intents: failedBuy('2026-09-28T10:55:00Z', 'An older failure.'),
+    }),
+  )
+  await hOld.settle()
+  assert.equal(hOld.el('invoice-panel').hidden, false)
+  assert.equal(hOld.el('intent-feedback').hidden, true)
+})
