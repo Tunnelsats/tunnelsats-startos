@@ -9,6 +9,7 @@ key. Anything the server sends that could carry key material (`fullConfig`,
 `config`, `peer.privateKey`) is ignored, and incomplete or unsafe fields fail
 closed without touching the pending order or its key.
 """
+import base64
 import io
 import json
 import os
@@ -33,6 +34,13 @@ SERVER_PUB = "c2VydmVyLXB1YmtleS1zZXJ2ZXItcHVia2V5LXNlcnY="
 PSK = "cHNrLXBzay1wc2stcHNrLXBzay1wc2stcHNrLXBzay0="
 OTHER_PUB = "7v4SSOfHG0qjHArLrDucmKCpkgHE+hH6DzZFSoq5JVk="
 SERVER_PRIV = "U0VSVkVSLVBSSVZBVEUtS0VZLVNFUlZFUi1QUklWQVQ="
+
+
+def new_keypair():
+    priv = base64.b64encode(os.urandom(32)).decode()
+    pub = bridge.derive_wg_pubkey(priv)
+    assert pub, "wg pubkey is required for these tests"
+    return priv, pub
 
 
 def iso(dt):
@@ -86,7 +94,7 @@ class SettlementTestBase(unittest.TestCase):
         bridge.CONFIG_PATH = os.path.join(d, "tunnelsatsv3.conf")
         bridge.APP_CONFIG_PATH = os.path.join(d, "config.json")
         bridge._pubkey_cache = None
-        self.priv, self.pub = bridge.generate_wg_keypair()
+        self.priv, self.pub = new_keypair()
         self.api = FakeApi()
         self._urlopen = patch("urllib.request.urlopen", side_effect=self.api)
         self._urlopen.start()
@@ -259,7 +267,7 @@ class TestOrderSettlement(SettlementTestBase):
                 self.assert_fails_closed(payload, label)
 
     def test_local_private_key_must_match_the_registered_public_key(self):
-        _, unrelated_pub = bridge.generate_wg_keypair()
+        _, unrelated_pub = new_keypair()
         self.write_meta({"pendingOrder": self.pending_order(publicKey=unrelated_pub)})
         self.api.on("GET", f"/subscription/{HASH}", response({"status": "paid"}))
         payload = self.claim_payload()
@@ -446,7 +454,7 @@ class TestRenewalSettlement(SettlementTestBase):
                          [("order", "waiting"), ("renewal", "waiting")])
 
     def pending_order_for_other_key(self):
-        priv, pub = bridge.generate_wg_keypair()
+        priv, pub = new_keypair()
         return self.pending_order(privateKey=priv, publicKey=pub)
 
 
@@ -699,7 +707,7 @@ class TestResetSettlement(SettlementTestBase):
         self.assertIn("pendingReset", self.read_meta())
 
     def test_order_renewal_and_reset_settle_in_the_same_tick(self):
-        priv, pub = bridge.generate_wg_keypair()
+        priv, pub = new_keypair()
         self.write_meta({"pendingOrder": self.pending_order(privateKey=priv, publicKey=pub),
                          "pendingRenewal": {"paymentHash": RENEW_HASH, "renewalId": "r", "oldExpiry": "x",
                                             "newExpiry": "y", "createdAt": iso(NOW), "publicKey": self.pub,

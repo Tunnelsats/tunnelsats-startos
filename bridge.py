@@ -169,35 +169,6 @@ def validate_config(wg_conf):
     if not re.search(r'#\s*(?:VPNPort|Port Forwarding):\s*\d+', wg_conf, re.IGNORECASE):
         raise ValueError("Missing port-forwarding metadata (e.g., # Port Forwarding: XXXXX).")
 
-def generate_wg_keypair():
-    try:
-        proc_priv = subprocess.run(["wg", "genkey"], capture_output=True, check=True)
-        priv = proc_priv.stdout.decode().strip()
-        proc_pub = subprocess.run(["wg", "pubkey"], input=priv.encode(), capture_output=True, check=True)
-        pub = proc_pub.stdout.decode().strip()
-        if priv and pub:
-            return priv, pub
-    except Exception:
-        pass
-
-    try:
-        from cryptography.hazmat.primitives.asymmetric.x25519 import X25519PrivateKey
-        from cryptography.hazmat.primitives import serialization
-        import base64
-        key = X25519PrivateKey.generate()
-        raw_priv = key.private_bytes(
-            encoding=serialization.Encoding.Raw,
-            format=serialization.PrivateFormat.Raw,
-            encryption_algorithm=serialization.NoEncryption()
-        )
-        raw_pub = key.public_key().public_bytes(
-            encoding=serialization.Encoding.Raw,
-            format=serialization.PublicFormat.Raw
-        )
-        return base64.b64encode(raw_priv).decode(), base64.b64encode(raw_pub).decode()
-    except Exception as e:
-        raise RuntimeError(f"Unable to generate WireGuard keypair: {e}")
-
 TARGET_NODES = ("lnd", "cln", "eclair")
 
 def save_configuration(conf_content, target_node="lnd", clear_pending_order=None, provisioned_key=None):
@@ -1466,62 +1437,8 @@ class DashboardHTTPRequestHandler(BaseHTTPRequestHandler):
             self.send_error(404, "File not found")
 
     def do_POST(self):
-        path_only = self.path.partition('?')[0].partition('#')[0]
         if not self.is_trusted_request():
             return
-
-        if path_only == "/api/keys/generate":
-            try:
-                priv, pub = generate_wg_keypair()
-                self.send_response(200)
-                self.send_header("Content-Type", "application/json")
-                self.end_headers()
-                self.wfile.write(json.dumps({"private_key": priv, "public_key": pub}).encode("utf-8"))
-            except Exception as e:
-                self.send_error(500, f"Key generation failed: {e}")
-            return
-
-        if path_only == "/api/config/save":
-            try:
-                # Protect active configuration from unauthenticated replacement
-                if os.path.exists(CONFIG_PATH):
-                    # Fail closed: from the unauthenticated web UI, only a
-                    # subscription positively known to be expired may be replaced.
-                    sub_info = get_subscription_info(get_wg_pubkey())
-                    if not sub_info.get("isExpired"):
-                        self.send_response(403)
-                        self.send_header("Content-Type", "application/json")
-                        self.end_headers()
-                        self.wfile.write(json.dumps({
-                            "error": "Active configuration already present. Replacing an active configuration requires operator authentication in StartOS (Services → TunnelSats → Configure)."
-                        }).encode("utf-8"))
-                        return
-
-                content_length = int(self.headers.get('Content-Length', 0))
-                body = self.rfile.read(content_length).decode('utf-8')
-                data = json.loads(body)
-                conf = data.get("config", "").strip()
-                target_node = data.get("target_node", "lnd")
-                if not conf:
-                    self.send_response(400)
-                    self.send_header("Content-Type", "application/json")
-                    self.end_headers()
-                    self.wfile.write(json.dumps({"error": "No configuration provided"}).encode("utf-8"))
-                    return
-
-                save_configuration(conf, target_node)
-
-                self.send_response(200)
-                self.send_header("Content-Type", "application/json")
-                self.end_headers()
-                self.wfile.write(json.dumps({"success": True, "message": "Configuration saved. Accept the routing prompt on your Lightning node."}).encode("utf-8"))
-            except Exception as e:
-                self.send_response(400)
-                self.send_header("Content-Type", "application/json")
-                self.end_headers()
-                self.wfile.write(json.dumps({"error": str(e)}).encode("utf-8"))
-            return
-
         self.send_error(404, "Not found")
 
 def web_server_thread():
