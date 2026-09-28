@@ -15,6 +15,7 @@ export const subscriptionNotices = FileHelper.json(
     sentFor: z.string().optional().catch(undefined),
     /** Earlier expiries of the current period (notifications.ts, #100). */
     seen: z.array(z.string()).optional().catch(undefined),
+    announcedFor: z.array(z.string()).optional().catch(undefined),
     unknownKey: z.string().optional().catch(undefined),
   }),
 )

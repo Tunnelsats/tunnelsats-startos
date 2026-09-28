@@ -5,12 +5,19 @@ import {
   planNotifications,
   SEEN_EXPIRIES_LIMIT,
   createNoticeRunner,
+  noticeStateRecord,
+  NOTICE_RETRY_MS,
   type NoticeInputs,
   type NoticeState,
   type Notice,
 } from '../startos/notifications'
 import { noticeInputsFor } from '../startos/dependencies'
 import { generateWireguardKeypair } from '../startos/keygen'
+import { subscriptionNotices } from '../startos/fileModels/subscriptionNotices'
+import { mkdtempSync, rmSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import type { T } from '@start9labs/start-sdk'
 
 const DAY = 24 * 60 * 60 * 1000
 const NOW = new Date('2026-10-01T12:00:00Z')
@@ -269,6 +276,81 @@ test('the seen expiries of a period stay bounded', () => {
   assert.ok((state.seen?.length ?? 0) <= SEEN_EXPIRIES_LIMIT)
   // The most recent ones are kept.
   assert.ok(state.seen?.includes(at(29 - 11 * 0.5).toISOString()))
+})
+
+test('an announced expiry is never forgotten, however many corrections follow', () => {
+  // 7-day notice for 6 days, 3-day notice for 2 days, then more distinct
+  // corrections than SEEN_EXPIRIES_LIMIT: 6 days drops out of seen and is
+  // no longer sentFor, but it announced a notice.
+  const recorded = planNotifications(inputs({ expiry: at(30) }), null, NOW)
+  const six = planNotifications(inputs({ expiry: at(6) }), recorded.next, NOW)
+  const two = planNotifications(inputs({ expiry: at(2) }), six.next, NOW)
+  assert.deepEqual(
+    [...six.steps, ...two.steps].map((s) => s.notice.kind),
+    ['7d', '3d'],
+  )
+  let state = two.next
+  for (let i = 1; i <= SEEN_EXPIRIES_LIMIT + 1; i++) {
+    state = planNotifications(
+      inputs({ expiry: at(2 - i * 0.1) }),
+      state,
+      NOW,
+    ).next
+  }
+  assert.ok(!state.seen?.includes(at(6).toISOString()))
+  assert.equal(state.sentFor, at(2).toISOString())
+  const back = planNotifications(inputs({ expiry: at(6) }), state, NOW)
+  assert.deepEqual(back.steps, [])
+  assert.deepEqual(back.next.sent, ['7d', '3d'])
+})
+
+test('the runner persists the period history through the file model and a rollback', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'notices-'))
+  try {
+    const file = subscriptionNotices.withPath(join(dir, 'notices.json'))
+    const effects = {} as T.Effects
+    let expiry = at(30)
+    let now = NOW
+    let failPost = false
+    const posted: string[] = []
+    const run = createNoticeRunner({
+      readInputs: async () => inputs({ expiry }),
+      readState: async () => (await file.read().once()) ?? null,
+      writeState: async (state) => {
+        await file.write(effects, noticeStateRecord(state))
+      },
+      notify: async (notice) => {
+        if (failPost) throw new Error('no notifications')
+        posted.push(notice.kind)
+      },
+      now: () => now,
+    })
+    await run()
+    expiry = at(6)
+    await run()
+    // The 3-day notice fails once and is rolled back.
+    expiry = at(2)
+    failPost = true
+    assert.match((await run()).error ?? '', /no notifications/)
+    const rolledBack = await file.read().once()
+    assert.deepEqual(rolledBack?.announcedFor, [at(6).toISOString()])
+    assert.ok(rolledBack?.seen?.includes(at(6).toISOString()))
+    failPost = false
+    now = new Date(NOW.getTime() + NOTICE_RETRY_MS)
+    await run()
+    // Back to the first shortened expiry: nothing repeats.
+    expiry = at(6)
+    await run()
+    assert.deepEqual(posted, ['7d', '3d'])
+    const saved = await file.read().once()
+    assert.deepEqual(saved?.announcedFor, [
+      at(6).toISOString(),
+      at(2).toISOString(),
+    ])
+    assert.deepEqual(saved?.sent, ['7d', '3d'])
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
 })
 
 test('a new key starts a new period', () => {

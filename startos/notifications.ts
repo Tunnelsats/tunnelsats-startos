@@ -39,9 +39,12 @@ export type NoticeKind = ExpiryStage | 'unknown-key'
 const STAGES: readonly ExpiryStage[] = ['7d', '3d', 'lapsed']
 const DAY_MS = 24 * 60 * 60 * 1000
 /**
- * How many earlier expiries of a period are remembered (#100). The API has
- * to correct one period's expiry more often than this before a correction
- * back to a forgotten value can repeat a notice.
+ * How many other expiries of a period are remembered (#100), oldest dropped
+ * first. Expiries a stage was announced for are kept apart (announcedFor, at
+ * most one per stage) and never dropped, so a correction back to one never
+ * repeats its notice. Only a correction back to an expiry that announced
+ * nothing and was dropped can open a new period; it then posts only what is
+ * due for it, which was not posted for that expiry before.
  */
 export const SEEN_EXPIRIES_LIMIT = 8
 /** Pause after a failed post, so a host without notifications is not asked on every tick. */
@@ -83,6 +86,8 @@ export interface NoticeState {
    * oldest first, at most SEEN_EXPIRIES_LIMIT.
    */
   seen?: readonly string[]
+  /** The expiries a stage of the current period was announced for. */
+  announcedFor?: readonly string[]
   /** The key the unknown-key notice was sent for. */
   unknownKey?: string
 }
@@ -188,12 +193,16 @@ export function planNotifications(
     const prevExpiry = valid(prev?.expiresAt)
     const prevSentFor = valid(prev?.sentFor)
     const t = expiry.getTime()
+    const dates = (list: readonly string[] | undefined) =>
+      (list ?? []).map((iso) => valid(iso)).filter((d): d is Date => d !== null)
     // Earlier answers of this period; sentFor counts too (state written
     // before `seen` existed has only that).
-    const prevSeen = (prev?.seen ?? [])
-      .map((iso) => valid(iso))
-      .filter((d): d is Date => d !== null)
-    const seenBefore = [...prevSeen, ...(prevSentFor ? [prevSentFor] : [])]
+    const prevSeen = dates(prev?.seen)
+    const seenBefore = [
+      ...prevSeen,
+      ...dates(prev?.announcedFor),
+      ...(prevSentFor ? [prevSentFor] : []),
+    ]
     // The period keeps the latest expiry it saw, so a temporarily earlier
     // answer and its correction back to that expiry are not a renewal. An
     // expiry later than the one the last stage was announced for is one,
@@ -217,6 +226,7 @@ export function planNotifications(
     if (newPeriod) {
       delete base.sentFor
       delete base.seen
+      delete base.announcedFor
     } else if (prevExpiry && t < prevExpiry.getTime()) {
       const iso = expiry.toISOString()
       const kept = prevSeen.map((d) => d.toISOString())
@@ -239,15 +249,42 @@ export function planNotifications(
   }
   if (stageDue && expiry) {
     const upTo = STAGES.indexOf(stageDue)
+    const iso = expiry.toISOString()
+    const announced = (state.announcedFor ?? []).filter((a) => a !== iso)
     const after = {
       ...state,
       sent: STAGES.slice(0, upTo + 1),
-      sentFor: expiry.toISOString(),
+      sentFor: iso,
+      announcedFor: [...announced, iso].slice(-STAGES.length),
     }
     steps.push({ notice: noticeFor(stageDue, expiry), before: state, after })
     state = after
   }
   return { steps, next: state }
+}
+
+/**
+ * The persisted form of a NoticeState (subscription-notices.json): every
+ * field the planner reads, arrays copied. main.ts writes exactly this.
+ */
+export function noticeStateRecord(state: NoticeState): {
+  publicKey?: string
+  expiresAt?: string
+  sent?: string[]
+  sentFor?: string
+  seen?: string[]
+  announcedFor?: string[]
+  unknownKey?: string
+} {
+  return {
+    publicKey: state.publicKey,
+    expiresAt: state.expiresAt,
+    sent: state.sent ? [...state.sent] : undefined,
+    sentFor: state.sentFor,
+    seen: state.seen ? [...state.seen] : undefined,
+    announcedFor: state.announcedFor ? [...state.announcedFor] : undefined,
+    unknownKey: state.unknownKey,
+  }
 }
 
 function sameState(a: NoticeState | null | undefined, b: NoticeState) {
@@ -257,6 +294,7 @@ function sameState(a: NoticeState | null | undefined, b: NoticeState) {
     a.expiresAt === b.expiresAt &&
     a.sentFor === b.sentFor &&
     (a.seen ?? []).join(',') === (b.seen ?? []).join(',') &&
+    (a.announcedFor ?? []).join(',') === (b.announcedFor ?? []).join(',') &&
     a.unknownKey === b.unknownKey &&
     sentStages(a).join(',') === sentStages(b).join(',')
   )
