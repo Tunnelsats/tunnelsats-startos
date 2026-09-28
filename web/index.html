@@ -384,7 +384,16 @@
             </li>
             <li>
               <code>curl -4 -s https://ifconfig.me</code>
-              <span>must print the TunnelSats server IP, not your home IP</span>
+              <span
+                >must print the TunnelSats server IPv4, not your home IP</span
+              >
+            </li>
+            <li>
+              <code>curl -6 -s https://ifconfig.me</code>
+              <span
+                >must print the TunnelSats server IPv6 (or fail when IPv6 is
+                blocked), never your home IPv6</span
+              >
             </li>
           </ul>
           <p class="note">

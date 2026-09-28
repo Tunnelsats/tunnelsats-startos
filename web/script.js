@@ -131,7 +131,7 @@ function buildNotices(m) {
       notices.push({
         level: 'info',
         title: 'Payment pending',
-        text: `Accept the Pay Invoice task on ${node}. TunnelSats sets up the tunnel by itself once the payment settles.${retryText(pending.order)}`,
+        text: `If you have not paid yet, accept the Pay Invoice task on ${node}. Once paid, TunnelSats sets up the tunnel automatically.${retryText(pending.order)}`,
       })
     }
   }
@@ -147,7 +147,7 @@ function buildNotices(m) {
       notices.push({
         level: 'info',
         title: 'Renewal payment pending',
-        text: `Accept the Pay Invoice task on ${node}. The new expiry is confirmed automatically once the payment settles.${retryText(pending.renewal)}`,
+        text: `If you have not paid yet, accept the Pay Invoice task on ${node}. Once paid, the new expiry is confirmed automatically.${retryText(pending.renewal)}`,
       })
     }
   }
@@ -167,7 +167,7 @@ function buildNotices(m) {
       notices.push({
         level: 'info',
         title: 'Bandwidth reset payment pending',
-        text: `Accept the Pay Invoice task on ${node}.${expires ? ` The invoice expires ${expires}.` : ''}${retryText(pending.reset)}`,
+        text: `If you have not paid yet, accept the Pay Invoice task on ${node}; once paid, the reset is applied automatically.${expires ? ` The invoice expires ${expires}.` : ''}${retryText(pending.reset)}`,
       })
     }
   }

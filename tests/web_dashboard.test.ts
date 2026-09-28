@@ -321,7 +321,7 @@ test('a pending order on Eclair asks for the Pay Invoice task on Eclair', () => 
   })
   const notices = h.run<Json[]>(`buildNotices(${JSON.stringify(m)})`)
   assert.deepEqual(titles(notices), ['Payment pending'])
-  assert.match(texts(notices), /Accept the Pay Invoice task on Eclair\./)
+  assert.match(texts(notices), /accept the Pay Invoice task on Eclair\./)
   assert.match(texts(notices), /Last check failed: backend unreachable/)
   assert.deepEqual(
     h.run(`badgeState(${JSON.stringify(m)}, false)`).text,
