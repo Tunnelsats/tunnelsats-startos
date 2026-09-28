@@ -221,7 +221,18 @@ export function runPurchase(
       pending.paymentReceivedFor === pending.paymentHash &&
       input.keepPayable
     ) {
-      // Paid, not claimed yet: the settlement watcher finishes it.
+      // Paid, not claimed yet: the settlement watcher finishes it. Only the
+      // same selection is that payment; any other request would be marked
+      // done without an invoice for what was asked.
+      if (
+        pending.serverId !== input.serverRegion ||
+        pending.duration !== input.duration ||
+        pending.targetNode !== input.targetNode
+      ) {
+        throw new PendingPaymentConflictError(
+          `A subscription payment (${pending.serverId}, ${pending.duration ?? '?'} month(s), ${pending.targetNode}) was received and is still being set up. Try again once it has finished.`,
+        )
+      }
       return {
         kind: 'already-paid',
         paymentHash: pending.paymentHash,

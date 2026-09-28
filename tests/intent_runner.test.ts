@@ -229,14 +229,14 @@ test('runPurchase creates, records, and raises a task, then reuses while payable
     payTaskReplayId('order', 'lnd', ORDER_HASH),
   ])
 
-  // Once paid (paymentReceivedFor matches), an intent returns already-paid and
-  // never overwrites the paid order's private key.
+  // Once paid (paymentReceivedFor matches), an identical intent returns
+  // already-paid and never overwrites the paid order's private key.
   state.pending = { ...state.pending!, paymentReceivedFor: ORDER_HASH_2 }
   const fourth = await runPurchase(
     {
-      targetNode: 'lnd',
-      serverRegion: 'eu-de',
-      duration: 1,
+      targetNode: 'eclair',
+      serverRegion: 'us-west',
+      duration: 12,
       keepPayable: true,
     },
     ops,
@@ -246,6 +246,22 @@ test('runPurchase creates, records, and raises a task, then reuses while payable
     paymentHash: ORDER_HASH_2,
     targetNode: 'eclair',
   })
+  // A different selection is not that payment: it conflicts instead of
+  // being reported as done.
+  await assert.rejects(
+    runPurchase(
+      {
+        targetNode: 'lnd',
+        serverRegion: 'eu-de',
+        duration: 1,
+        keepPayable: true,
+      },
+      ops,
+    ),
+    (e: unknown) =>
+      e instanceof PendingPaymentConflictError &&
+      /was received and is still being set up/.test(e.message),
+  )
   assert.equal(createCalls, 2)
   assert.equal(state.pending?.privateKey, kp2.privateKey)
 })
@@ -1079,4 +1095,55 @@ test('reuseOnly Buy and Renew return the recorded invoice but never create a new
   renewalPending = { ...renewalPending, expiresAt: inMs(-1) }
   await assert.rejects(runRenewal(renew, renewalOps), NothingToResumeError)
   assert.equal(created, 0)
+})
+
+test('a paid, settling renewal answers only a dashboard request for the same plan', async () => {
+  const kp = generateWireguardKeypair()
+  const pub = derivePublicKey(kp.privateKey)
+  const conf = `[Interface]\nPrivateKey = ${kp.privateKey}\nAddress = 10.9.0.2/32\n# Server: de2.tunnelsats.com\n# Port Forwarding: 24556\n\n[Peer]\nPublicKey = ${kp.publicKey}\nEndpoint = de2.tunnelsats.com:51820\nAllowedIPs = 0.0.0.0/0\n`
+  const paid: PendingRenewalRecord = {
+    paymentHash: RENEW_HASH,
+    renewalId: 'ren-paid',
+    oldExpiry: '2026-10-15T00:00:00.000Z',
+    newExpiry: '2027-01-15T00:00:00.000Z',
+    createdAt: inMs(-5 * 60_000),
+    duration: 3,
+    invoice: RENEW_INVOICE,
+    expiresAt: inMs(30 * 60_000),
+    paymentReceivedFor: RENEW_HASH,
+    publicKey: pub,
+    targetNode: 'lnd',
+  }
+  let requested = 0
+  const ops: RenewalOps = {
+    now: () => NOW,
+    readConfig: async () => ({
+      enabled: true,
+      'target-node': 'lnd',
+      'tunnelsats-conf': conf,
+    }),
+    readServerMeta: async () => ({
+      publicKey: pub,
+      serverDomain: 'de2.tunnelsats.com',
+    }),
+    readCurrent: async () => ({ pending: paid }),
+    requestRenewal: async () => {
+      requested += 1
+      throw new Error('must not request')
+    },
+    record: async () => undefined,
+    raiseTask: async () => undefined,
+  }
+  assert.deepEqual(await runRenewal({ duration: 3, keepPayable: true }, ops), {
+    kind: 'already-paid',
+    paymentHash: RENEW_HASH,
+    targetNode: 'lnd',
+  })
+  await assert.rejects(
+    runRenewal({ duration: 12, keepPayable: true }, ops),
+    (e: unknown) =>
+      e instanceof PendingPaymentConflictError &&
+      /was received and is still being applied/.test(e.message),
+  )
+  assert.equal(requested, 0)
 })

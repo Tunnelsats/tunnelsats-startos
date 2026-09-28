@@ -160,6 +160,13 @@ export async function runRenewal(
       pending.paymentReceivedFor === pending.paymentHash &&
       input.keepPayable
     ) {
+      // Only a request for the same plan is that payment; a record without
+      // a duration cannot be matched and is treated as different.
+      if (pending.duration !== input.duration) {
+        throw new PendingPaymentConflictError(
+          `A renewal payment (${pending.duration ?? '?'} month(s)) was received and is still being applied. Try again once it has finished.`,
+        )
+      }
       return {
         kind: 'already-paid',
         paymentHash: pending.paymentHash,
