@@ -207,10 +207,13 @@ export function planNotifications(
     // answer and its correction back to that expiry are not a renewal. An
     // expiry later than the one the last stage was announced for is one,
     // though: a renewal can extend a shortened expiry without passing the
-    // old latest one. Unless the period saw that exact expiry before: then
-    // it is a correction back to an earlier answer (#100). A renewal that
-    // lands exactly on an earlier answer is the remaining ambiguity;
-    // renewals add whole months, so that collision is not expected.
+    // old latest one. Unless it is still within the reminder window and the
+    // period already saw that exact reminder-window expiry (#100): then it
+    // is a correction back to an earlier answer. Pre-reminder expiries
+    // (stage === null, > 7 days away) are never recorded in `seen`, so a
+    // renewal that extends a shortened expiry back to an earlier >7d timestamp
+    // (e.g. 90d -> 35d -> 5d -> renewed to 35d) still starts a new period.
+    const stage = expiryStage(expiry, now)
     const newPeriod =
       prev?.publicKey !== publicKey ||
       !prevExpiry ||
@@ -218,7 +221,7 @@ export function planNotifications(
       (!!prevSentFor &&
         t > prevSentFor.getTime() &&
         t < prevExpiry.getTime() &&
-        !seenBefore.some((d) => d.getTime() === t))
+        (stage === null || !seenBefore.some((d) => d.getTime() === t)))
     base.publicKey = publicKey
     base.expiresAt =
       newPeriod || !prevExpiry ? expiry.toISOString() : prevExpiry.toISOString()
@@ -227,7 +230,7 @@ export function planNotifications(
       delete base.sentFor
       delete base.seen
       delete base.announcedFor
-    } else if (prevExpiry && t < prevExpiry.getTime()) {
+    } else if (prevExpiry && t < prevExpiry.getTime() && stage !== null) {
       const iso = expiry.toISOString()
       const kept = prevSeen.map((d) => d.toISOString())
       if (!kept.includes(iso)) {
@@ -236,7 +239,6 @@ export function planNotifications(
         base.seen = kept
       }
     }
-    const stage = expiryStage(expiry, now)
     if (stage && !base.sent.includes(stage)) stageDue = stage
   }
 

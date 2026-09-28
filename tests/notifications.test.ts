@@ -262,12 +262,51 @@ test('legacy state without seen expiries still treats sentFor as seen', () => {
   assert.deepEqual(same.next.sent, ['7d', '3d'])
 })
 
+test('a renewal to an earlier pre-reminder expiry starts a new period and announces when due', () => {
+  // 90d -> shortened to 35d (outside the 7d reminder window) -> shortened to
+  // 5d (7d notice sent) -> renewed by 30d back to 35d: must start a new
+  // period so the renewed subscription receives its 7d reminder when due.
+  const ninety = planNotifications(inputs({ expiry: at(90) }), null, NOW)
+  const thirtyFive = planNotifications(
+    inputs({ expiry: at(35) }),
+    ninety.next,
+    NOW,
+  )
+  assert.equal(thirtyFive.next.seen, undefined)
+  const five = planNotifications(
+    inputs({ expiry: at(5) }),
+    thirtyFive.next,
+    NOW,
+  )
+  assert.deepEqual(
+    five.steps.map((s) => s.notice.kind),
+    ['7d'],
+  )
+  const renewed = planNotifications(inputs({ expiry: at(35) }), five.next, NOW)
+  assert.deepEqual(renewed.steps, [])
+  assert.deepEqual(renewed.next, {
+    publicKey: 'PK=',
+    expiresAt: at(35).toISOString(),
+    sent: [],
+  })
+  const dueAgain = planNotifications(
+    inputs({ expiry: at(35) }),
+    renewed.next,
+    at(28),
+  )
+  assert.deepEqual(
+    dueAgain.steps.map((s) => s.notice.kind),
+    ['7d'],
+  )
+})
+
 test('the seen expiries of a period stay bounded', () => {
   let state = planNotifications(inputs({ expiry: at(30) }), null, NOW).next
-  // Twelve distinct shortenings, each earlier than the one before.
+  // Twelve distinct shortenings within the reminder window, each earlier than
+  // the one before.
   for (let i = 0; i < 12; i++) {
     state = planNotifications(
-      inputs({ expiry: at(29 - i * 0.5) }),
+      inputs({ expiry: at(7 - i * 0.5) }),
       state,
       NOW,
     ).next
@@ -275,7 +314,7 @@ test('the seen expiries of a period stay bounded', () => {
   assert.equal(state.expiresAt, at(30).toISOString())
   assert.ok((state.seen?.length ?? 0) <= SEEN_EXPIRIES_LIMIT)
   // The most recent ones are kept.
-  assert.ok(state.seen?.includes(at(29 - 11 * 0.5).toISOString()))
+  assert.ok(state.seen?.includes(at(7 - 11 * 0.5).toISOString()))
 })
 
 test('an announced expiry is never forgotten, however many corrections follow', () => {
