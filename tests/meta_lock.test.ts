@@ -146,6 +146,29 @@ test('a job whose holder exits before the release fails', async () => {
   )
 })
 
+test('a job whose holder exits as the job finishes (before close fires) still fails', async () => {
+  let child: ReturnType<typeof spawn> | undefined
+  const lock = createMetaLock((use) =>
+    use(async () => {
+      child = spawn(
+        'python3',
+        ['-c', 'import time; print("locked", flush=True); time.sleep(60)'],
+        { stdio: 'pipe' },
+      )
+      return child
+    }),
+  )
+  await assert.rejects(
+    lock(async () => {
+      // Kill the holder right as the job returns, before its 'close' event
+      // has had a chance to run on the event loop.
+      child!.kill('SIGKILL')
+      return 'written'
+    }),
+    (e: unknown) => e instanceof MetaLockError && /lost/.test(e.message),
+  )
+})
+
 test(
   'heartbeats to the real holder keep the lock held until the release',
   withDir(async (dir) => {

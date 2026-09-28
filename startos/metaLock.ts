@@ -150,23 +150,33 @@ async function holdWhile<R>(
     options.heartbeatMs ?? META_LOCK_HEARTBEAT_MS,
   )
   heartbeat.unref()
-  let lostEarly = false
+  let heldUntilRelease = false
   let result: R
   try {
     result = await holding.run(true, job)
   } finally {
     clearInterval(heartbeat)
-    lostEarly = exited
+    const activeAtEnd = !exited
     child.stdin?.end()
-    const released = await Promise.race([
+    const closed = await Promise.race([
       exit.then(() => true),
       new Promise<boolean>((resolve) =>
         setTimeout(() => resolve(false), releaseTimeoutMs).unref(),
       ),
     ])
-    if (!released) child.kill('SIGKILL')
+    if (!closed) child.kill('SIGKILL')
+    // Checked after `exit` (the 'close' event) resolves: a holder that
+    // exited while `job` was finishing may not have fired 'close' yet when
+    // `finally` began, and only a holder still waiting on stdin when `end()`
+    // ran prints `released` and exits 0.
+    heldUntilRelease =
+      activeAtEnd &&
+      closed &&
+      child.exitCode === 0 &&
+      child.signalCode === null &&
+      output.split('\n').includes('released')
   }
-  if (lostEarly) {
+  if (!heldUntilRelease) {
     // The hold ended early (lease or holder killed), so the job's writes
     // may have interleaved with bridge.py: never report them as done.
     throw new MetaLockError('the lock was lost before the write finished')

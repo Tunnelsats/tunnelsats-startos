@@ -166,8 +166,9 @@ META_LOCK_EXIT_LEASE = 3
 def hold_meta_lock(stdin_fd, out, acquire_timeout=META_LOCK_ACQUIRE_TIMEOUT, lease=META_LOCK_LEASE):
     """meta_lock for a process that cannot flock (the TypeScript runtime):
     takes the same lock file, writes "locked" to `out`, and holds the lock
-    until `stdin_fd` reaches EOF, which is how the owner releases it. An
-    owner that dies closes the pipe, so its lock is released as well.
+    until `stdin_fd` reaches EOF, which is how the owner releases it (the
+    holder then writes "released" before closing the lock file). An owner
+    that dies closes the pipe, so its lock is released as well.
 
     The owner keeps the hold alive by writing to stdin (a heartbeat); every
     write renews the lease. A slow file operation therefore never loses the
@@ -177,8 +178,8 @@ def hold_meta_lock(stdin_fd, out, acquire_timeout=META_LOCK_ACQUIRE_TIMEOUT, lea
     Returns 0 after a release, META_LOCK_EXIT_BUSY (after writing a JSON
     error, never "locked") when the lock stays taken for acquire_timeout
     seconds, and META_LOCK_EXIT_LEASE when the owner sent neither a
-    heartbeat nor EOF for `lease` seconds. The owner treats that exit as a
-    lost lock and fails its job."""
+    heartbeat nor EOF for `lease` seconds. The owner treats any exit without
+    "released" as a lost lock and fails its job."""
     fd = os.open(META_FILE_PATH + ".lock", os.O_RDWR | os.O_CREAT, 0o600)
     try:
         deadline = time.monotonic() + acquire_timeout
@@ -206,6 +207,11 @@ def hold_meta_lock(stdin_fd, out, acquire_timeout=META_LOCK_ACQUIRE_TIMEOUT, lea
             readable, _, _ = select.select([stdin_fd], [], [], remaining)
             if readable:
                 if not os.read(stdin_fd, 4096):
+                    try:
+                        out.write("released\n")
+                        out.flush()
+                    except (BrokenPipeError, OSError):
+                        pass
                     return 0
                 lease_end = time.monotonic() + lease
     finally:

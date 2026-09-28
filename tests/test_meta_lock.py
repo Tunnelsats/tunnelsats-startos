@@ -68,6 +68,7 @@ class TestMetaLockHolder(MetaLockBase):
         self.assertEqual(holder.stdout.readline().strip(), "locked")
         self.assertFalse(lock_is_free(self.lock_path))
         holder.stdin.close()
+        self.assertEqual(holder.stdout.readline().strip(), "released")
         self.assertEqual(holder.wait(timeout=10), 0)
         self.assertTrue(lock_is_free(self.lock_path))
 
