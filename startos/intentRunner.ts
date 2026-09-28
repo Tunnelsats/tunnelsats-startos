@@ -12,7 +12,11 @@ import {
   type DashboardResetIntent,
 } from './fileModels/dashboardIntents'
 import { configJson } from './fileModels/config.json'
-import { startPurchase, type PurchaseInput } from './actions/buySubscription'
+import {
+  INVOICE_TTL_MS,
+  startPurchase,
+  type PurchaseInput,
+} from './actions/buySubscription'
 import { startRenewal, type RenewalInput } from './actions/renewSubscription'
 import { startBandwidthReset } from './actions/resetBandwidth'
 import type { TargetNode } from './settlement'
@@ -22,6 +26,13 @@ import type { TargetNode } from './settlement'
  * request as timed out, so the runner must not create an invoice for it.
  */
 export const INTENT_TTL_MS = 120 * 1000
+/**
+ * How long a request that was already started ('processing' when StartOS
+ * restarted) may still be resumed: the default invoice lifetime. Past it any
+ * invoice the request created has expired, so resuming would only create a
+ * new one for a request the operator made long ago.
+ */
+export const INTENT_RESUME_MS = INVOICE_TTL_MS
 const INTENT_ORDER: readonly DashboardIntentKind[] = ['renew', 'reset', 'buy']
 const HEX64_RE = /\b[0-9a-fA-F]{64}\b/g
 
@@ -136,10 +147,16 @@ export function runDashboardIntents(
 
       const now = ops.now()
       const createdMs = Date.parse(slot.createdAt)
-      if (
-        !Number.isFinite(createdMs) ||
-        now.getTime() - createdMs > INTENT_TTL_MS
-      ) {
+      const ageMs = now.getTime() - createdMs
+      // A 'processing' result for this ID means the runner started it and
+      // StartOS restarted before the outcome was written. The action may
+      // already have recorded an invoice, so the request is resumed (the
+      // action cores reuse a recorded, still-payable invoice for the same
+      // selection) rather than failed at the dashboard TTL, which only
+      // bounds requests that never started.
+      const resuming = previous?.id === slot.id
+      const limitMs = resuming ? INTENT_RESUME_MS : INTENT_TTL_MS
+      if (!Number.isFinite(createdMs) || ageMs > limitMs) {
         const expiredResult: DashboardIntentResult = {
           id: slot.id,
           kind,
@@ -147,7 +164,9 @@ export function runDashboardIntents(
           createdAt: slot.createdAt,
           updatedAt: now.toISOString(),
           targetNode: slot.targetNode,
-          error: 'The dashboard request expired before it could be processed.',
+          error: resuming
+            ? 'StartOS restarted while this request was being processed, and it is too old to resume. Check for a Pay Invoice task on your node, or request it again.'
+            : 'The dashboard request expired before it could be processed.',
         }
         await ops.writeResult(kind, expiredResult)
         outcomes.push(expiredResult)

@@ -33,6 +33,7 @@ import {
 } from '../startos/fileModels/dashboardIntents'
 import { metaShape } from '../startos/fileModels/tunnelsatsMeta'
 import {
+  INTENT_RESUME_MS,
   INTENT_TTL_MS,
   processDashboardIntents,
   purchaseInputFromIntent,
@@ -337,6 +338,86 @@ test('runRenewal creates, records, and reuses a payable renewal invoice', async 
   )
 })
 
+test('a dashboard renewal never replaces the previous key renewal while payable or paid', async () => {
+  const kp = generateWireguardKeypair()
+  const pub = derivePublicKey(kp.privateKey)
+  const conf = `[Interface]\nPrivateKey = ${kp.privateKey}\nAddress = 10.9.0.2/32\n# Server: de2.tunnelsats.com\n# Port Forwarding: 24556\n\n[Peer]\nPublicKey = ${kp.publicKey}\nEndpoint = de2.tunnelsats.com:51820\nAllowedIPs = 0.0.0.0/0\n`
+  const previousKeyRenewal: PendingRenewalRecord = {
+    paymentHash: RENEW_HASH,
+    renewalId: 'ren-old',
+    oldExpiry: '2026-10-15T00:00:00.000Z',
+    newExpiry: '2026-11-15T00:00:00.000Z',
+    createdAt: inMs(-60_000),
+    duration: 1,
+    invoice: RENEW_INVOICE,
+    expiresAt: inMs(30 * 60_000),
+    publicKey: 'previous-key-previous-key-previous-key-prev=',
+    targetNode: 'lnd',
+  }
+  let state: { pending?: PendingRenewalRecord | null } = {
+    pending: previousKeyRenewal,
+  }
+  let renewCalls = 0
+  const ops: RenewalOps = {
+    now: () => NOW,
+    readConfig: async () => ({
+      enabled: true,
+      'target-node': 'lnd',
+      'tunnelsats-conf': conf,
+    }),
+    readServerMeta: async () => ({
+      publicKey: pub,
+      serverDomain: 'de2.tunnelsats.com',
+    }),
+    readCurrent: async () => ({ ...state }),
+    requestRenewal: async () => {
+      renewCalls += 1
+      return {
+        invoice: RENEW_INVOICE,
+        paymentHash: RENEW_HASH_2,
+        oldExpiry: '2026-10-15T00:00:00.000Z',
+        newExpiry: '2026-11-15T00:00:00.000Z',
+        renewalId: 'ren-new',
+      }
+    },
+    record: async (entry) => {
+      state = { pending: entry }
+    },
+    raiseTask: async () => undefined,
+  }
+
+  // Still payable for the previous key: the dashboard must not replace it.
+  await assert.rejects(
+    runRenewal({ duration: 1, keepPayable: true }, ops),
+    (e: unknown) =>
+      e instanceof PendingPaymentConflictError &&
+      /previous subscription key is still payable/.test(e.message),
+  )
+  assert.equal(renewCalls, 0)
+  assert.equal(state.pending?.paymentHash, RENEW_HASH)
+
+  // Paid for the previous key but not settled yet: still protected.
+  state = {
+    pending: { ...previousKeyRenewal, paymentReceivedFor: RENEW_HASH },
+  }
+  await assert.rejects(
+    runRenewal({ duration: 1, keepPayable: true }, ops),
+    (e: unknown) =>
+      e instanceof PendingPaymentConflictError &&
+      /paid and is still being settled/.test(e.message),
+  )
+  assert.equal(renewCalls, 0)
+
+  // Expired and unpaid for the previous key: nothing left to protect.
+  state = {
+    pending: { ...previousKeyRenewal, expiresAt: inMs(-1_000) },
+  }
+  const created = await runRenewal({ duration: 1, keepPayable: true }, ops)
+  assert.equal(created.kind, 'created')
+  assert.equal(renewCalls, 1)
+  assert.equal(state.pending?.publicKey, pub)
+})
+
 test('startBandwidthReset delegates to runBandwidthReset and maps 429 errors', async () => {
   const kp = generateWireguardKeypair()
   const conf = `[Interface]\nPrivateKey = ${kp.privateKey}\nAddress = 10.9.0.2/32\n# Server: de2.tunnelsats.com\n# Port Forwarding: 24556\n\n[Peer]\nPublicKey = ${kp.publicKey}\nEndpoint = de2.tunnelsats.com:51820\nAllowedIPs = 0.0.0.0/0\n`
@@ -448,6 +529,77 @@ test('runDashboardIntents processes renew, reset, then buy in order and is idemp
   assert.equal(staleRun[0].status, 'failed')
   assert.match(staleRun[0].error ?? '', /expired/)
   assert.deepEqual(order, ['renew', 'reset', 'buy'])
+})
+
+test('runDashboardIntents resumes a request StartOS restarted during, within the invoice lifetime', async () => {
+  const calls: string[] = []
+  const renew = {
+    id: 'intent-renew-restart',
+    kind: 'renew' as const,
+    createdAt: inMs(-10 * 60_000),
+    targetNode: 'lnd' as const,
+    duration: '1m' as const,
+  }
+  const results: DashboardIntentResultsFile = {
+    renew: {
+      id: renew.id,
+      kind: 'renew',
+      status: 'processing',
+      createdAt: renew.createdAt,
+      updatedAt: inMs(-10 * 60_000 + 500),
+      targetNode: 'lnd',
+    },
+  }
+  const ops: IntentRunnerOps = {
+    now: () => NOW,
+    readIntents: async () => ({ renew }),
+    readResults: async () => ({ ...results }),
+    writeResult: async (kind, result) => {
+      results[kind] = result
+    },
+    runRenew: async () => {
+      calls.push('renew')
+      // The action core finds the invoice it recorded before the restart.
+      return { paymentHash: RENEW_HASH, targetNode: 'lnd', reused: true }
+    },
+    runReset: async () => {
+      throw new Error('unexpected')
+    },
+    runBuy: async () => {
+      throw new Error('unexpected')
+    },
+  }
+
+  // Older than the dashboard TTL, but it had started: resumed, not failed.
+  assert.ok(10 * 60_000 > INTENT_TTL_MS)
+  const resumed = await runDashboardIntents(ops)
+  assert.deepEqual(calls, ['renew'])
+  assert.equal(resumed.length, 1)
+  assert.equal(resumed[0].status, 'succeeded')
+  assert.equal(resumed[0].paymentHash, RENEW_HASH)
+  assert.equal(resumed[0].reused, true)
+
+  // Past the invoice lifetime a started request is not resumed; the result
+  // says StartOS restarted instead of claiming it never started.
+  const oldRenew = {
+    ...renew,
+    id: 'intent-renew-old',
+    createdAt: inMs(-INTENT_RESUME_MS - 1_000),
+  }
+  results.renew = {
+    id: oldRenew.id,
+    kind: 'renew',
+    status: 'processing',
+    createdAt: oldRenew.createdAt,
+    updatedAt: oldRenew.createdAt,
+    targetNode: 'lnd',
+  }
+  ops.readIntents = async () => ({ renew: oldRenew })
+  const tooOld = await runDashboardIntents(ops)
+  assert.deepEqual(calls, ['renew'])
+  assert.equal(tooOld[0].status, 'failed')
+  assert.match(tooOld[0].error ?? '', /StartOS restarted/)
+  assert.doesNotMatch(tooOld[0].error ?? '', /before it could be processed/)
 })
 
 test('runDashboardIntents records sanitized failure messages and redacts payment hashes', async () => {

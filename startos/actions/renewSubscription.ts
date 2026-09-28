@@ -191,6 +191,23 @@ export async function runRenewal(
         targetNode: node,
       }
     }
+    if (input.keepPayable && pending && pending.publicKey !== publicKey) {
+      // A renewal bought for the previous key is invisible on the dashboard
+      // (it only shows the current key's payments). Replacing it would stop
+      // tracking an invoice that can still be paid, or one already paid and
+      // waiting for its settlement tick.
+      const previousUntil = payableUntil(pending, now)
+      if (previousUntil !== null) {
+        throw new PendingPaymentConflictError(
+          `A renewal invoice for the previous subscription key is still payable until ${new Date(previousUntil).toISOString()}. Pay it, or replace it with the Renew Subscription action in StartOS.`,
+        )
+      }
+      if (pending.paymentReceivedFor === pending.paymentHash) {
+        throw new PendingPaymentConflictError(
+          'A renewal for the previous subscription key was paid and is still being settled. Try again once it has settled.',
+        )
+      }
+    }
     const otherPayableUntil =
       pending && pending.publicKey === publicKey
         ? payableUntil(pending, now)
