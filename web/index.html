@@ -97,6 +97,13 @@
             <h2 id="invoice-title">Lightning invoice ready</h2>
             <span class="info-label" id="invoice-expiry">…</span>
           </div>
+          <div
+            id="invoice-switcher"
+            class="invoice-switcher"
+            role="group"
+            aria-label="Payable invoices"
+            hidden
+          ></div>
           <p class="invoice-framing" id="invoice-framing">…</p>
           <div class="invoice-body">
             <div
@@ -176,8 +183,12 @@
                 <select id="buy-server-select" class="intent-select">
                   <option value="eu-de" selected>Europe (Nuremberg, DE)</option>
                   <option value="eu-ch">Europe (Geneva, CH)</option>
-                  <option value="us-east">North America East (Ashburn, US)</option>
-                  <option value="us-west">North America West (Hillsboro, US)</option>
+                  <option value="us-east">
+                    North America East (Ashburn, US)
+                  </option>
+                  <option value="us-west">
+                    North America West (Hillsboro, US)
+                  </option>
                   <option value="sa-br">South America (Sao Paulo, BR)</option>
                   <option value="asia-sg">Asia (Singapore, SG)</option>
                   <option value="oc-au">Oceania (Sydney, AU)</option>
@@ -399,7 +410,8 @@
             <li class="action-item" id="action-buy">
               <span class="action-name">Buy Subscription</span>
               <span class="action-desc"
-                >A new tunnel on the configured node: pick a server region and a plan.</span
+                >A new tunnel on the configured node: pick a server region and a
+                plan.</span
               >
               <div class="action-controls" id="buy-controls">
                 <select

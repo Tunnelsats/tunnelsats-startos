@@ -974,6 +974,34 @@ code {
   font-size: 13.5px;
 }
 
+.invoice-switcher {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.invoice-switch {
+  min-height: 44px;
+  padding: 8px 14px;
+  border-radius: var(--radius-inner);
+  border: 1px solid var(--card-border);
+  background: var(--surface-sunken);
+  color: var(--text-secondary);
+  font: inherit;
+  font-size: 13.5px;
+  cursor: pointer;
+}
+
+.invoice-switch:hover {
+  color: var(--text-primary);
+}
+
+.invoice-switch[aria-pressed='true'] {
+  border-color: var(--accent-bitcoin);
+  background: var(--accent-bitcoin-glow);
+  color: var(--text-primary);
+}
+
 .invoice-body {
   display: grid;
   grid-template-columns: auto minmax(0, 1fr);

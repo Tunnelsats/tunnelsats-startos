@@ -64,37 +64,67 @@ let lastPollAt = 0
 let submittingIntent = false
 let localIntentFeedback = null
 let lastRenderedInvoice = null
+let selectedInvoiceKind = null
 let selectedBuyDuration = '3m'
 
 // ─────────────────────────────────────────────
-// Pure-DOM ISO/IEC 18004 QR Code Generator (Alphanumeric, Level L, V1–V20)
+// Pure-DOM ISO/IEC 18004 QR Code Generator (Byte mode, Level L, V1–V40)
 // ─────────────────────────────────────────────
-const QR_ALNUM_CHARS = '0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ $%*+-./:'
+// Byte mode encodes the invoice exactly as displayed and copied (lowercase),
+// so scanning and copying always yield the same string.
 
-// Per version 1..20 at Error Correction Level L:
-// [ecCodewordsPerBlock, g1Blocks, g1DataCw, g2Blocks, g2DataCw, alignmentCenters]
-const QR_VERSION_SPECS = Object.freeze([
-  [7, 1, 19, 0, 0, []],
-  [10, 1, 34, 0, 0, [6, 18]],
-  [15, 1, 55, 0, 0, [6, 22]],
-  [20, 1, 80, 0, 0, [6, 26]],
-  [26, 1, 108, 0, 0, [6, 30]],
-  [18, 2, 68, 0, 0, [6, 34]],
-  [20, 2, 78, 0, 0, [6, 22, 38]],
-  [24, 2, 97, 0, 0, [6, 24, 42]],
-  [30, 2, 116, 0, 0, [6, 26, 46]],
-  [18, 2, 68, 2, 69, [6, 28, 50]],
-  [20, 4, 81, 0, 0, [6, 30, 54]],
-  [24, 2, 92, 2, 93, [6, 32, 58]],
-  [26, 4, 107, 0, 0, [6, 34, 62]],
-  [30, 3, 115, 1, 116, [6, 26, 46, 66]],
-  [22, 5, 87, 1, 88, [6, 26, 48, 70]],
-  [24, 5, 98, 1, 99, [6, 26, 50, 74]],
-  [28, 1, 107, 5, 108, [6, 30, 54, 78]],
-  [30, 5, 120, 1, 121, [6, 30, 56, 82]],
-  [28, 3, 113, 4, 114, [6, 30, 58, 86]],
-  [28, 3, 107, 5, 108, [6, 34, 62, 90]],
+// Error correction level L, indexed by version (index 0 unused).
+const QR_ECC_CODEWORDS_PER_BLOCK_L = Object.freeze([
+  -1, 7, 10, 15, 20, 26, 18, 20, 24, 30, 18, 20, 24, 26, 30, 22, 24, 28, 30, 28,
+  28, 28, 28, 30, 30, 26, 28, 30, 30, 30, 30, 30, 30, 30, 30, 30, 30, 30, 30,
+  30, 30,
 ])
+const QR_NUM_ECC_BLOCKS_L = Object.freeze([
+  -1, 1, 1, 1, 1, 1, 2, 2, 2, 2, 4, 4, 4, 4, 4, 6, 6, 6, 6, 7, 8, 8, 9, 9, 10,
+  12, 12, 12, 13, 14, 15, 16, 17, 18, 19, 19, 20, 21, 22, 24, 25,
+])
+const QR_MAX_VERSION = 40
+
+// Modules available for data and ECC in a version (ISO/IEC 18004 §7.1).
+function qrRawDataModules(version) {
+  let result = (16 * version + 128) * version + 64
+  if (version >= 2) {
+    const numAlign = Math.floor(version / 7) + 2
+    result -= (25 * numAlign - 10) * numAlign - 55
+    if (version >= 7) result -= 36
+  }
+  return result
+}
+
+function qrAlignmentCenters(version) {
+  if (version === 1) return []
+  const size = 17 + version * 4
+  const numAlign = Math.floor(version / 7) + 2
+  const step =
+    Math.floor((version * 8 + numAlign * 3 + 5) / (numAlign * 4 - 4)) * 2
+  const result = [6]
+  for (let pos = size - 7; result.length < numAlign; pos -= step) {
+    result.splice(1, 0, pos)
+  }
+  return result
+}
+
+// Block layout of a version at level L: short blocks first, long blocks
+// carry one more data codeword.
+function qrBlockLayout(version) {
+  const rawCodewords = Math.floor(qrRawDataModules(version) / 8)
+  const numBlocks = QR_NUM_ECC_BLOCKS_L[version]
+  const ecPerBlock = QR_ECC_CODEWORDS_PER_BLOCK_L[version]
+  const numShortBlocks = numBlocks - (rawCodewords % numBlocks)
+  const shortDataCw = Math.floor(rawCodewords / numBlocks) - ecPerBlock
+  return {
+    ecPerBlock,
+    numBlocks,
+    numShortBlocks,
+    shortDataCw,
+    totalDataCw: rawCodewords - ecPerBlock * numBlocks,
+  }
+}
 
 const GF_EXP = new Uint8Array(512)
 const GF_LOG = new Uint8Array(256)
@@ -269,46 +299,38 @@ function qrPenaltyScore(modules, size) {
  * 2D boolean QR matrix using ISO/IEC 18004 Alphanumeric mode (Level L).
  */
 function encodeQrMatrix(rawText) {
-  const text = String(rawText || '')
-    .trim()
-    .toUpperCase()
+  const text = String(rawText || '').trim()
   if (!text) return null
+  // ASCII only (BOLT11 is): one byte per character.
+  const bytes = []
   for (let i = 0; i < text.length; i++) {
-    if (QR_ALNUM_CHARS.indexOf(text[i]) === -1) return null
+    const code = text.charCodeAt(i)
+    if (code > 0x7e || code < 0x20) return null
+    bytes.push(code)
   }
 
-  const payloadBits = Math.floor(text.length / 2) * 11 + (text.length % 2) * 6
   let version = 0
-  let spec = null
-  for (let v = 1; v <= QR_VERSION_SPECS.length; v++) {
-    const candidate = QR_VERSION_SPECS[v - 1]
-    const totalDataCw =
-      candidate[1] * candidate[2] + candidate[3] * candidate[4]
-    const countBits = v <= 9 ? 9 : 11
-    if (4 + countBits + payloadBits <= totalDataCw * 8) {
+  let layout = null
+  for (let v = 1; v <= QR_MAX_VERSION; v++) {
+    const candidate = qrBlockLayout(v)
+    const countBits = v <= 9 ? 8 : 16
+    if (4 + countBits + bytes.length * 8 <= candidate.totalDataCw * 8) {
       version = v
-      spec = candidate
+      layout = candidate
       break
     }
   }
-  if (!spec) return null
+  if (!layout) return null
 
-  const [ecPerBlock, g1Blocks, g1DataCw, g2Blocks, g2DataCw, alignCoords] = spec
-  const totalDataCw = g1Blocks * g1DataCw + g2Blocks * g2DataCw
-  const countBits = version <= 9 ? 9 : 11
+  const { ecPerBlock, numBlocks, numShortBlocks, shortDataCw, totalDataCw } =
+    layout
+  const alignCoords = qrAlignmentCenters(version)
+  const countBits = version <= 9 ? 8 : 16
 
   const bits = []
-  pushBits(bits, 0b0010, 4)
-  pushBits(bits, text.length, countBits)
-  for (let i = 0; i < text.length; i += 2) {
-    const v1 = QR_ALNUM_CHARS.indexOf(text[i])
-    if (i + 1 < text.length) {
-      const v2 = QR_ALNUM_CHARS.indexOf(text[i + 1])
-      pushBits(bits, v1 * 45 + v2, 11)
-    } else {
-      pushBits(bits, v1, 6)
-    }
-  }
+  pushBits(bits, 0b0100, 4)
+  pushBits(bits, bytes.length, countBits)
+  for (const byte of bytes) pushBits(bits, byte, 8)
   const maxDataBits = totalDataCw * 8
   const terminator = Math.min(4, maxDataBits - bits.length)
   pushBits(bits, 0, terminator)
@@ -330,22 +352,16 @@ function encodeQrMatrix(rawText) {
   const dataBlocks = []
   const ecBlocks = []
   let offset = 0
-  for (let i = 0; i < g1Blocks; i++) {
-    const block = dataCw.slice(offset, offset + g1DataCw)
-    offset += g1DataCw
-    dataBlocks.push(block)
-    ecBlocks.push(rsRemainder(block, ecPerBlock))
-  }
-  for (let i = 0; i < g2Blocks; i++) {
-    const block = dataCw.slice(offset, offset + g2DataCw)
-    offset += g2DataCw
+  for (let i = 0; i < numBlocks; i++) {
+    const len = shortDataCw + (i < numShortBlocks ? 0 : 1)
+    const block = dataCw.slice(offset, offset + len)
+    offset += len
     dataBlocks.push(block)
     ecBlocks.push(rsRemainder(block, ecPerBlock))
   }
 
   const interleaved = []
-  const maxBlockLen = Math.max(g1DataCw, g2DataCw)
-  for (let col = 0; col < maxBlockLen; col++) {
+  for (let col = 0; col <= shortDataCw; col++) {
     for (let b = 0; b < dataBlocks.length; b++) {
       if (col < dataBlocks[b].length) interleaved.push(dataBlocks[b][col])
     }
@@ -473,7 +489,7 @@ function createInvoiceQrSvg(invoice) {
   if (typeof invoice !== 'string' || !BOLT11_RE.test(invoice.trim())) {
     return null
   }
-  const matrix = encodeQrMatrix(invoice.trim().toUpperCase())
+  const matrix = encodeQrMatrix(invoice.trim())
   if (!matrix) return null
 
   const size = matrix.length
@@ -585,40 +601,47 @@ function retryText(pending) {
   return ` Last check failed: ${pending.lastError}${nextRetrySuffix(pending)}`
 }
 
+const INVOICE_KINDS = [
+  { kind: 'order', title: 'Pay Subscription Invoice', label: 'Subscription' },
+  { kind: 'renewal', title: 'Pay Renewal Invoice', label: 'Renewal' },
+  {
+    kind: 'reset',
+    title: 'Pay Bandwidth Reset Invoice',
+    label: 'Bandwidth reset',
+  },
+]
+
 /**
- * Returns the active payable invoice descriptor from m.pending when an unpaid,
- * non-expired BOLT11 invoice is present, or null otherwise.
+ * Every unpaid BOLT11 invoice in m.pending, in a fixed order (subscription,
+ * renewal, bandwidth reset). More than one can be payable at the same time,
+ * for example a renewal and a bandwidth reset.
  */
-function activePayableInvoice(m) {
+function payableInvoices(m) {
   const pending = (m && m.pending) || {}
-  const candidates = [
-    {
-      kind: 'order',
-      title: 'Pay Subscription Invoice',
-      entry: pending.order,
-    },
-    {
-      kind: 'renewal',
-      title: 'Pay Renewal Invoice',
-      entry: pending.renewal,
-    },
-    {
-      kind: 'reset',
-      title: 'Pay Bandwidth Reset Invoice',
-      entry: pending.reset,
-    },
-  ]
-  for (const item of candidates) {
+  const out = []
+  for (const meta of INVOICE_KINDS) {
+    const entry = pending[meta.kind]
     if (
-      item.entry &&
-      typeof item.entry.invoice === 'string' &&
-      BOLT11_RE.test(item.entry.invoice) &&
-      !isPaymentReceived(item.entry)
+      entry &&
+      typeof entry.invoice === 'string' &&
+      BOLT11_RE.test(entry.invoice) &&
+      !isPaymentReceived(entry)
     ) {
-      return item
+      out.push({ kind: meta.kind, title: meta.title, label: meta.label, entry })
     }
   }
-  return null
+  return out
+}
+
+/**
+ * The payable invoice the panel shows: the one the operator picked in the
+ * invoice switcher while it is still payable, otherwise the first one.
+ * Returns null when nothing is payable.
+ */
+function activePayableInvoice(m) {
+  const all = payableInvoices(m)
+  if (!all.length) return null
+  return all.find((item) => item.kind === selectedInvoiceKind) || all[0]
 }
 
 /**
@@ -906,11 +929,50 @@ function renderPlans(m) {
   list.replaceChildren(...items)
 }
 
+/**
+ * One toggle button per payable invoice when more than one is waiting.
+ * Buttons are rebuilt only when the set of invoices changes, so a poll does
+ * not steal keyboard focus from them.
+ */
+function renderInvoiceSwitcher(all, active) {
+  const switcher = byId('invoice-switcher')
+  if (!switcher) return
+  if (all.length < 2) {
+    switcher.hidden = true
+    switcher.replaceChildren()
+    switcher.setAttribute('data-key', '')
+    return
+  }
+  const labels = all.map(
+    (item) => `${item.label} · ${formatSats(item.entry.amountSats)}`,
+  )
+  const key = all.map((item, i) => `${item.kind}:${labels[i]}`).join('|')
+  if (switcher.getAttribute('data-key') !== key) {
+    const buttons = all.map((item, i) => {
+      const button = document.createElement('button')
+      button.setAttribute('type', 'button')
+      button.className = 'invoice-switch'
+      button.setAttribute('data-invoice-kind', item.kind)
+      button.textContent = labels[i]
+      return button
+    })
+    switcher.replaceChildren(...buttons)
+    switcher.setAttribute('data-key', key)
+  }
+  for (const button of switcher.children) {
+    const on = button.getAttribute('data-invoice-kind') === active.kind
+    button.setAttribute('aria-pressed', on ? 'true' : 'false')
+  }
+  switcher.hidden = false
+}
+
 function renderInvoicePanel(m) {
   const panel = byId('invoice-panel')
   const qrBox = byId('invoice-qr')
   if (!panel || !qrBox) return
+  const all = payableInvoices(m)
   const active = activePayableInvoice(m)
+  renderInvoiceSwitcher(all, active)
   if (!active) {
     panel.hidden = true
     qrBox.replaceChildren()
@@ -924,7 +986,7 @@ function renderInvoicePanel(m) {
   setText('invoice-title', active.title)
   setText(
     'invoice-framing',
-    `A Pay Invoice task has been raised on ${nodeName}. Accept it in StartOS, or scan/copy the same invoice below.`,
+    `A Pay Invoice task has been raised on ${nodeName}. Accept it in StartOS, or scan/copy the same invoice below.${all.length > 1 ? ` ${all.length} invoices are waiting for payment.` : ''}`,
   )
   setText('invoice-amount', formatSats(entry.amountSats))
   const expiresFormatted = formatTime(entry.expiresAt)
@@ -947,6 +1009,13 @@ function renderInvoicePanel(m) {
       lastRenderedInvoice = null
     }
   }
+}
+
+/** Shows the chosen payable invoice; unknown or unpayable kinds are ignored. */
+function selectInvoice(kind) {
+  if (!payableInvoices(model).some((item) => item.kind === kind)) return
+  selectedInvoiceKind = kind
+  renderInvoicePanel(model)
 }
 
 function activeIntentMessage(m) {
@@ -1324,6 +1393,11 @@ function bindEvents() {
     const intentBtn = target.closest('[data-submit-intent]')
     if (intentBtn && !intentBtn.disabled) {
       submitIntent(intentBtn.getAttribute('data-submit-intent'))
+      return
+    }
+    const invoiceSwitch = target.closest('[data-invoice-kind]')
+    if (invoiceSwitch) {
+      selectInvoice(invoiceSwitch.getAttribute('data-invoice-kind'))
       return
     }
     const planCard = target.closest('[data-plan-duration]')
