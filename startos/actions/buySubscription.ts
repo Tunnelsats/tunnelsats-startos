@@ -1,12 +1,285 @@
+import { T } from '@start9labs/start-sdk'
 import { sdk } from '../sdk'
 import { tunnelsatsMeta } from '../fileModels/tunnelsatsMeta'
 import { i18n } from '../i18n'
 import { generateWireguardKeypair } from '../keygen'
-import { createSubscriptionOrder } from '../apiClient'
-import { payTaskReplayId, recordPaymentThenRaiseTask } from '../settlement'
-import { payInvoice as lndPayInvoice } from 'lnd-startos/startos/actions/payInvoice'
-import { payInvoice as clnPayInvoice } from 'cln-startos/startos/actions/payInvoice'
-import { payInvoice as eclairPayInvoice } from 'eclair-startos/startos/actions/payInvoice'
+import {
+  bolt11AmountSats,
+  createSubscriptionOrder,
+  type SubscriptionOrder,
+} from '../apiClient'
+import {
+  payTaskReplayId,
+  recordThenRaise,
+  runPaymentExclusive,
+  type TargetNode,
+} from '../settlement'
+import { resolvePayInvoice } from './resolvePayInvoice'
+
+export const INVOICE_TTL_MS = 60 * 60 * 1000
+export const VALID_DURATIONS = [1, 3, 6, 12] as const
+
+export interface PendingOrderRecord {
+  paymentHash: string
+  orderId: string
+  privateKey: string
+  publicKey: string
+  targetNode: TargetNode
+  serverId: string
+  createdAt: string
+  duration?: number
+  invoice?: string
+  amountSats?: number
+  expiresAt?: string
+  paymentReceivedFor?: string
+}
+
+export interface PurchaseInput {
+  targetNode: TargetNode
+  serverRegion: string
+  duration: number
+  /**
+   * When true (dashboard intents), any still-payable pendingOrder is reused
+   * regardless of parameters so a single active order slot is enforced.
+   */
+  reuseActive?: boolean
+}
+
+export interface PurchaseOps {
+  now(): Date
+  readCurrent(): Promise<{
+    pending?: PendingOrderRecord | null
+    payTasksToClear?: string[]
+  } | null>
+  generateKeypair(): { privateKey: string; publicKey: string }
+  createOrder(params: {
+    serverId: string
+    duration: number
+    wgPublicKey: string
+  }): Promise<SubscriptionOrder>
+  record(
+    entry: PendingOrderRecord,
+    patch: { payTasksToClear?: string[] },
+  ): Promise<unknown>
+  raiseTask(task: {
+    invoice: string
+    paymentHash: string
+    amountSats: number
+    targetNode: TargetNode
+  }): Promise<unknown>
+}
+
+export type PurchaseRunResult =
+  | {
+      kind: 'created'
+      order: SubscriptionOrder & { expiresAt: string }
+      targetNode: TargetNode
+    }
+  | {
+      kind: 'reused'
+      order: SubscriptionOrder & { expiresAt: string }
+      targetNode: TargetNode
+    }
+  | {
+      kind: 'already-paid'
+      paymentHash: string
+      targetNode: TargetNode
+    }
+
+export function reusablePendingOrder(
+  pending: PendingOrderRecord | null | undefined,
+  input: PurchaseInput,
+  now: Date,
+): (PendingOrderRecord & { invoice: string; expiresAt: string }) | null {
+  if (!pending || !pending.paymentHash || !pending.invoice) return null
+  if (pending.paymentReceivedFor === pending.paymentHash) return null
+  const createdMs = Date.parse(pending.createdAt)
+  const expiresMs = pending.expiresAt
+    ? Date.parse(pending.expiresAt)
+    : Number.isFinite(createdMs)
+      ? createdMs + INVOICE_TTL_MS
+      : NaN
+  if (!Number.isFinite(expiresMs) || expiresMs <= now.getTime()) return null
+  if (
+    !input.reuseActive &&
+    (pending.serverId !== input.serverRegion ||
+      pending.duration !== input.duration ||
+      pending.targetNode !== input.targetNode)
+  ) {
+    return null
+  }
+  return {
+    ...pending,
+    invoice: pending.invoice,
+    expiresAt: new Date(expiresMs).toISOString(),
+  }
+}
+
+export function runPurchase(
+  input: PurchaseInput,
+  ops: PurchaseOps,
+): Promise<PurchaseRunResult> {
+  if (!VALID_DURATIONS.includes(input.duration as 1 | 3 | 6 | 12)) {
+    return Promise.reject(
+      new Error(`Invalid subscription duration: ${String(input.duration)}`),
+    )
+  }
+  if (!['lnd', 'cln', 'eclair'].includes(input.targetNode)) {
+    return Promise.reject(
+      new Error(`Unsupported target node: ${String(input.targetNode)}`),
+    )
+  }
+  if (!input.serverRegion || typeof input.serverRegion !== 'string') {
+    return Promise.reject(new Error('Invalid server region'))
+  }
+
+  return runPaymentExclusive(async () => {
+    const current = await ops.readCurrent()
+    const pending = current?.pending ?? null
+    if (
+      pending &&
+      pending.paymentReceivedFor === pending.paymentHash &&
+      input.reuseActive
+    ) {
+      return {
+        kind: 'already-paid',
+        paymentHash: pending.paymentHash,
+        targetNode: pending.targetNode,
+      }
+    }
+
+    const now = ops.now()
+    const reusable = reusablePendingOrder(pending, input, now)
+    if (reusable) {
+      const amountSats =
+        reusable.amountSats ?? bolt11AmountSats(reusable.invoice) ?? 0
+      await ops.raiseTask({
+        invoice: reusable.invoice,
+        paymentHash: reusable.paymentHash,
+        amountSats,
+        targetNode: reusable.targetNode,
+      })
+      return {
+        kind: 'reused',
+        order: {
+          invoice: reusable.invoice,
+          paymentHash: reusable.paymentHash,
+          amountSats,
+          orderId: reusable.orderId,
+          expiresAt: reusable.expiresAt,
+        },
+        targetNode: reusable.targetNode,
+      }
+    }
+
+    const keypair = ops.generateKeypair()
+    const order = await ops.createOrder({
+      serverId: input.serverRegion,
+      duration: input.duration,
+      wgPublicKey: keypair.publicKey,
+    })
+    const createdNow = ops.now()
+    const expiresAt =
+      order.expiresAt && !Number.isNaN(Date.parse(order.expiresAt))
+        ? new Date(order.expiresAt).toISOString()
+        : new Date(createdNow.getTime() + INVOICE_TTL_MS).toISOString()
+    const entry: PendingOrderRecord = {
+      paymentHash: order.paymentHash,
+      orderId: order.orderId,
+      privateKey: keypair.privateKey,
+      publicKey: keypair.publicKey,
+      targetNode: input.targetNode,
+      serverId: input.serverRegion,
+      createdAt: createdNow.toISOString(),
+      duration: input.duration,
+      invoice: order.invoice,
+      amountSats: order.amountSats,
+      expiresAt,
+    }
+
+    await recordThenRaise('order', order.paymentHash, {
+      readCurrent: ops.readCurrent,
+      record: (patch) => ops.record(entry, patch),
+      raiseTask: () =>
+        ops.raiseTask({
+          invoice: order.invoice,
+          paymentHash: order.paymentHash,
+          amountSats: order.amountSats,
+          targetNode: input.targetNode,
+        }),
+    })
+
+    return {
+      kind: 'created',
+      order: { ...order, expiresAt },
+      targetNode: input.targetNode,
+    }
+  })
+}
+
+export function startPurchase(
+  effects: T.Effects,
+  input: PurchaseInput,
+  opsOverride?: Partial<PurchaseOps>,
+): Promise<PurchaseRunResult> {
+  const defaultOps: PurchaseOps = {
+    now: () => new Date(),
+    readCurrent: async () => {
+      const current = await tunnelsatsMeta.read().once()
+      return (
+        current && {
+          pending: current.pendingOrder,
+          payTasksToClear: current.payTasksToClear,
+        }
+      )
+    },
+    generateKeypair: () => generateWireguardKeypair(),
+    createOrder: (params) => createSubscriptionOrder(params),
+    record: (entry, patch) =>
+      tunnelsatsMeta.merge(effects, {
+        pendingOrder: {
+          ...entry,
+          // merge() is a deep merge: without these, a backoff or received
+          // marker left by an earlier order would carry over to this one.
+          paymentReceivedFor: undefined,
+          lastError: undefined,
+          nextAttemptAt: undefined,
+        },
+        ...patch,
+      }),
+    raiseTask: ({ invoice, paymentHash, amountSats, targetNode }) => {
+      const { packageId, payInvoiceAction } = resolvePayInvoice(targetNode)
+      return sdk.action.createTask(
+        effects,
+        packageId,
+        payInvoiceAction,
+        'important',
+        {
+          // The settlement health check clears the task under this ID once the
+          // order is settled or expired.
+          replayId: payTaskReplayId('order', targetNode, paymentHash),
+          input: {
+            kind: 'partial',
+            accept: [],
+            set: {
+              invoice,
+              amount: { selection: 'invoice', value: {} },
+              'max-fee-percent': 1,
+              confirmed: false,
+            },
+          },
+          reason: i18n(
+            'Pay TunnelSats VPN subscription invoice (${amount} sats)',
+            {
+              amount: String(amountSats),
+            },
+          ),
+        },
+      )
+    },
+  }
+  return runPurchase(input, { ...defaultOps, ...opsOverride })
+}
 
 const { InputSpec, Value } = sdk
 
@@ -63,103 +336,32 @@ export const buySubscription = sdk.Action.withInput(
   inputSpec,
   async ({ effects }) => ({}),
   async ({ effects, input }) => {
-    const keypair = generateWireguardKeypair()
-    const targetNode = input['target-node']
-
-    const order = await createSubscriptionOrder({
-      serverId: input['server-region'],
+    const outcome = await startPurchase(effects, {
+      targetNode: input['target-node'],
+      serverRegion: input['server-region'],
       duration: parseInt(input.duration, 10),
-      wgPublicKey: keypair.publicKey,
     })
 
-    let packageId: string
-    let payInvoiceAction: any
-
-    switch (targetNode) {
-      case 'lnd':
-        packageId = 'lnd'
-        payInvoiceAction = lndPayInvoice
-        break
-      case 'cln':
-        packageId = 'c-lightning'
-        payInvoiceAction = clnPayInvoice
-        break
-      case 'eclair':
-        packageId = 'eclair'
-        payInvoiceAction = eclairPayInvoice
-        break
-      default: {
-        // Compile-time exhaustiveness: a new target node must be handled above.
-        const unsupported: never = targetNode
-        throw new Error(`Unsupported target node: ${String(unsupported)}`)
+    if (outcome.kind === 'already-paid') {
+      return {
+        version: '1' as const,
+        title: i18n('Invoice Created'),
+        message: i18n(
+          'A payment task has been raised on your Lightning node. You can also pay manually using the invoice below. Once payment is confirmed, the VPN tunnel will be activated automatically.',
+        ),
+        result: {
+          name: i18n('Payment Hash'),
+          description: null,
+          type: 'single' as const,
+          value: outcome.paymentHash,
+          copyable: true,
+          masked: false,
+          qr: false,
+        },
       }
     }
 
-    // Records the order, queueing the replaced order's pay task for the
-    // settlement health check to clear in the same write, then raises this
-    // order's task; serialized with other purchases (see
-    // recordPaymentThenRaiseTask). The key is stored before the invoice is
-    // payable, so a paid order can always be claimed.
-    await recordPaymentThenRaiseTask('order', order.paymentHash, {
-      // A read error fails the purchase: treating it as "nothing pending"
-      // would replace a pending payment without queuing its task. A missing
-      // file reads as null.
-      readCurrent: async () => {
-        const current = await tunnelsatsMeta.read().once()
-        return (
-          current && {
-            pending: current.pendingOrder,
-            payTasksToClear: current.payTasksToClear,
-          }
-        )
-      },
-      record: (patch) =>
-        tunnelsatsMeta.merge(effects, {
-          pendingOrder: {
-            paymentHash: order.paymentHash,
-            orderId: order.orderId,
-            privateKey: keypair.privateKey,
-            publicKey: keypair.publicKey,
-            targetNode,
-            serverId: input['server-region'],
-            createdAt: new Date().toISOString(),
-            // merge() is a deep merge: without these, a backoff left by an
-            // earlier order would delay settling this one.
-            lastError: undefined,
-            nextAttemptAt: undefined,
-          },
-          ...patch,
-        }),
-      raiseTask: () =>
-        sdk.action.createTask(
-          effects,
-          packageId,
-          payInvoiceAction,
-          'important',
-          {
-            // The settlement health check clears the task under this ID once the
-            // order is settled or expired.
-            replayId: payTaskReplayId('order', targetNode, order.paymentHash),
-            input: {
-              kind: 'partial',
-              accept: [],
-              set: {
-                invoice: order.invoice,
-                amount: { selection: 'invoice', value: {} },
-                'max-fee-percent': 1,
-                confirmed: false,
-              },
-            },
-            reason: i18n(
-              'Pay TunnelSats VPN subscription invoice (${amount} sats)',
-              {
-                amount: String(order.amountSats),
-              },
-            ),
-          },
-        ),
-    })
-
+    const { order } = outcome
     return {
       version: '1' as const,
       title: i18n('Invoice Created'),
