@@ -1018,6 +1018,7 @@ test('monthPace projects usage to the end of the UTC month', () => {
     usedGb: 50,
     limitGb: 100,
     projectedGb: 100,
+    afterReset: false,
     exceedsLimit: false,
     resetsAt: '2026-10-01T00:00:00.000Z',
   })
@@ -1040,6 +1041,28 @@ test('monthPace projects usage to the end of the UTC month', () => {
       `paceText(monthPace(${JSON.stringify({ bandwidth: { usedGb: 5, limitGb: 100 } })}, ${Date.UTC(2026, 8, 1, 12)}))`,
     ),
     /Too early in the month/,
+  )
+  // After a paid reset the counter restarted at an unknown time: dividing by
+  // the time since the 1st would understate the pace, so no projection.
+  const reset = { usedGb: 40, limitGb: 100, resetsThisMonth: 1 }
+  const afterReset = h.run(
+    `monthPace(${JSON.stringify({ bandwidth: reset })}, ${Date.UTC(2026, 8, 28)})`,
+  )
+  assert.equal(afterReset.afterReset, true)
+  assert.equal(afterReset.projectedGb, null)
+  assert.equal(afterReset.exceedsLimit, false)
+  assert.match(
+    h.run(
+      `paceText(monthPace(${JSON.stringify({ bandwidth: reset })}, ${Date.UTC(2026, 8, 28)}))`,
+    ),
+    /40\.00 GB since this month's paid reset\. No projection/,
+  )
+  // No reset this month (0) still projects.
+  assert.equal(
+    h.run(
+      `monthPace(${JSON.stringify({ bandwidth: { ...reset, resetsThisMonth: 0 } })}, ${SEPT_16})`,
+    ).afterReset,
+    false,
   )
 })
 
@@ -1093,9 +1116,9 @@ test('subscriptionTimeline places the 7-day and 3-day reminders before the expir
   const h = load(model())
   const now = Date.UTC(2026, 8, 1)
   const at = (days: number) => new Date(now + days * 86400000).toISOString()
-  const timeline = (expiresAt: string | null) =>
+  const timeline = (expiresAt: string | null, linked = true) =>
     h.run(
-      `subscriptionTimeline(${JSON.stringify({ subscription: { expiresAt } })}, ${now})`,
+      `subscriptionTimeline(${JSON.stringify({ subscription: { expiresAt, linked } })}, ${now})`,
     )
   const t = timeline(at(20))
   assert.equal(t.phase, 'ok')
@@ -1128,14 +1151,22 @@ test('subscriptionTimeline places the 7-day and 3-day reminders before the expir
   assert.equal(expired.nowPct, 100)
   assert.equal(timeline(null), null)
   assert.equal(timeline('not a date'), null)
+  // A "# Valid Until" hint on an unlinked subscription is not confirmed.
+  assert.equal(timeline(at(20), false), null)
+  assert.equal(
+    h.run(
+      `subscriptionTimeline(${JSON.stringify({ subscription: { expiresAt: at(20), linked: true, keyUnknown: true } })}, ${now})`,
+    ),
+    null,
+  )
 })
 
 test('renewPreview adds calendar months to the later of expiry and now', () => {
   const h = load(model())
   const now = Date.UTC(2026, 8, 1)
-  const preview = (expiresAt: string) =>
+  const preview = (expiresAt: string, linked = true) =>
     h.run(
-      `renewPreview(${JSON.stringify({ subscription: { expiresAt }, plans: model().plans })}, ${now})`,
+      `renewPreview(${JSON.stringify({ subscription: { expiresAt, linked }, plans: model().plans })}, ${now})`,
     )
   assert.deepEqual(
     preview('2026-10-15T00:00:00.000Z').map((p: Json) => [
@@ -1155,9 +1186,13 @@ test('renewPreview adds calendar months to the later of expiry and now', () => {
     '2026-10-01T00:00:00.000Z',
   )
   assert.deepEqual(
-    h.run(`renewPreview({ subscription: { expiresAt: null } }, ${now})`),
+    h.run(
+      `renewPreview({ subscription: { expiresAt: null, linked: true } }, ${now})`,
+    ),
     [],
   )
+  // An unconfirmed "# Valid Until" hint never feeds the preview.
+  assert.deepEqual(preview('2026-10-15T00:00:00.000Z', false), [])
   // Month ends roll over exactly like TunnelSats' setMonth: never clamped
   // to the end of February, which TunnelSats would not grant.
   assert.equal(
@@ -1317,7 +1352,11 @@ test('server cards drive both Buy region pickers', async () => {
     )
     assert.equal(select.value, 'eu-de')
   }
-  assert.match(h.el('server-cards-note').textContent, /tunnelsats\.com\/status/)
+  assert.equal(h.el('server-status-note').hidden, false)
+  assert.match(
+    readFileSync(join(__dirname, '..', 'web', 'index.html'), 'utf8'),
+    /<p id="server-status-note"[^>]*>[\s\S]*?<a\s+href="https:\/\/tunnelsats\.com\/status"\s+target="_blank"\s+rel="noopener noreferrer"\s*>tunnelsats\.com\/status<\/a/,
+  )
   assert.doesNotMatch(
     h.el('server-cards-note').textContent,
     /online|healthy|up\b/i,
@@ -1342,6 +1381,73 @@ test('server cards drive both Buy region pickers', async () => {
   await settleAll(h)
   const buy = h.requests.find((r) => r.url === '/api/intents')
   assert.equal(JSON.parse(buy!.init!.body).serverId, 'us-east')
+})
+
+test('a refresh never swaps the region the operator picked for another', async () => {
+  const routes: Record<string, { status: number; body: Json }> = {
+    '/api/servers': { status: 200, body: SERVERS },
+  }
+  const h = load(model({ configured: false }), 200, undefined, routes)
+  await settleAll(h)
+  h.run(`selectServer('us-east')`)
+  // TunnelSats withdraws us-east before the operator presses Buy.
+  routes['/api/servers'] = {
+    status: 200,
+    body: { servers: [SERVERS.servers[0]] },
+  }
+  h.run('loadServers()')
+  await settleAll(h)
+  for (const id of ['buy-server-select', 'manage-buy-server-select']) {
+    const select = h.el(id)
+    assert.equal(select.value, '')
+    assert.deepEqual(
+      select.children.map((o) => [o.value, o.disabled]),
+      [
+        ['', true],
+        ['eu-de', false],
+      ],
+    )
+  }
+  assert.deepEqual(
+    h
+      .el('server-cards')
+      .children.map((li) => li.children[0].attributes['aria-pressed']),
+    ['false'],
+  )
+  assert.match(
+    h.el('server-cards-note').textContent,
+    /The region you picked \(us-east\) is no longer offered\. Choose another region before buying\./,
+  )
+  h.run(`submitIntent('buy')`)
+  h.run(`submitIntent('buy-manage')`)
+  await settleAll(h)
+  assert.equal(
+    h.requests.filter((r) => r.url === '/api/intents').length,
+    0,
+    'Buy must not substitute a region',
+  )
+  assert.match(h.el('intent-feedback').textContent, /Choose a server region/)
+
+  // A new pick clears the notice and Buy carries it.
+  h.run(`selectServer('eu-de')`)
+  assert.equal(h.el('buy-server-select').value, 'eu-de')
+  assert.doesNotMatch(h.el('server-cards-note').textContent, /no longer/)
+  h.run(`submitIntent('buy')`)
+  await settleAll(h)
+  const buy = h.requests.find((r) => r.url === '/api/intents')
+  assert.equal(JSON.parse(buy!.init!.body).serverId, 'eu-de')
+})
+
+test('an unpicked default region follows the live list', async () => {
+  const h = load(model({ configured: false }), 200, undefined, {
+    '/api/servers': {
+      status: 200,
+      body: { servers: [SERVERS.servers[1]] },
+    },
+  })
+  await settleAll(h)
+  assert.equal(h.el('buy-server-select').value, 'us-east')
+  assert.doesNotMatch(h.el('server-cards-note').textContent, /no longer/)
 })
 
 test('a stale or missing server list says so', async () => {

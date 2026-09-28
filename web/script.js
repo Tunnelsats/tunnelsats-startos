@@ -84,6 +84,11 @@ let lastRenderedInvoice = null
 let selectedInvoiceKind = null
 let selectedBuyDuration = '3m'
 let selectedServerId = DEFAULT_SERVER_ID
+// Whether the operator picked selectedServerId. A picked region that drops
+// out of a refreshed list is never swapped for another: the selection is
+// cleared (withdrawnServerId) and Buy waits for a new pick.
+let serverPickedByOperator = false
+let withdrawnServerId = null
 let serverList = null
 let serversFailed = false
 let serversLoadedAt = 0
@@ -901,7 +906,9 @@ function badgeState(m, failed) {
 /**
  * Linear projection of this month's usage to the end of the UTC month.
  * null without a usage figure; projectedGb is null during the first day of
- * the month, when a projection says little.
+ * the month, when a projection says little, and after a paid reset this
+ * month: the counter restarted at a time the dashboard does not know, so
+ * dividing by the time since the 1st would understate the pace.
  */
 function monthPace(m, nowMs = Date.now()) {
   const bw = (m && m.bandwidth) || {}
@@ -917,12 +924,15 @@ function monthPace(m, nowMs = Date.now()) {
   const start = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1)
   const end = Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 1)
   const elapsed = nowMs - start
+  const afterReset =
+    Number.isInteger(bw.resetsThisMonth) && bw.resetsThisMonth > 0
   const projectedGb =
-    elapsed >= DAY_MS ? (used * (end - start)) / elapsed : null
+    !afterReset && elapsed >= DAY_MS ? (used * (end - start)) / elapsed : null
   return {
     usedGb: used,
     limitGb: limit,
     projectedGb,
+    afterReset,
     exceedsLimit: projectedGb !== null && projectedGb > limit,
     resetsAt: new Date(end).toISOString(),
   }
@@ -933,6 +943,9 @@ function paceText(pace) {
   const resets = new Date(pace.resetsAt).toLocaleDateString(undefined, {
     timeZone: 'UTC',
   })
+  if (pace.afterReset) {
+    return `${pace.usedGb.toFixed(2)} GB since this month's paid reset. No projection: the reset time is not known. The counter resets on ${resets} (UTC).`
+  }
   if (pace.projectedGb === null) {
     return `Too early in the month for a projection (${pace.usedGb.toFixed(2)} GB so far). The counter resets on ${resets} (UTC).`
   }
@@ -1008,9 +1021,16 @@ function resetEligibility(m) {
   }
 }
 
+/**
+ * The expiry TunnelSats confirmed for this configuration, in ms; null
+ * otherwise. An unlinked subscription can still carry the configuration's
+ * "# Valid Until" hint as expiresAt, but that date is not confirmed, so the
+ * timeline and the renewal preview never build on it.
+ */
 function expiryMs(m) {
-  const iso = m && m.subscription ? m.subscription.expiresAt : null
-  const ms = iso ? Date.parse(iso) : NaN
+  const sub = m && m.subscription
+  if (!sub || sub.linked !== true || sub.keyUnknown) return null
+  const ms = sub.expiresAt ? Date.parse(sub.expiresAt) : NaN
   return Number.isFinite(ms) ? ms : null
 }
 
@@ -1775,6 +1795,7 @@ function renderFlows(m) {
 function renderServers() {
   const cards = byId('server-cards')
   const note = byId('server-cards-note')
+  const statusNote = byId('server-status-note')
   const list = usableServers(serverList)
   if (!list.length) {
     if (cards) {
@@ -1787,12 +1808,19 @@ function renderServers() {
         : ''
       note.hidden = !serversFailed
     }
+    if (statusNote) statusNote.hidden = true
     return
   }
-  if (!list.some((server) => server.id === selectedServerId)) {
-    selectedServerId = list.some((server) => server.id === DEFAULT_SERVER_ID)
-      ? DEFAULT_SERVER_ID
-      : list[0].id
+  const offered = (id) => list.some((server) => server.id === id)
+  if (selectedServerId && !offered(selectedServerId)) {
+    if (serverPickedByOperator) {
+      withdrawnServerId = selectedServerId
+      selectedServerId = ''
+    } else {
+      selectedServerId = offered(DEFAULT_SERVER_ID)
+        ? DEFAULT_SERVER_ID
+        : list[0].id
+    }
   }
   if (cards) {
     cards.replaceChildren(
@@ -1823,38 +1851,58 @@ function renderServers() {
     )
     cards.hidden = false
   }
+  const needsPick = !selectedServerId
   for (const id of ['buy-server-select', 'manage-buy-server-select']) {
     const select = byId(id)
     if (!select) continue
-    const key = list.map((server) => server.id).join(',')
+    const key =
+      (needsPick ? '!,' : '') + list.map((server) => server.id).join(',')
     if (select.getAttribute('data-key') !== key) {
-      select.replaceChildren(
-        ...list.map((server) => {
-          const option = document.createElement('option')
-          option.value = server.id
-          option.textContent = serverLabel(server)
-          return option
-        }),
-      )
+      const options = list.map((server) => {
+        const option = document.createElement('option')
+        option.value = server.id
+        option.textContent = serverLabel(server)
+        return option
+      })
+      if (needsPick) {
+        const placeholder = document.createElement('option')
+        placeholder.value = ''
+        placeholder.textContent = 'Choose a region'
+        placeholder.disabled = true
+        options.unshift(placeholder)
+      }
+      select.replaceChildren(...options)
       select.setAttribute('data-key', key)
     }
     select.value = selectedServerId
   }
   if (note) {
     const asOf = formatTime(serverList.fetchedAt)
-    note.textContent = serverList.stale
-      ? `TunnelSats did not answer; regions as of ${asOf || 'the last answer'}.`
-      : 'Regions offered by TunnelSats. For live server health see tunnelsats.com/status.'
+    const lines = []
+    if (needsPick && withdrawnServerId) {
+      lines.push(
+        `The region you picked (${withdrawnServerId}) is no longer offered. Choose another region before buying.`,
+      )
+    }
+    lines.push(
+      serverList.stale
+        ? `TunnelSats did not answer; regions as of ${asOf || 'the last answer'}.`
+        : 'Regions offered by TunnelSats.',
+    )
+    note.textContent = lines.join(' ')
     note.hidden = false
   }
+  if (statusNote) statusNote.hidden = false
 }
 
-/** Picks a server region in the cards and both region selects. */
+/** The operator picks a server region in the cards or a region select. */
 function selectServer(id) {
   if (typeof id !== 'string' || !SERVER_ID_RE.test(id)) return
   const list = usableServers(serverList)
   if (list.length && !list.some((server) => server.id === id)) return
   selectedServerId = id
+  serverPickedByOperator = true
+  withdrawnServerId = null
   if (list.length) {
     renderServers()
     return
@@ -2033,28 +2081,33 @@ async function checkReachability() {
 async function submitIntent(actionKey) {
   if (submittingIntent) return
   let payload = null
-  if (actionKey === 'buy') {
-    const serverSelect = byId('buy-server-select')
-    const durationSelect = byId('buy-duration-select')
-    payload = {
-      kind: 'buy',
-      serverId:
-        (serverSelect && serverSelect.value) ||
-        selectedServerId ||
-        DEFAULT_SERVER_ID,
-      duration:
-        (durationSelect && durationSelect.value) || selectedBuyDuration || '3m',
+  if (actionKey === 'buy' || actionKey === 'buy-manage') {
+    const manage = actionKey === 'buy-manage'
+    const serverSelect = byId(
+      manage ? 'manage-buy-server-select' : 'buy-server-select',
+    )
+    const durationSelect = byId(
+      manage ? 'manage-buy-duration-select' : 'buy-duration-select',
+    )
+    // selectedServerId is '' while the operator's pick is withdrawn: Buy
+    // then waits for a new pick instead of buying some other region.
+    const serverId = selectedServerId
+      ? (serverSelect && serverSelect.value) || selectedServerId
+      : ''
+    if (!serverId) {
+      localIntentFeedback = {
+        level: 'error',
+        text: 'Choose a server region first.',
+      }
+      render()
+      return
     }
-  } else if (actionKey === 'buy-manage') {
-    const serverSelect = byId('manage-buy-server-select')
-    const durationSelect = byId('manage-buy-duration-select')
     payload = {
       kind: 'buy',
-      serverId:
-        (serverSelect && serverSelect.value) ||
-        selectedServerId ||
-        DEFAULT_SERVER_ID,
-      duration: (durationSelect && durationSelect.value) || '3m',
+      serverId,
+      duration:
+        (durationSelect && durationSelect.value) ||
+        (manage ? '3m' : selectedBuyDuration || '3m'),
     }
   } else if (actionKey === 'renew') {
     const durationSelect = byId('renew-duration-select')
