@@ -38,6 +38,7 @@ class FakeElement {
   className = ''
   title = ''
   hidden = true
+  disabled = false
   value = ''
   style: Json = {}
   classList = new FakeClassList()
@@ -70,7 +71,14 @@ interface Harness {
   settle: () => Promise<void>
 }
 
-function load(model: Json | null, status = 200): Harness {
+function load(
+  model: Json | null,
+  status = 200,
+  intentResponse: { status: number; body: Json } = {
+    status: 202,
+    body: { status: 'accepted' },
+  },
+): Harness {
   const requests: { url: string; init: Json | undefined }[] = []
   const elements = new Map<string, FakeElement>()
   const el = (id: string) => {
@@ -81,12 +89,18 @@ function load(model: Json | null, status = 200): Harness {
     }
     return element
   }
+  const csrfMeta = new FakeElement('META')
+  csrfMeta.setAttribute('content', 'csrf-test-token-123')
   const context = vm.createContext({
     console: { log() {}, warn() {}, error() {}, info() {} },
     document: {
       hidden: false,
       getElementById: el,
       createElement: (tag: string) => new FakeElement(tag.toUpperCase()),
+      createElementNS: (_ns: string, tag: string) =>
+        new FakeElement(tag.toUpperCase()),
+      querySelector: (selector: string) =>
+        selector === 'meta[name="csrf-token"]' ? csrfMeta : null,
       addEventListener() {},
       body: new FakeElement('BODY'),
     },
@@ -99,6 +113,13 @@ function load(model: Json | null, status = 200): Harness {
     setTimeout: () => 0,
     fetch: async (url: string, init?: Json) => {
       requests.push({ url: String(url), init })
+      if (String(url) === '/api/intents') {
+        return {
+          ok: intentResponse.status >= 200 && intentResponse.status < 300,
+          status: intentResponse.status,
+          json: async () => intentResponse.body,
+        }
+      }
       return {
         ok: status >= 200 && status < 300,
         status,
@@ -147,6 +168,7 @@ function model(overrides: Json = {}): Json {
     },
     bandwidth: { usedGb: 12.5, limitGb: 100 },
     pending: { order: null, renewal: null, reset: null },
+    intents: { buy: null, renew: null, reset: null },
     handoff: { activeTarget: 'lnd', pendingOff: [], unraised: [] },
     notices: null,
     ...overrides,
@@ -156,7 +178,7 @@ function model(overrides: Json = {}): Json {
 const titles = (notices: Json[]) => notices.map((n) => n.title)
 const texts = (notices: Json[]) => notices.map((n) => n.text).join('\n')
 
-test('the dashboard only GETs /api/dashboard on its own origin', async () => {
+test('the dashboard only GETs /api/dashboard on initial load on its own origin', async () => {
   const h = load(model())
   await h.settle()
   assert.equal(h.requests.length, 1)
@@ -167,7 +189,7 @@ test('the dashboard only GETs /api/dashboard on its own origin', async () => {
   assert.equal(request.init?.credentials, 'same-origin')
 })
 
-test('the shipped script has no write paths, third-party calls or HTML sinks', () => {
+test('the shipped script has no legacy write paths, third-party calls or HTML sinks', () => {
   for (const banned of [
     'innerHTML',
     'outerHTML',
@@ -181,15 +203,13 @@ test('the shipped script has no write paths, third-party calls or HTML sinks', (
     '/api/keys/generate',
     '/api/config/save',
     'privateKey',
-    'X-CSRF-Token',
-    "method: 'POST'",
     'localStorage',
   ]) {
     assert.ok(!SCRIPT.includes(banned), `script.js must not contain ${banned}`)
   }
-  // Every fetch in the script is the read model.
+  // Every fetch in the script is either GET /api/dashboard or POST /api/intents.
   const fetches = SCRIPT.match(/fetch\(([^,)]+)/g) ?? []
-  assert.deepEqual(fetches, ['fetch(DASHBOARD_URL'])
+  assert.deepEqual(fetches, ['fetch(DASHBOARD_URL', 'fetch(INTENTS_URL'])
 })
 
 test('a configured model shows the overview and fills it with textContent', async () => {
@@ -519,4 +539,138 @@ test('index.html obeys the strict CSP and includes Eclair, NWC and kill-switch h
   )
   assert.match(html, /Kill switch caveat:/)
   assert.match(html, /Services → TunnelSats → Actions → Buy Subscription/)
+})
+
+test('createInvoiceQrSvg builds a valid pure-DOM SVG QR code and rejects non-BOLT11 strings', () => {
+  const h = load(model())
+  const invoice = 'lnbc250u1pjorderinvoiceorderinvoiceorderinvoice'
+  const matrix = h.run<boolean[][]>(
+    `encodeQrMatrix(${JSON.stringify(invoice)})`,
+  )
+  assert.ok(Array.isArray(matrix))
+  const size = matrix.length
+  assert.equal((size - 17) % 4, 0)
+  // Top-left, top-right, and bottom-left 7x7 finder corners have dark outer border and 3x3 center
+  for (const [topR, leftC] of [
+    [0, 0],
+    [0, size - 7],
+    [size - 7, 0],
+  ]) {
+    assert.equal(matrix[topR][leftC], true)
+    assert.equal(matrix[topR + 6][leftC + 6], true)
+    assert.equal(matrix[topR + 3][leftC + 3], true)
+    assert.equal(matrix[topR + 1][leftC + 1], false)
+  }
+
+  const svg = h.run<Json>(`createInvoiceQrSvg(${JSON.stringify(invoice)})`)
+  assert.equal(svg.tagName, 'SVG')
+  assert.equal(svg.attributes.class, 'invoice-qr-svg')
+  assert.equal(svg.attributes.viewBox, `0 0 ${size + 8} ${size + 8}`)
+  assert.equal(svg.children.length, 2)
+  assert.equal(svg.children[0].tagName, 'RECT')
+  assert.equal(svg.children[1].tagName, 'PATH')
+  assert.match(svg.children[1].attributes.d, /^M\d+,\d+h1v1h-1z/)
+
+  // Rejects non-BOLT11 input
+  assert.equal(h.run(`createInvoiceQrSvg('javascript:alert(1)')`), null)
+  assert.equal(h.run(`createInvoiceQrSvg('')`), null)
+})
+
+test('an unpaid pending invoice renders the QR panel with dual-path framing and hides once paid', async () => {
+  const invoice = 'lnbc250u1pjorderinvoiceorderinvoiceorderinvoice'
+  const h = load(
+    model({
+      configured: false,
+      targetNode: 'eclair',
+      pending: {
+        order: {
+          targetNode: 'eclair',
+          serverId: 'eu-de',
+          duration: '3m',
+          amountSats: 25000,
+          expiresAt: '2026-09-28T12:00:00Z',
+          paymentReceived: false,
+          invoice,
+        },
+        renewal: null,
+        reset: null,
+      },
+    }),
+  )
+  await h.settle()
+  assert.equal(h.el('invoice-panel').hidden, false)
+  assert.equal(h.el('invoice-title').textContent, 'Pay Subscription Invoice')
+  assert.equal(
+    h.el('invoice-framing').textContent,
+    'A Pay Invoice task has been raised on Eclair. Accept it in StartOS, or scan/copy the same invoice below.',
+  )
+  assert.equal(h.el('invoice-amount').textContent, '25,000 sats')
+  assert.equal(h.el('val-invoice').textContent, invoice)
+  assert.equal(h.el('invoice-qr').children.length, 1)
+  assert.equal(h.el('invoice-qr').children[0].tagName, 'SVG')
+
+  // Once paid, the invoice panel hides and clears the QR SVG
+  const hPaid = load(
+    model({
+      configured: false,
+      targetNode: 'eclair',
+      pending: {
+        order: {
+          targetNode: 'eclair',
+          serverId: 'eu-de',
+          duration: '3m',
+          amountSats: 25000,
+          paymentReceived: true,
+          invoice: null,
+        },
+        renewal: null,
+        reset: null,
+      },
+    }),
+  )
+  await hPaid.settle()
+  assert.equal(hPaid.el('invoice-panel').hidden, true)
+  assert.equal(hPaid.el('invoice-qr').children.length, 0)
+})
+
+test('submitIntent POSTs to /api/intents with CSRF header and handles rate-limit errors', async () => {
+  const h = load(
+    model({
+      configured: true,
+      targetNode: 'cln',
+    }),
+  )
+  await h.settle()
+  h.el('renew-duration-select').value = '6m'
+
+  await vm.runInContext(`submitIntent('renew')`, h.context)
+  await h.settle()
+
+  const postReq = h.requests.find((r) => r.url === '/api/intents')
+  assert.ok(postReq)
+  assert.equal(postReq.init?.method, 'POST')
+  assert.equal(postReq.init?.credentials, 'same-origin')
+  assert.equal(postReq.init?.headers?.['X-CSRF-Token'], 'csrf-test-token-123')
+  assert.deepEqual(JSON.parse(postReq.init?.body), {
+    kind: 'renew',
+    duration: '6m',
+  })
+
+  // Rate-limited 429 response renders the error in #intent-feedback
+  const hRateLimited = load(model(), 200, {
+    status: 429,
+    body: {
+      error: 'Please wait 28s before repeating this request.',
+      retryAfterSeconds: 28,
+    },
+  })
+  await hRateLimited.settle()
+  await vm.runInContext(`submitIntent('reset')`, hRateLimited.context)
+  await hRateLimited.settle()
+  assert.equal(hRateLimited.el('intent-feedback').hidden, false)
+  assert.ok(hRateLimited.el('intent-feedback').classList.contains('is-error'))
+  assert.match(
+    hRateLimited.el('intent-feedback').textContent,
+    /Please wait 28s/,
+  )
 })

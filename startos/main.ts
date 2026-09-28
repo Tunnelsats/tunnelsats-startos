@@ -143,7 +143,7 @@ export const main = sdk.setupMain(async ({ effects }) => {
     if (!intentsWatcherActive) return { cancel: true }
     if (intents) {
       await processDashboardIntents(effects).catch((e: unknown) =>
-        console.warn(`TunnelSats dashboard intent runner failed: ${e}`),
+        console.warn(`TunnelSats dashboard intent runner failed: ${String(e)}`),
       )
     }
     return { cancel: !intentsWatcherActive }
