@@ -49,6 +49,7 @@ export interface BandwidthResetActionOps extends Partial<ResetOps> {
 export async function startBandwidthReset(
   effects: T.Effects,
   opsOverride?: BandwidthResetActionOps,
+  options: { reuseOnly?: boolean } = {},
 ): Promise<{
   outcome: ResetRunResult
   targetNode: TargetNode
@@ -152,11 +153,15 @@ export async function startBandwidthReset(
 
   let outcome: ResetRunResult
   try {
-    outcome = await runBandwidthReset(publicKey, {
-      ...defaultOps,
-      ...opsOverride,
-      targetNode,
-    })
+    outcome = await runBandwidthReset(
+      publicKey,
+      {
+        ...defaultOps,
+        ...opsOverride,
+        targetNode,
+      },
+      options,
+    )
   } catch (e) {
     if (e instanceof ResetFailedError) {
       throw new Error(

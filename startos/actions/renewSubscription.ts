@@ -11,6 +11,7 @@ import {
   type RenewalOrder,
 } from '../apiClient'
 import {
+  NothingToResumeError,
   payTaskReplayId,
   recordThenRaise,
   runPaymentExclusive,
@@ -21,6 +22,8 @@ import {
   PendingPaymentConflictError,
   VALID_DURATIONS,
   payableUntil,
+  unsettledUntil,
+  untilText,
 } from './buySubscription'
 import { resolvePayInvoice } from './resolvePayInvoice'
 
@@ -48,6 +51,8 @@ export interface RenewalInput {
    * unset: the operator may replace a payable renewal.
    */
   keepPayable?: boolean
+  /** See PurchaseInput.reuseOnly: never create a new renewal invoice. */
+  reuseOnly?: boolean
 }
 
 export interface RenewalOps {
@@ -194,12 +199,12 @@ export async function runRenewal(
     if (input.keepPayable && pending && pending.publicKey !== publicKey) {
       // A renewal bought for the previous key is invisible on the dashboard
       // (it only shows the current key's payments). Replacing it would stop
-      // tracking an invoice that can still be paid, or one already paid and
-      // waiting for its settlement tick.
-      const previousUntil = payableUntil(pending, now)
+      // tracking an invoice that can still be paid (stored or not), or one
+      // already paid and waiting for its settlement tick.
+      const previousUntil = unsettledUntil(pending, now)
       if (previousUntil !== null) {
         throw new PendingPaymentConflictError(
-          `A renewal invoice for the previous subscription key is still payable until ${new Date(previousUntil).toISOString()}. Pay it, or replace it with the Renew Subscription action in StartOS.`,
+          `A renewal invoice for the previous subscription key is still payable${untilText(previousUntil)}. Pay it, or replace it with the Renew Subscription action in StartOS.`,
         )
       }
       if (pending.paymentReceivedFor === pending.paymentHash) {
@@ -210,13 +215,14 @@ export async function runRenewal(
     }
     const otherPayableUntil =
       pending && pending.publicKey === publicKey
-        ? payableUntil(pending, now)
+        ? unsettledUntil(pending, now)
         : null
     if (input.keepPayable && pending && otherPayableUntil !== null) {
       throw new PendingPaymentConflictError(
-        `An unpaid renewal invoice (${pending.duration ?? '?'} month(s), ${pending.targetNode ?? targetNode}) is still payable until ${new Date(otherPayableUntil).toISOString()}. Pay it, or replace it with the Renew Subscription action in StartOS.`,
+        `An unpaid renewal invoice (${pending.duration ?? '?'} month(s), ${pending.targetNode ?? targetNode}) is still payable${untilText(otherPayableUntil)}. Pay it, or replace it with the Renew Subscription action in StartOS.`,
       )
     }
+    if (input.reuseOnly) throw new NothingToResumeError()
 
     const renewal = await ops.requestRenewal({
       serverId,

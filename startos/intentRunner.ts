@@ -12,11 +12,7 @@ import {
   type DashboardResetIntent,
 } from './fileModels/dashboardIntents'
 import { configJson } from './fileModels/config.json'
-import {
-  INVOICE_TTL_MS,
-  startPurchase,
-  type PurchaseInput,
-} from './actions/buySubscription'
+import { startPurchase, type PurchaseInput } from './actions/buySubscription'
 import { startRenewal, type RenewalInput } from './actions/renewSubscription'
 import { startBandwidthReset } from './actions/resetBandwidth'
 import type { TargetNode } from './settlement'
@@ -26,13 +22,6 @@ import type { TargetNode } from './settlement'
  * request as timed out, so the runner must not create an invoice for it.
  */
 export const INTENT_TTL_MS = 120 * 1000
-/**
- * How long a request that was already started ('processing' when StartOS
- * restarted) may still be resumed: the default invoice lifetime. Past it any
- * invoice the request created has expired, so resuming would only create a
- * new one for a request the operator made long ago.
- */
-export const INTENT_RESUME_MS = INVOICE_TTL_MS
 const INTENT_ORDER: readonly DashboardIntentKind[] = ['renew', 'reset', 'buy']
 const HEX64_RE = /\b[0-9a-fA-F]{64}\b/g
 
@@ -43,22 +32,26 @@ const HEX64_RE = /\b[0-9a-fA-F]{64}\b/g
 export function purchaseInputFromIntent(
   intent: DashboardBuyIntent,
   configuredNode: TargetNode | undefined,
+  run: IntentRunOptions = {},
 ): PurchaseInput {
   return {
     targetNode: intent.targetNode ?? configuredNode ?? 'lnd',
     serverRegion: intent.serverId,
     duration: intentDurationMonths(intent.duration),
     keepPayable: true,
+    reuseOnly: run.reuseOnly === true,
   }
 }
 
 /** The action-core input for a dashboard Renew. */
 export function renewalInputFromIntent(
   intent: DashboardRenewIntent,
+  run: IntentRunOptions = {},
 ): RenewalInput {
   return {
     duration: intentDurationMonths(intent.duration),
     keepPayable: true,
+    reuseOnly: run.reuseOnly === true,
   }
 }
 
@@ -96,6 +89,16 @@ export function sanitizeIntentError(err: unknown): string {
   return redacted.length <= 300 ? redacted : `${redacted.slice(0, 299)}…`
 }
 
+/**
+ * reuseOnly: the request was started before StartOS restarted and is now
+ * past INTENT_TTL_MS, so only what it already recorded (a payable invoice
+ * for the same selection, or its paid state) may be returned; the action
+ * never creates a new invoice for it (NothingToResumeError instead).
+ */
+export interface IntentRunOptions {
+  reuseOnly?: boolean
+}
+
 export interface IntentActionOutcome {
   paymentHash: string
   targetNode: TargetNode
@@ -110,9 +113,18 @@ export interface IntentRunnerOps {
     kind: DashboardIntentKind,
     result: DashboardIntentResult,
   ): Promise<unknown>
-  runBuy(intent: DashboardBuyIntent): Promise<IntentActionOutcome>
-  runRenew(intent: DashboardRenewIntent): Promise<IntentActionOutcome>
-  runReset(intent: DashboardResetIntent): Promise<IntentActionOutcome>
+  runBuy(
+    intent: DashboardBuyIntent,
+    run: IntentRunOptions,
+  ): Promise<IntentActionOutcome>
+  runRenew(
+    intent: DashboardRenewIntent,
+    run: IntentRunOptions,
+  ): Promise<IntentActionOutcome>
+  runReset(
+    intent: DashboardResetIntent,
+    run: IntentRunOptions,
+  ): Promise<IntentActionOutcome>
 }
 
 let intentQueueTail: Promise<unknown> = Promise.resolve()
@@ -150,13 +162,14 @@ export function runDashboardIntents(
       const ageMs = now.getTime() - createdMs
       // A 'processing' result for this ID means the runner started it and
       // StartOS restarted before the outcome was written. The action may
-      // already have recorded an invoice, so the request is resumed (the
-      // action cores reuse a recorded, still-payable invoice for the same
-      // selection) rather than failed at the dashboard TTL, which only
-      // bounds requests that never started.
+      // already have recorded an invoice, so the request is resumed rather
+      // than failed at the dashboard TTL (which bounds requests that never
+      // started). Past the TTL it runs reuseOnly: the recorded invoice (or
+      // paid state) is returned however old it is, and nothing new is
+      // created for a request the operator made long ago.
       const resuming = previous?.id === slot.id
-      const limitMs = resuming ? INTENT_RESUME_MS : INTENT_TTL_MS
-      if (!Number.isFinite(createdMs) || ageMs > limitMs) {
+      const pastTtl = !Number.isFinite(createdMs) || ageMs > INTENT_TTL_MS
+      if (pastTtl && !resuming) {
         const expiredResult: DashboardIntentResult = {
           id: slot.id,
           kind,
@@ -164,9 +177,7 @@ export function runDashboardIntents(
           createdAt: slot.createdAt,
           updatedAt: now.toISOString(),
           targetNode: slot.targetNode,
-          error: resuming
-            ? 'StartOS restarted while this request was being processed, and it is too old to resume. Check for a Pay Invoice task on your node, or request it again.'
-            : 'The dashboard request expired before it could be processed.',
+          error: 'The dashboard request expired before it could be processed.',
         }
         await ops.writeResult(kind, expiredResult)
         outcomes.push(expiredResult)
@@ -184,13 +195,14 @@ export function runDashboardIntents(
       await ops.writeResult(kind, processingResult)
 
       try {
+        const run: IntentRunOptions = { reuseOnly: pastTtl }
         let actionOutcome: IntentActionOutcome
         if (kind === 'buy') {
-          actionOutcome = await ops.runBuy(slot as DashboardBuyIntent)
+          actionOutcome = await ops.runBuy(slot as DashboardBuyIntent, run)
         } else if (kind === 'renew') {
-          actionOutcome = await ops.runRenew(slot as DashboardRenewIntent)
+          actionOutcome = await ops.runRenew(slot as DashboardRenewIntent, run)
         } else {
-          actionOutcome = await ops.runReset(slot as DashboardResetIntent)
+          actionOutcome = await ops.runReset(slot as DashboardResetIntent, run)
         }
         const succeededResult: DashboardIntentResult = {
           id: slot.id,
@@ -241,14 +253,14 @@ export function processDashboardIntents(
         .catch(() => null),
     writeResult: (kind, result) =>
       dashboardIntentResults.merge(effects, resultPatch(kind, result)),
-    runBuy: async (intent) => {
+    runBuy: async (intent, run) => {
       const config = await configJson
         .read()
         .once()
         .catch(() => null)
       const res = await startPurchase(
         effects,
-        purchaseInputFromIntent(intent, config?.['target-node']),
+        purchaseInputFromIntent(intent, config?.['target-node'], run),
       )
       if (res.kind === 'already-paid') {
         return {
@@ -263,8 +275,11 @@ export function processDashboardIntents(
         reused: res.kind === 'reused',
       }
     },
-    runRenew: async (intent) => {
-      const res = await startRenewal(effects, renewalInputFromIntent(intent))
+    runRenew: async (intent, run) => {
+      const res = await startRenewal(
+        effects,
+        renewalInputFromIntent(intent, run),
+      )
       if (res.kind === 'already-paid') {
         return {
           paymentHash: res.paymentHash,
@@ -278,8 +293,12 @@ export function processDashboardIntents(
         reused: res.kind === 'reused',
       }
     },
-    runReset: async () => {
-      const { outcome, targetNode } = await startBandwidthReset(effects)
+    runReset: async (_intent, run) => {
+      const { outcome, targetNode } = await startBandwidthReset(
+        effects,
+        undefined,
+        { reuseOnly: run.reuseOnly === true },
+      )
       if (outcome.kind === 'already-paid') {
         return {
           paymentHash: outcome.paymentHash,

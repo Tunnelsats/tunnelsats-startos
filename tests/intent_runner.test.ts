@@ -11,6 +11,7 @@ import {
   PendingPaymentConflictError,
   payableUntil,
   reusablePendingOrder,
+  unsettledUntil,
   runPurchase,
   startPurchase,
   type PendingOrderRecord,
@@ -33,7 +34,6 @@ import {
 } from '../startos/fileModels/dashboardIntents'
 import { metaShape } from '../startos/fileModels/tunnelsatsMeta'
 import {
-  INTENT_RESUME_MS,
   INTENT_TTL_MS,
   processDashboardIntents,
   purchaseInputFromIntent,
@@ -44,7 +44,7 @@ import {
   type IntentRunnerOps,
 } from '../startos/intentRunner'
 import { derivePublicKey, generateWireguardKeypair } from '../startos/keygen'
-import { payTaskReplayId } from '../startos/settlement'
+import { NothingToResumeError, payTaskReplayId } from '../startos/settlement'
 
 const NOW = new Date('2026-10-01T12:00:00.000Z')
 const inMs = (ms: number) => new Date(NOW.getTime() + ms).toISOString()
@@ -531,24 +531,26 @@ test('runDashboardIntents processes renew, reset, then buy in order and is idemp
   assert.deepEqual(order, ['renew', 'reset', 'buy'])
 })
 
-test('runDashboardIntents resumes a request StartOS restarted during, within the invoice lifetime', async () => {
-  const calls: string[] = []
-  const renew = {
-    id: 'intent-renew-restart',
+test('runDashboardIntents resumes a request StartOS restarted during, reuse-only past the TTL', async () => {
+  const calls: { id: string; reuseOnly: boolean | undefined }[] = []
+  const renewAt = (id: string, ageMs: number) => ({
+    id,
     kind: 'renew' as const,
-    createdAt: inMs(-10 * 60_000),
+    createdAt: inMs(-ageMs),
     targetNode: 'lnd' as const,
     duration: '1m' as const,
-  }
-  const results: DashboardIntentResultsFile = {
-    renew: {
+  })
+  let renew = renewAt('intent-renew-fresh', 30_000)
+  const results: DashboardIntentResultsFile = {}
+  const markProcessing = () => {
+    results.renew = {
       id: renew.id,
       kind: 'renew',
       status: 'processing',
       createdAt: renew.createdAt,
-      updatedAt: inMs(-10 * 60_000 + 500),
+      updatedAt: renew.createdAt,
       targetNode: 'lnd',
-    },
+    }
   }
   const ops: IntentRunnerOps = {
     now: () => NOW,
@@ -557,8 +559,8 @@ test('runDashboardIntents resumes a request StartOS restarted during, within the
     writeResult: async (kind, result) => {
       results[kind] = result
     },
-    runRenew: async () => {
-      calls.push('renew')
+    runRenew: async (intent, run) => {
+      calls.push({ id: intent.id, reuseOnly: run.reuseOnly })
       // The action core finds the invoice it recorded before the restart.
       return { paymentHash: RENEW_HASH, targetNode: 'lnd', reused: true }
     },
@@ -570,36 +572,39 @@ test('runDashboardIntents resumes a request StartOS restarted during, within the
     },
   }
 
-  // Older than the dashboard TTL, but it had started: resumed, not failed.
-  assert.ok(10 * 60_000 > INTENT_TTL_MS)
-  const resumed = await runDashboardIntents(ops)
-  assert.deepEqual(calls, ['renew'])
-  assert.equal(resumed.length, 1)
-  assert.equal(resumed[0].status, 'succeeded')
-  assert.equal(resumed[0].paymentHash, RENEW_HASH)
-  assert.equal(resumed[0].reused, true)
+  // Started and interrupted within the TTL: resumed as a normal run.
+  markProcessing()
+  const fresh = await runDashboardIntents(ops)
+  assert.deepEqual(calls, [{ id: 'intent-renew-fresh', reuseOnly: false }])
+  assert.equal(fresh[0].status, 'succeeded')
 
-  // Past the invoice lifetime a started request is not resumed; the result
-  // says StartOS restarted instead of claiming it never started.
-  const oldRenew = {
-    ...renew,
-    id: 'intent-renew-old',
-    createdAt: inMs(-INTENT_RESUME_MS - 1_000),
+  // Interrupted and resumed long after the TTL (even past the default
+  // invoice lifetime): still resumed, but reuse-only, so a recorded invoice
+  // with a longer backend expiry is returned and nothing new is created.
+  renew = renewAt('intent-renew-late', INVOICE_TTL_MS + 5 * 60_000)
+  markProcessing()
+  const late = await runDashboardIntents(ops)
+  assert.deepEqual(calls[1], { id: 'intent-renew-late', reuseOnly: true })
+  assert.equal(late[0].status, 'succeeded')
+  assert.equal(late[0].paymentHash, RENEW_HASH)
+  assert.equal(late[0].reused, true)
+
+  // A request that never started is still failed at the TTL, untouched.
+  renew = renewAt('intent-renew-never-started', INTENT_TTL_MS + 1_000)
+  const never = await runDashboardIntents(ops)
+  assert.equal(calls.length, 2)
+  assert.equal(never[0].status, 'failed')
+  assert.match(never[0].error ?? '', /expired before it could be processed/)
+
+  // Reuse-only with nothing left to reuse reports the restart honestly.
+  renew = renewAt('intent-renew-gone', INTENT_TTL_MS + 60_000)
+  markProcessing()
+  ops.runRenew = async () => {
+    throw new NothingToResumeError()
   }
-  results.renew = {
-    id: oldRenew.id,
-    kind: 'renew',
-    status: 'processing',
-    createdAt: oldRenew.createdAt,
-    updatedAt: oldRenew.createdAt,
-    targetNode: 'lnd',
-  }
-  ops.readIntents = async () => ({ renew: oldRenew })
-  const tooOld = await runDashboardIntents(ops)
-  assert.deepEqual(calls, ['renew'])
-  assert.equal(tooOld[0].status, 'failed')
-  assert.match(tooOld[0].error ?? '', /StartOS restarted/)
-  assert.doesNotMatch(tooOld[0].error ?? '', /before it could be processed/)
+  const gone = await runDashboardIntents(ops)
+  assert.equal(gone[0].status, 'failed')
+  assert.match(gone[0].error ?? '', /StartOS restarted/)
 })
 
 test('runDashboardIntents records sanitized failure messages and redacts payment hashes', async () => {
@@ -817,12 +822,12 @@ test('bridge.py intents parse in the runner and its results read back in bridge.
       readResults: () => resultsFile.read().once(),
       writeResult: (kind, result) =>
         resultsFile.merge({} as never, resultPatch(kind, result)),
-      runBuy: async (intent) => {
-        inputs.buy = purchaseInputFromIntent(intent, undefined)
+      runBuy: async (intent, run) => {
+        inputs.buy = purchaseInputFromIntent(intent, undefined, run)
         return { paymentHash: ORDER_HASH, targetNode: 'cln', reused: false }
       },
-      runRenew: async (intent) => {
-        inputs.renew = renewalInputFromIntent(intent)
+      runRenew: async (intent, run) => {
+        inputs.renew = renewalInputFromIntent(intent, run)
         return { paymentHash: RENEW_HASH, targetNode: 'cln', reused: false }
       },
       runReset: async () => ({
@@ -837,8 +842,13 @@ test('bridge.py intents parse in the runner and its results read back in bridge.
       serverRegion: 'eu-ch',
       duration: 6,
       keepPayable: true,
+      reuseOnly: false,
     })
-    assert.deepEqual(inputs.renew, { duration: 3, keepPayable: true })
+    assert.deepEqual(inputs.renew, {
+      duration: 3,
+      keepPayable: true,
+      reuseOnly: false,
+    })
 
     const summary = JSON.parse(
       bridgePython(dir, 'print(json.dumps(bridge._intents_summary()))'),
@@ -893,4 +903,180 @@ test('resultPatch replaces a result slot without carrying over old fields', asyn
   } finally {
     rmSync(dir, { recursive: true, force: true })
   }
+})
+
+test('unsettledUntil protects unpaid records without a stored invoice and fails closed without a time', () => {
+  const legacy = { paymentHash: ORDER_HASH, createdAt: inMs(-5 * 60_000) }
+  assert.equal(payableUntil({ ...legacy }, NOW), null)
+  assert.equal(
+    unsettledUntil(legacy, NOW),
+    Date.parse(legacy.createdAt) + INVOICE_TTL_MS,
+  )
+  assert.equal(unsettledUntil({ ...legacy, expiresAt: inMs(-1) }, NOW), null)
+  assert.equal(
+    unsettledUntil({ ...legacy, paymentReceivedFor: ORDER_HASH }, NOW),
+    null,
+  )
+  assert.equal(
+    unsettledUntil({ paymentHash: ORDER_HASH, createdAt: 'garbage' }, NOW),
+    Number.POSITIVE_INFINITY,
+  )
+  assert.equal(unsettledUntil({ createdAt: legacy.createdAt }, NOW), null)
+})
+
+test('dashboard Buy and Renew never replace a legacy pending record without a stored invoice', async () => {
+  const kp = generateWireguardKeypair()
+  const pub = derivePublicKey(kp.privateKey)
+  const conf = `[Interface]\nPrivateKey = ${kp.privateKey}\nAddress = 10.9.0.2/32\n# Server: de2.tunnelsats.com\n# Port Forwarding: 24556\n\n[Peer]\nPublicKey = ${kp.publicKey}\nEndpoint = de2.tunnelsats.com:51820\nAllowedIPs = 0.0.0.0/0\n`
+  let created = 0
+  const legacyOrder: PendingOrderRecord = {
+    paymentHash: ORDER_HASH,
+    orderId: 'ord-legacy',
+    privateKey: kp.privateKey,
+    publicKey: pub,
+    targetNode: 'lnd',
+    serverId: 'eu-de',
+    duration: 3,
+    createdAt: inMs(-5 * 60_000),
+  }
+  const purchaseOps: PurchaseOps = {
+    now: () => NOW,
+    readCurrent: async () => ({ pending: legacyOrder }),
+    generateKeypair: () => generateWireguardKeypair(),
+    createOrder: async () => {
+      created += 1
+      throw new Error('must not create')
+    },
+    record: async () => undefined,
+    raiseTask: async () => undefined,
+  }
+  await assert.rejects(
+    runPurchase(
+      {
+        targetNode: 'lnd',
+        serverRegion: 'eu-de',
+        duration: 3,
+        keepPayable: true,
+      },
+      purchaseOps,
+    ),
+    PendingPaymentConflictError,
+  )
+
+  for (const publicKey of [
+    pub,
+    'previous-key-previous-key-previous-key-prev=',
+  ]) {
+    const legacyRenewal = {
+      paymentHash: RENEW_HASH,
+      renewalId: 'ren-legacy',
+      oldExpiry: '2026-10-15T00:00:00.000Z',
+      newExpiry: '2026-11-15T00:00:00.000Z',
+      createdAt: inMs(-5 * 60_000),
+      publicKey,
+      targetNode: 'lnd' as const,
+    } as PendingRenewalRecord
+    const renewalOps: RenewalOps = {
+      now: () => NOW,
+      readConfig: async () => ({
+        enabled: true,
+        'target-node': 'lnd',
+        'tunnelsats-conf': conf,
+      }),
+      readServerMeta: async () => ({
+        publicKey: pub,
+        serverDomain: 'de2.tunnelsats.com',
+      }),
+      readCurrent: async () => ({ pending: legacyRenewal }),
+      requestRenewal: async () => {
+        created += 1
+        throw new Error('must not request')
+      },
+      record: async () => undefined,
+      raiseTask: async () => undefined,
+    }
+    await assert.rejects(
+      runRenewal({ duration: 1, keepPayable: true }, renewalOps),
+      PendingPaymentConflictError,
+    )
+  }
+  assert.equal(created, 0)
+})
+
+test('reuseOnly Buy and Renew return the recorded invoice but never create a new one', async () => {
+  const kp = generateWireguardKeypair()
+  const pub = derivePublicKey(kp.privateKey)
+  const conf = `[Interface]\nPrivateKey = ${kp.privateKey}\nAddress = 10.9.0.2/32\n# Server: de2.tunnelsats.com\n# Port Forwarding: 24556\n\n[Peer]\nPublicKey = ${kp.publicKey}\nEndpoint = de2.tunnelsats.com:51820\nAllowedIPs = 0.0.0.0/0\n`
+  let created = 0
+  let orderPending: PendingOrderRecord | null = {
+    paymentHash: ORDER_HASH,
+    orderId: 'ord-1',
+    privateKey: kp.privateKey,
+    publicKey: pub,
+    targetNode: 'lnd',
+    serverId: 'eu-de',
+    duration: 3,
+    createdAt: inMs(-90 * 60_000),
+    invoice: ORDER_INVOICE,
+    // A backend expiry longer than the default invoice lifetime.
+    expiresAt: inMs(30 * 60_000),
+  }
+  const purchaseOps: PurchaseOps = {
+    now: () => NOW,
+    readCurrent: async () => ({ pending: orderPending }),
+    generateKeypair: () => generateWireguardKeypair(),
+    createOrder: async () => {
+      created += 1
+      throw new Error('must not create')
+    },
+    record: async () => undefined,
+    raiseTask: async () => undefined,
+  }
+  const buy = {
+    targetNode: 'lnd' as const,
+    serverRegion: 'eu-de',
+    duration: 3,
+    keepPayable: true,
+    reuseOnly: true,
+  }
+  assert.equal((await runPurchase(buy, purchaseOps)).kind, 'reused')
+  orderPending = null
+  await assert.rejects(runPurchase(buy, purchaseOps), NothingToResumeError)
+
+  let renewalPending: PendingRenewalRecord | null = {
+    paymentHash: RENEW_HASH,
+    renewalId: 'ren-1',
+    oldExpiry: '2026-10-15T00:00:00.000Z',
+    newExpiry: '2026-11-15T00:00:00.000Z',
+    createdAt: inMs(-90 * 60_000),
+    duration: 1,
+    invoice: RENEW_INVOICE,
+    expiresAt: inMs(30 * 60_000),
+    publicKey: pub,
+    targetNode: 'lnd',
+  }
+  const renewalOps: RenewalOps = {
+    now: () => NOW,
+    readConfig: async () => ({
+      enabled: true,
+      'target-node': 'lnd',
+      'tunnelsats-conf': conf,
+    }),
+    readServerMeta: async () => ({
+      publicKey: pub,
+      serverDomain: 'de2.tunnelsats.com',
+    }),
+    readCurrent: async () => ({ pending: renewalPending }),
+    requestRenewal: async () => {
+      created += 1
+      throw new Error('must not request')
+    },
+    record: async () => undefined,
+    raiseTask: async () => undefined,
+  }
+  const renew = { duration: 1, keepPayable: true, reuseOnly: true }
+  assert.equal((await runRenewal(renew, renewalOps)).kind, 'reused')
+  renewalPending = { ...renewalPending, expiresAt: inMs(-1) }
+  await assert.rejects(runRenewal(renew, renewalOps), NothingToResumeError)
+  assert.equal(created, 0)
 })

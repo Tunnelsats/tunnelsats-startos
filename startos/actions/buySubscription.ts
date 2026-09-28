@@ -9,6 +9,7 @@ import {
   type SubscriptionOrder,
 } from '../apiClient'
 import {
+  NothingToResumeError,
   payTaskReplayId,
   recordThenRaise,
   runPaymentExclusive,
@@ -45,6 +46,12 @@ export interface PurchaseInput {
    * unset: the operator may replace a payable order.
    */
   keepPayable?: boolean
+  /**
+   * A dashboard request resumed after StartOS restarted mid-request, past
+   * the dashboard TTL: only the invoice it already recorded (or its paid
+   * state) may be returned; a new invoice is never created for it.
+   */
+  reuseOnly?: boolean
 }
 
 /**
@@ -56,6 +63,13 @@ export class PendingPaymentConflictError extends Error {
     super(message)
     this.name = 'PendingPaymentConflictError'
   }
+}
+
+/** " until <ISO time>", or "" when the pending record has no usable time. */
+export function untilText(untilMs: number): string {
+  return Number.isFinite(untilMs)
+    ? ` until ${new Date(untilMs).toISOString()}`
+    : ''
 }
 
 export interface PurchaseOps {
@@ -127,6 +141,36 @@ export function payableUntil(
       : NaN
   if (!Number.isFinite(expiresMs) || expiresMs <= now.getTime()) return null
   return expiresMs
+}
+
+/**
+ * Until when (epoch ms) an unpaid pending payment may still be paid, whether
+ * or not its invoice was stored: records written before invoices were kept
+ * have none, yet their invoice can still be paid on the node. Returns
+ * Infinity when the record has no usable time (fail closed), null when
+ * nothing unpaid is pending or it has expired. Paid records return null;
+ * callers check paymentReceivedFor separately.
+ */
+export function unsettledUntil(
+  pending:
+    | {
+        paymentHash?: string
+        paymentReceivedFor?: string
+        createdAt?: string
+        expiresAt?: string
+      }
+    | null
+    | undefined,
+  now: Date,
+): number | null {
+  if (!pending || !pending.paymentHash) return null
+  if (pending.paymentReceivedFor === pending.paymentHash) return null
+  const createdMs = pending.createdAt ? Date.parse(pending.createdAt) : NaN
+  const expiresMs = pending.expiresAt
+    ? Date.parse(pending.expiresAt)
+    : createdMs + INVOICE_TTL_MS
+  if (!Number.isFinite(expiresMs)) return Number.POSITIVE_INFINITY
+  return expiresMs > now.getTime() ? expiresMs : null
 }
 
 /** A payable pending order for exactly this server, plan and node, or null. */
@@ -210,12 +254,13 @@ export function runPurchase(
         targetNode: reusable.targetNode,
       }
     }
-    const otherPayableUntil = payableUntil(pending, now)
+    const otherPayableUntil = unsettledUntil(pending, now)
     if (input.keepPayable && pending && otherPayableUntil !== null) {
       throw new PendingPaymentConflictError(
-        `An unpaid subscription invoice (${pending.serverId}, ${pending.duration ?? '?'} month(s), ${pending.targetNode}) is still payable until ${new Date(otherPayableUntil).toISOString()}. Pay it, or replace it with the Buy Subscription action in StartOS.`,
+        `An unpaid subscription invoice (${pending.serverId}, ${pending.duration ?? '?'} month(s), ${pending.targetNode}) is still payable${untilText(otherPayableUntil)}. Pay it, or replace it with the Buy Subscription action in StartOS.`,
       )
     }
+    if (input.reuseOnly) throw new NothingToResumeError()
 
     const keypair = ops.generateKeypair()
     const order = await ops.createOrder({
