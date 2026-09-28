@@ -1862,6 +1862,7 @@ INVOICE_DEFAULT_TTL = timedelta(hours=1)
 INTENT_KINDS = ("buy", "renew", "reset")
 INTENT_DURATIONS = ("1m", "3m", "6m", "12m")
 INTENT_TTL = timedelta(seconds=120)
+INTENT_PROCESSING_GRACE = timedelta(minutes=3)
 INTENT_RATE_LIMIT_WINDOW = timedelta(seconds=30)
 INTENT_HOURLY_WINDOW = timedelta(hours=1)
 INTENT_HOURLY_CAP = 5
@@ -1942,6 +1943,12 @@ def _dashboard_node(value):
 
 
 def _dashboard_duration(value):
+    """'1m'..'12m', from the wire format or the whole months TypeScript stores
+    in tunnelsats-meta.json; None for anything else."""
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, int) and f"{value}m" in INTENT_DURATIONS:
+        return f"{value}m"
     return value if value in INTENT_DURATIONS else None
 
 
@@ -2105,12 +2112,16 @@ def _intent_slot_summary(kind, req_slot, res_slot, now):
     error = None
     if isinstance(res_slot, dict) and res_slot.get("id") == intent_id:
         res_status = res_slot.get("status")
-        if res_status in ("processing", "completed", "failed"):
+        # The statuses startos/intentRunner.ts writes.
+        if res_status in ("processing", "succeeded", "failed"):
             status = res_status
             updated_at = _dashboard_time(res_slot.get("updatedAt")) or created_at
             if status == "failed":
                 error = _dashboard_error_text(res_slot.get("error")) or "The request failed."
-    if status in ("pending", "processing") and now - created_dt >= INTENT_TTL:
+    # The runner refuses intents older than INTENT_TTL; one it picked up gets
+    # INTENT_PROCESSING_GRACE more to finish its upstream call and task.
+    deadline = INTENT_TTL + (INTENT_PROCESSING_GRACE if status == "processing" else timedelta(0))
+    if status in ("pending", "processing") and now - created_dt >= deadline:
         status = "failed"
         error = "The dashboard request timed out before StartOS processed it. Please try again."
 
@@ -2125,6 +2136,7 @@ def _intent_slot_summary(kind, req_slot, res_slot, now):
     if kind == "buy":
         summary["serverId"] = server_id
         summary["duration"] = duration
+        summary["targetNode"] = _dashboard_node(req_slot.get("targetNode"))
     elif kind == "renew":
         summary["duration"] = duration
     return summary
@@ -2162,26 +2174,21 @@ def _current_configured_pubkey():
     return pubkey
 
 
-def _reusable_pending_for_intent(meta, kind, public_key, server_id, duration, now):
+def _reusable_pending_for_intent(meta, kind, public_key, now):
+    """The summary of a still-payable invoice of this kind, or None. Any such
+    invoice is reused whatever its server or duration: the runner calls the
+    shared action core with reuseActive, so there is one payment slot per
+    kind and the dashboard cannot pile up orders."""
     pending_key = {"buy": "pendingOrder", "renew": "pendingRenewal", "reset": "pendingReset"}[kind]
     summary = _pending_summary(meta, pending_key, public_key, now=now)
     if summary is None or not summary.get("invoice") or summary.get("paymentReceived"):
         return None
-    raw = meta.get(pending_key) or {}
-    if kind == "buy":
-        if raw.get("serverId") != server_id:
-            return None
-        if raw.get("duration") not in (None, duration):
-            return None
-    elif kind == "renew":
-        if raw.get("duration") not in (None, duration):
-            return None
     return summary
 
 
 def submit_dashboard_intent(payload, now=None):
-    """Validates a POST /api/intents request, reuses an existing unpaid
-    invoice when matching, enforces rate limits, and writes the single-writer
+    """Validates a POST /api/intents request, reuses a still-payable invoice
+    of the same kind, enforces rate limits, and writes the single-writer
     dashboard-intents.json slot. Returns (http_status, response_dict)."""
     if not isinstance(payload, dict):
         return 400, {"error": "Request body must be a JSON object"}
@@ -2199,17 +2206,15 @@ def submit_dashboard_intent(payload, now=None):
 
     server_id = None
     duration = None
+    if kind in ("buy", "renew"):
+        # Strict wire format: exactly one of INTENT_DURATIONS.
+        duration = payload.get("duration") if payload.get("duration") in INTENT_DURATIONS else None
+        if duration is None:
+            return 400, {"error": "Invalid duration; expected '1m', '3m', '6m', or '12m'"}
     if kind == "buy":
         server_id = _dashboard_server_id(payload.get("serverId"))
-        duration = _dashboard_duration(payload.get("duration"))
         if server_id is None:
             return 400, {"error": "Invalid serverId"}
-        if duration is None:
-            return 400, {"error": "Invalid duration; expected '1m', '3m', '6m', or '12m'"}
-    elif kind == "renew":
-        duration = _dashboard_duration(payload.get("duration"))
-        if duration is None:
-            return 400, {"error": "Invalid duration; expected '1m', '3m', '6m', or '12m'"}
 
     public_key = _current_configured_pubkey()
     if kind in ("renew", "reset") and public_key is None:
@@ -2218,7 +2223,7 @@ def submit_dashboard_intent(payload, now=None):
 
     now = now or datetime.now(timezone.utc)
     meta = read_meta()
-    reusable = _reusable_pending_for_intent(meta, kind, public_key, server_id, duration, now)
+    reusable = _reusable_pending_for_intent(meta, kind, public_key, now)
     if reusable is not None:
         return 200, {"status": "reused", "kind": kind, "pending": reusable}
 
@@ -2283,6 +2288,9 @@ def submit_dashboard_intent(payload, now=None):
         if kind == "buy":
             new_slot["serverId"] = server_id
             new_slot["duration"] = duration
+            # The configured node, as the Buy action defaults to; the runner
+            # raises the Pay Invoice task there.
+            new_slot["targetNode"] = get_target_node()
         elif kind == "renew":
             new_slot["duration"] = duration
 

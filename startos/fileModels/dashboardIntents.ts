@@ -2,18 +2,23 @@ import { FileHelper, z } from '@start9labs/start-sdk'
 import { sdk } from '../sdk'
 
 const targetNodeShape = z.enum(['lnd', 'cln', 'eclair'])
-const durationShape = z.union([
-  z.literal(1),
-  z.literal(3),
-  z.literal(6),
-  z.literal(12),
-])
+/**
+ * The wire format bridge.py writes (INTENT_DURATIONS there). Converted to
+ * whole months with intentDurationMonths() before reaching the action core.
+ */
+const durationShape = z.enum(['1m', '3m', '6m', '12m'])
+export type IntentDuration = z.infer<typeof durationShape>
+
+export function intentDurationMonths(duration: IntentDuration): number {
+  return Number.parseInt(duration, 10)
+}
 
 export const dashboardBuyIntentShape = z.object({
   id: z.string(),
   kind: z.literal('buy'),
   createdAt: z.string(),
-  targetNode: targetNodeShape,
+  /** Set by bridge.py from config.json; the runner falls back to the same. */
+  targetNode: targetNodeShape.optional().catch(undefined),
   serverId: z.string(),
   duration: durationShape,
 })
@@ -41,8 +46,17 @@ export const dashboardIntentsShape = z.object({
   buy: dashboardBuyIntentShape.optional().nullable().catch(null),
   renew: dashboardRenewIntentShape.optional().nullable().catch(null),
   reset: dashboardResetIntentShape.optional().nullable().catch(null),
-  /** Recent submission timestamps (ISO strings) maintained by bridge.py for hourly rate limiting. */
-  history: z.array(z.string()).optional().catch(undefined),
+  /** Recent submissions maintained by bridge.py for its rate limits. */
+  history: z
+    .array(
+      z.object({
+        id: z.string(),
+        kind: z.enum(['buy', 'renew', 'reset']),
+        createdAt: z.string(),
+      }),
+    )
+    .optional()
+    .catch(undefined),
 })
 
 export const dashboardIntentResultShape = z.object({

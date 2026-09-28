@@ -1252,7 +1252,8 @@ async function submitIntent(actionKey) {
     if (data.status === 'reused') {
       localIntentFeedback = {
         level: 'info',
-        text: 'An unpaid invoice for this selection is already active below.',
+        text:
+          'An unpaid invoice of this kind is already active below. Pay it, or let it expire before requesting another.',
       }
     } else {
       localIntentFeedback = {

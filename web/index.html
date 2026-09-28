@@ -174,22 +174,13 @@
               <label class="intent-field">
                 <span class="intent-field-label">Server region</span>
                 <select id="buy-server-select" class="intent-select">
-                  <option value="eu-de" selected>Europe (Frankfurt, DE)</option>
-                  <option value="eu-ch">Europe (Zurich, CH)</option>
-                  <option value="na-east">
-                    North America East (Ashburn, US)
-                  </option>
-                  <option value="na-central">
-                    North America Central (Dallas, US)
-                  </option>
-                  <option value="na-west">
-                    North America West (Los Angeles, US)
-                  </option>
-                  <option value="latam-br">
-                    South America (Sao Paulo, BR)
-                  </option>
-                  <option value="ap-sg">Asia-Pacific (Singapore, SG)</option>
-                  <option value="ap-jp">Asia-Pacific (Tokyo, JP)</option>
+                  <option value="eu-de" selected>Europe (Nuremberg, DE)</option>
+                  <option value="eu-ch">Europe (Geneva, CH)</option>
+                  <option value="us-east">North America East (Ashburn, US)</option>
+                  <option value="us-west">North America West (Hillsboro, US)</option>
+                  <option value="sa-br">South America (Sao Paulo, BR)</option>
+                  <option value="asia-sg">Asia (Singapore, SG)</option>
+                  <option value="oc-au">Oceania (Sydney, AU)</option>
                 </select>
               </label>
               <label class="intent-field">
@@ -408,7 +399,7 @@
             <li class="action-item" id="action-buy">
               <span class="action-name">Buy Subscription</span>
               <span class="action-desc"
-                >A new tunnel: pick the node, a server region and a plan.</span
+                >A new tunnel on the configured node: pick a server region and a plan.</span
               >
               <div class="action-controls" id="buy-controls">
                 <select
@@ -418,12 +409,11 @@
                 >
                   <option value="eu-de" selected>Europe (DE)</option>
                   <option value="eu-ch">Europe (CH)</option>
-                  <option value="na-east">NA East (US)</option>
-                  <option value="na-central">NA Central (US)</option>
-                  <option value="na-west">NA West (US)</option>
-                  <option value="latam-br">South America (BR)</option>
-                  <option value="ap-sg">Asia-Pacific (SG)</option>
-                  <option value="ap-jp">Asia-Pacific (JP)</option>
+                  <option value="us-east">US East</option>
+                  <option value="us-west">US West</option>
+                  <option value="sa-br">South America (BR)</option>
+                  <option value="asia-sg">Asia (SG)</option>
+                  <option value="oc-au">Oceania (AU)</option>
                 </select>
                 <select
                   id="manage-buy-duration-select"

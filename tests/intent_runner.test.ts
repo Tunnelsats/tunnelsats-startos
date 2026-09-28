@@ -1,6 +1,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { mkdtempSync, rmSync } from 'node:fs'
+import { execFileSync } from 'node:child_process'
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { FileHelper } from '@start9labs/start-sdk'
@@ -32,6 +33,9 @@ import { metaShape } from '../startos/fileModels/tunnelsatsMeta'
 import {
   INTENT_TTL_MS,
   processDashboardIntents,
+  purchaseInputFromIntent,
+  renewalInputFromIntent,
+  resultPatch,
   runDashboardIntents,
   sanitizeIntentError,
   type IntentRunnerOps,
@@ -355,14 +359,14 @@ test('runDashboardIntents processes renew, reset, then buy in order and is idemp
       createdAt: inMs(-5_000),
       targetNode: 'lnd',
       serverId: 'eu-de',
-      duration: 3,
+      duration: '3m',
     },
     renew: {
       id: 'intent-renew-1',
       kind: 'renew',
       createdAt: inMs(-4_000),
       targetNode: 'cln',
-      duration: 6,
+      duration: '6m',
     },
     reset: {
       id: 'intent-reset-1',
@@ -416,7 +420,7 @@ test('runDashboardIntents processes renew, reset, then buy in order and is idemp
       createdAt: inMs(-INTENT_TTL_MS - 1_000),
       targetNode: 'lnd',
       serverId: 'eu-de',
-      duration: 1,
+      duration: '1m',
     },
   }
   const staleRun = await runDashboardIntents(ops)
@@ -492,7 +496,7 @@ test('real FileHelper models persist invoice metadata and intent results cleanly
         createdAt: NOW.toISOString(),
         targetNode: 'eclair',
         serverId: 'eu-de',
-        duration: 6,
+        duration: '6m',
       },
     })
 
@@ -508,12 +512,7 @@ test('real FileHelper models persist invoice metadata and intent results cleanly
       runBuy: async (intent) => {
         const res = await startPurchase(
           {} as never,
-          {
-            targetNode: intent.targetNode,
-            serverRegion: intent.serverId,
-            duration: intent.duration,
-            reuseActive: true,
-          },
+          purchaseInputFromIntent(intent, 'lnd'),
           {
             now: () => NOW,
             readCurrent: async () => {
@@ -571,6 +570,154 @@ test('real FileHelper models persist invoice metadata and intent results cleanly
     assert.equal(savedResults?.buy?.status, 'succeeded')
     assert.equal(savedResults?.buy?.targetNode, 'eclair')
     assert.equal(raised.length, 1)
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+// Cross-runtime contract: bridge.py writes the request file and reads the
+// result file; this runs the real Python functions against the real
+// TypeScript file models and runner, so the two sides cannot drift apart.
+function bridgePython(dataDir: string, body: string): string {
+  const repo = join(__dirname, '..')
+  const program = [
+    'import json, sys',
+    `sys.path.insert(0, ${JSON.stringify(repo)})`,
+    'import bridge',
+    body,
+  ].join('\n')
+  return execFileSync('python3', ['-c', program], {
+    env: { ...process.env, DATA_DIR: dataDir },
+    encoding: 'utf8',
+  })
+}
+
+test('bridge.py intents parse in the runner and its results read back in bridge.py', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'intent-contract-'))
+  try {
+    const kp = generateWireguardKeypair()
+    const conf = `[Interface]\nPrivateKey = ${kp.privateKey}\nAddress = 10.9.0.7/32\n\n[Peer]\nPublicKey = ${kp.publicKey}\nEndpoint = de2.tunnelsats.com:51820\nAllowedIPs = 0.0.0.0/0\n`
+    writeFileSync(join(dir, 'tunnelsatsv3.conf'), conf)
+    writeFileSync(
+      join(dir, 'config.json'),
+      JSON.stringify({
+        enabled: true,
+        'target-node': 'cln',
+        'tunnelsats-conf': conf,
+      }),
+    )
+
+    const submitted = JSON.parse(
+      bridgePython(
+        dir,
+        [
+          'out = [bridge.submit_dashboard_intent(p) for p in (',
+          '  {"kind": "buy", "serverId": "eu-ch", "duration": "6m"},',
+          '  {"kind": "renew", "duration": "3m"},',
+          '  {"kind": "reset"},',
+          ')]',
+          'print(json.dumps([code for code, _ in out]))',
+        ].join('\n'),
+      ),
+    )
+    assert.deepEqual(submitted, [202, 202, 202])
+
+    const raw = JSON.parse(
+      readFileSync(join(dir, 'dashboard-intents.json'), 'utf8'),
+    )
+    const parsed = dashboardIntentsShape.parse(raw)
+    assert.ok(parsed.buy, 'buy slot must parse')
+    assert.ok(parsed.renew, 'renew slot must parse')
+    assert.ok(parsed.reset, 'reset slot must parse')
+
+    const intentsFile = FileHelper.json(
+      join(dir, 'dashboard-intents.json'),
+      dashboardIntentsShape,
+    )
+    const resultsFile = FileHelper.json(
+      join(dir, 'dashboard-intent-results.json'),
+      dashboardIntentResultsShape,
+    )
+    const inputs: Record<string, unknown> = {}
+    const outcomes = await runDashboardIntents({
+      now: () => new Date(),
+      readIntents: () => intentsFile.read().once(),
+      readResults: () => resultsFile.read().once(),
+      writeResult: (kind, result) =>
+        resultsFile.merge({} as never, resultPatch(kind, result)),
+      runBuy: async (intent) => {
+        inputs.buy = purchaseInputFromIntent(intent, undefined)
+        return { paymentHash: ORDER_HASH, targetNode: 'cln', reused: false }
+      },
+      runRenew: async (intent) => {
+        inputs.renew = renewalInputFromIntent(intent)
+        return { paymentHash: RENEW_HASH, targetNode: 'cln', reused: false }
+      },
+      runReset: async () => ({
+        paymentHash: RESET_HASH,
+        targetNode: 'cln',
+        reused: false,
+      }),
+    })
+    assert.equal(outcomes.length, 3)
+    assert.deepEqual(inputs.buy, {
+      targetNode: 'cln',
+      serverRegion: 'eu-ch',
+      duration: 6,
+      reuseActive: true,
+    })
+    assert.deepEqual(inputs.renew, { duration: 3, reuseActive: true })
+
+    const summary = JSON.parse(
+      bridgePython(dir, 'print(json.dumps(bridge._intents_summary()))'),
+    )
+    assert.equal(summary.buy.status, 'succeeded')
+    assert.equal(summary.buy.targetNode, 'cln')
+    assert.equal(summary.renew.status, 'succeeded')
+    assert.equal(summary.reset.status, 'succeeded')
+    const text = JSON.stringify(summary)
+    for (const secret of [ORDER_HASH, RENEW_HASH, RESET_HASH, kp.privateKey]) {
+      assert.ok(!text.includes(secret), 'no payment hash or key in the summary')
+    }
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+test('resultPatch replaces a result slot without carrying over old fields', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'intent-results-'))
+  try {
+    const resultsFile = FileHelper.json(
+      join(dir, 'dashboard-intent-results.json'),
+      dashboardIntentResultsShape,
+    )
+    await resultsFile.merge(
+      {} as never,
+      resultPatch('reset', {
+        id: 'reset-1',
+        kind: 'reset',
+        status: 'failed',
+        createdAt: inMs(-2_000),
+        updatedAt: inMs(-1_000),
+        paymentHash: RESET_HASH,
+        error: 'upstream failed',
+      }),
+    )
+    await resultsFile.merge(
+      {} as never,
+      resultPatch('reset', {
+        id: 'reset-2',
+        kind: 'reset',
+        status: 'processing',
+        createdAt: inMs(0),
+        updatedAt: inMs(0),
+      }),
+    )
+    const saved = await resultsFile.read().once()
+    assert.equal(saved?.reset?.id, 'reset-2')
+    assert.equal(saved?.reset?.status, 'processing')
+    assert.equal(saved?.reset?.error, undefined)
+    assert.equal(saved?.reset?.paymentHash, undefined)
   } finally {
     rmSync(dir, { recursive: true, force: true })
   }

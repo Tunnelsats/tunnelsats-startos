@@ -144,7 +144,7 @@ class TestDashboardReadModel(DashboardStateTestBase):
             "pendingOrder": {
                 "paymentHash": ORDER_HASH, "orderId": "order-123", "privateKey": order_priv,
                 "publicKey": order_pub, "targetNode": "cln", "serverId": "eu-de",
-                "duration": "3m", "createdAt": self.iso(self.now), "invoice": ORDER_INVOICE,
+                "duration": 3, "createdAt": self.iso(self.now), "invoice": ORDER_INVOICE,
             },
             "pendingRenewal": {
                 "paymentHash": RENEW_HASH, "renewalId": "renew-456",
@@ -597,7 +597,7 @@ class TestDashboardEndpoint(DashboardStateTestBase):
             "pendingOrder": {
                 "paymentHash": ORDER_HASH, "orderId": "order-1", "privateKey": order_priv,
                 "publicKey": order_pub, "targetNode": "lnd", "serverId": "eu-de",
-                "duration": "3m", "createdAt": self.iso(self.now), "invoice": ORDER_INVOICE,
+                "duration": 3, "createdAt": self.iso(self.now), "invoice": ORDER_INVOICE,
             },
         })
         csrf_headers = {
@@ -648,7 +648,7 @@ class TestDashboardEndpoint(DashboardStateTestBase):
             "buy": {
                 "id": intent_id,
                 "kind": "buy",
-                "status": "completed",
+                "status": "succeeded",
                 "createdAt": resp["intent"]["createdAt"],
                 "updatedAt": self.iso(self.now + timedelta(seconds=2)),
             }
@@ -656,7 +656,7 @@ class TestDashboardEndpoint(DashboardStateTestBase):
         _, _, dash_body = self.get("/api/dashboard")
         dash = json.loads(dash_body)
         self.assertEqual(dash["intents"]["buy"]["id"], intent_id)
-        self.assertEqual(dash["intents"]["buy"]["status"], "completed")
+        self.assertEqual(dash["intents"]["buy"]["status"], "succeeded")
         self.assertEqual(forbidden_keys(dash), [])
 
         # Repeat within 30s is still rejected by per-kind cooldown even after completion
@@ -677,12 +677,12 @@ class TestDashboardEndpoint(DashboardStateTestBase):
                 now=t,
             )
             self.assertEqual(code, 202)
-            # Mark completed so the next submission 2 minutes later is not blocked as in-flight
+            # Mark succeeded so the next submission 2 minutes later is not blocked as in-flight
             self.write_json(bridge.INTENT_RESULTS_FILE_PATH, {
                 "reset": {
                     "id": res["intent"]["id"],
                     "kind": "reset",
-                    "status": "completed",
+                    "status": "succeeded",
                     "createdAt": res["intent"]["createdAt"],
                     "updatedAt": self.iso(t + timedelta(seconds=1)),
                 }
@@ -709,6 +709,68 @@ class TestDashboardEndpoint(DashboardStateTestBase):
         summary = bridge._intents_summary(now=self.now)
         self.assertEqual(summary["buy"]["status"], "failed")
         self.assertIn("timed out", summary["buy"]["error"])
+
+    def test_buy_slot_carries_configured_node_and_wire_format(self):
+        self.write_json(bridge.APP_CONFIG_PATH, {"enabled": False, "target-node": "cln"})
+        code, res = bridge.submit_dashboard_intent(
+            {"kind": "buy", "serverId": "eu-ch", "duration": "6m"}, now=self.now,
+        )
+        self.assertEqual(code, 202)
+        with open(bridge.INTENTS_FILE_PATH) as f:
+            slot = json.load(f)["buy"]
+        # The exact shape startos/fileModels/dashboardIntents.ts parses.
+        self.assertEqual(slot["kind"], "buy")
+        self.assertEqual(slot["serverId"], "eu-ch")
+        self.assertEqual(slot["duration"], "6m")
+        self.assertEqual(slot["targetNode"], "cln")
+        self.assertEqual(bridge._intents_summary(now=self.now)["buy"]["targetNode"], "cln")
+
+        # Durations stay strict on the wire: whole months are not accepted.
+        code, _ = bridge.submit_dashboard_intent(
+            {"kind": "renew", "duration": 3}, now=self.now,
+        )
+        self.assertEqual(code, 400)
+
+    def test_processing_intent_gets_grace_before_timing_out(self):
+        created = self.now - bridge.INTENT_TTL - timedelta(seconds=30)
+        self.write_json(bridge.INTENTS_FILE_PATH, {
+            "reset": {"id": "reset-1", "kind": "reset", "createdAt": self.iso(created)},
+        })
+        self.write_json(bridge.INTENT_RESULTS_FILE_PATH, {
+            "reset": {
+                "id": "reset-1", "kind": "reset", "status": "processing",
+                "createdAt": self.iso(created), "updatedAt": self.iso(created),
+            },
+        })
+        self.assertEqual(bridge._intents_summary(now=self.now)["reset"]["status"], "processing")
+        later = created + bridge.INTENT_TTL + bridge.INTENT_PROCESSING_GRACE
+        summary = bridge._intents_summary(now=later)["reset"]
+        self.assertEqual(summary["status"], "failed")
+        self.assertIn("timed out", summary["error"])
+
+    def test_any_payable_invoice_of_the_kind_is_reused(self):
+        """One payment slot per kind, as the runner's reuseActive: a Buy for
+        another server or duration returns the payable order instead of
+        queueing a second one."""
+        _, pub, _ = self.configure("lnd")
+        order_priv, order_pub = new_keypair()
+        self.write_json(bridge.META_FILE_PATH, {
+            "publicKey": pub,
+            "pendingOrder": {
+                "paymentHash": ORDER_HASH, "orderId": "order-1", "privateKey": order_priv,
+                "publicKey": order_pub, "targetNode": "lnd", "serverId": "eu-de",
+                "duration": 3, "createdAt": self.iso(self.now), "invoice": ORDER_INVOICE,
+            },
+        })
+        code, res = bridge.submit_dashboard_intent(
+            {"kind": "buy", "serverId": "us-west", "duration": "12m"}, now=self.now,
+        )
+        self.assertEqual(code, 200)
+        self.assertEqual(res["status"], "reused")
+        self.assertEqual(res["pending"]["serverId"], "eu-de")
+        self.assertEqual(res["pending"]["duration"], "3m")
+        self.assertEqual(forbidden_keys(res), [])
+        self.assertFalse(os.path.exists(bridge.INTENTS_FILE_PATH))
 
 
 if __name__ == "__main__":

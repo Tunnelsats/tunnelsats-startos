@@ -2,6 +2,7 @@ import { T } from '@start9labs/start-sdk'
 import {
   dashboardIntentResults,
   dashboardIntents,
+  intentDurationMonths,
   type DashboardBuyIntent,
   type DashboardIntentKind,
   type DashboardIntentResult,
@@ -10,14 +11,65 @@ import {
   type DashboardRenewIntent,
   type DashboardResetIntent,
 } from './fileModels/dashboardIntents'
-import { startPurchase } from './actions/buySubscription'
-import { startRenewal } from './actions/renewSubscription'
+import { configJson } from './fileModels/config.json'
+import { startPurchase, type PurchaseInput } from './actions/buySubscription'
+import { startRenewal, type RenewalInput } from './actions/renewSubscription'
 import { startBandwidthReset } from './actions/resetBandwidth'
 import type { TargetNode } from './settlement'
 
-export const INTENT_TTL_MS = 10 * 60 * 1000
+/**
+ * Must equal INTENT_TTL in bridge.py: past it the dashboard reports the
+ * request as timed out, so the runner must not create an invoice for it.
+ */
+export const INTENT_TTL_MS = 120 * 1000
 const INTENT_ORDER: readonly DashboardIntentKind[] = ['renew', 'reset', 'buy']
 const HEX64_RE = /\b[0-9a-fA-F]{64}\b/g
+
+/**
+ * The action-core input for a dashboard Buy. Dashboard intents always reuse
+ * a still-payable order (single slot per kind).
+ */
+export function purchaseInputFromIntent(
+  intent: DashboardBuyIntent,
+  configuredNode: TargetNode | undefined,
+): PurchaseInput {
+  return {
+    targetNode: intent.targetNode ?? configuredNode ?? 'lnd',
+    serverRegion: intent.serverId,
+    duration: intentDurationMonths(intent.duration),
+    reuseActive: true,
+  }
+}
+
+/** The action-core input for a dashboard Renew. */
+export function renewalInputFromIntent(
+  intent: DashboardRenewIntent,
+): RenewalInput {
+  return {
+    duration: intentDurationMonths(intent.duration),
+    reuseActive: true,
+  }
+}
+
+/**
+ * The merge() patch that replaces the result slot of `kind`. merge() is a
+ * deep merge, so every optional field is cleared explicitly: an earlier
+ * result's error or payment hash must not carry over to this one.
+ */
+export function resultPatch(
+  kind: DashboardIntentKind,
+  result: DashboardIntentResult,
+): Partial<DashboardIntentResultsFile> {
+  return {
+    [kind]: {
+      targetNode: undefined,
+      paymentHash: undefined,
+      reused: undefined,
+      error: undefined,
+      ...result,
+    },
+  }
+}
 
 export function sanitizeIntentError(err: unknown): string {
   const raw =
@@ -169,16 +221,16 @@ export function processDashboardIntents(
         .once()
         .catch(() => null),
     writeResult: (kind, result) =>
-      dashboardIntentResults.merge(effects, {
-        [kind]: result,
-      }),
+      dashboardIntentResults.merge(effects, resultPatch(kind, result)),
     runBuy: async (intent) => {
-      const res = await startPurchase(effects, {
-        targetNode: intent.targetNode,
-        serverRegion: intent.serverId,
-        duration: intent.duration,
-        reuseActive: true,
-      })
+      const config = await configJson
+        .read()
+        .once()
+        .catch(() => null)
+      const res = await startPurchase(
+        effects,
+        purchaseInputFromIntent(intent, config?.['target-node']),
+      )
       if (res.kind === 'already-paid') {
         return {
           paymentHash: res.paymentHash,
@@ -193,10 +245,7 @@ export function processDashboardIntents(
       }
     },
     runRenew: async (intent) => {
-      const res = await startRenewal(effects, {
-        duration: intent.duration,
-        reuseActive: true,
-      })
+      const res = await startRenewal(effects, renewalInputFromIntent(intent))
       if (res.kind === 'already-paid') {
         return {
           paymentHash: res.paymentHash,
