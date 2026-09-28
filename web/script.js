@@ -89,10 +89,21 @@ function bandwidthPercent(m) {
   return Math.min(100, Math.max(0, (used / limit) * 100))
 }
 
+function isPaidPendingError(err) {
+  if (!err) return false
+  return /payment was received|renewal is paid|bandwidth reset was applied|bandwidth reset failed|claim|Provisioning failed|stored private key/i.test(
+    String(err),
+  )
+}
+
+function nextRetrySuffix(pending) {
+  const at = pending && formatTime(pending.nextAttemptAt)
+  return at ? ` Next try: ${at}.` : ''
+}
+
 function retryText(pending) {
   if (!pending || !pending.lastError) return ''
-  const at = formatTime(pending.nextAttemptAt)
-  return ` Last check failed: ${pending.lastError}${at ? ` Next try: ${at}.` : ''}`
+  return ` Last check failed: ${pending.lastError}${nextRetrySuffix(pending)}`
 }
 
 /**
@@ -109,29 +120,56 @@ function buildNotices(m) {
   const target = nodeLabel(m.targetNode)
 
   if (pending.order) {
-    const node = nodeLabel(pending.order.targetNode)
-    notices.push({
-      level: 'info',
-      title: 'Payment pending',
-      text: `Accept the Pay Invoice task on ${node}. TunnelSats sets up the tunnel by itself once the payment settles.${retryText(pending.order)}`,
-    })
+    if (isPaidPendingError(pending.order.lastError)) {
+      notices.push({
+        level: 'warning',
+        title: 'Tunnel provisioning pending',
+        text: `${pending.order.lastError}${nextRetrySuffix(pending.order)}`,
+      })
+    } else {
+      const node = nodeLabel(pending.order.targetNode)
+      notices.push({
+        level: 'info',
+        title: 'Payment pending',
+        text: `Accept the Pay Invoice task on ${node}. TunnelSats sets up the tunnel by itself once the payment settles.${retryText(pending.order)}`,
+      })
+    }
   }
   if (pending.renewal) {
-    const node = nodeLabel(pending.renewal.targetNode)
-    notices.push({
-      level: 'info',
-      title: 'Renewal payment pending',
-      text: `Accept the Pay Invoice task on ${node}. The new expiry is confirmed automatically once the payment settles.${retryText(pending.renewal)}`,
-    })
+    if (isPaidPendingError(pending.renewal.lastError)) {
+      notices.push({
+        level: 'warning',
+        title: 'Renewal confirmation pending',
+        text: `${pending.renewal.lastError}${nextRetrySuffix(pending.renewal)}`,
+      })
+    } else {
+      const node = nodeLabel(pending.renewal.targetNode)
+      notices.push({
+        level: 'info',
+        title: 'Renewal payment pending',
+        text: `Accept the Pay Invoice task on ${node}. The new expiry is confirmed automatically once the payment settles.${retryText(pending.renewal)}`,
+      })
+    }
   }
   if (pending.reset) {
-    const node = nodeLabel(pending.reset.targetNode)
-    const expires = formatTime(pending.reset.expiresAt)
-    notices.push({
-      level: 'info',
-      title: 'Bandwidth reset payment pending',
-      text: `Accept the Pay Invoice task on ${node}.${expires ? ` The invoice expires ${expires}.` : ''}${retryText(pending.reset)}`,
-    })
+    if (isPaidPendingError(pending.reset.lastError)) {
+      const failed = /bandwidth reset failed/i.test(pending.reset.lastError)
+      notices.push({
+        level: failed ? 'error' : 'warning',
+        title: failed
+          ? 'Bandwidth reset failed'
+          : 'Bandwidth reset confirmation pending',
+        text: `${pending.reset.lastError}${failed ? '' : nextRetrySuffix(pending.reset)}`,
+      })
+    } else {
+      const node = nodeLabel(pending.reset.targetNode)
+      const expires = formatTime(pending.reset.expiresAt)
+      notices.push({
+        level: 'info',
+        title: 'Bandwidth reset payment pending',
+        text: `Accept the Pay Invoice task on ${node}.${expires ? ` The invoice expires ${expires}.` : ''}${retryText(pending.reset)}`,
+      })
+    }
   }
 
   if (handoff && handoff.pendingOff && handoff.pendingOff.length) {
@@ -533,19 +571,10 @@ function bindEvents() {
       copyText(copier.getAttribute('data-copy'), copier)
       return
     }
-    // Light dismiss for browsers without <dialog closedby>: a click on the
-    // backdrop targets the dialog element itself, outside its content box.
-    if (
-      target.tagName === 'DIALOG' &&
-      !('closedBy' in HTMLDialogElement.prototype)
-    ) {
-      const rect = target.getBoundingClientRect()
-      const inside =
-        rect.top <= event.clientY &&
-        event.clientY <= rect.bottom &&
-        rect.left <= event.clientX &&
-        event.clientX <= rect.right
-      if (!inside) target.close()
+    // Light dismiss: .app-modal fills the viewport around .modal-dialog-inner,
+    // so a click on the backdrop targets the <dialog> element directly.
+    if (target.tagName === 'DIALOG' && target.open) {
+      target.close()
     }
   })
 

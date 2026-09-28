@@ -329,6 +329,39 @@ test('a pending order on Eclair asks for the Pay Invoice task on Eclair', () => 
   )
   // Nothing to suggest while the order is being paid.
   assert.deepEqual([...h.run(`suggestedActions(${JSON.stringify(m)})`)], [])
+
+  // Post-payment settlement errors must not ask the operator to pay again.
+  const paidFailed = model({
+    pending: {
+      order: {
+        targetNode: 'eclair',
+        lastError:
+          'HTTP 500 from the TunnelSats API: Provisioning failed. Please retry the claim.',
+        nextAttemptAt: null,
+      },
+      renewal: {
+        targetNode: 'eclair',
+        lastError:
+          'The renewal is paid, but its new expiry could not be confirmed yet',
+        nextAttemptAt: null,
+      },
+      reset: {
+        targetNode: 'eclair',
+        lastError:
+          'The payment was received, but the bandwidth reset failed. Contact TunnelSats support with the payment hash from the Reset Bandwidth action.',
+        nextAttemptAt: null,
+      },
+    },
+  })
+  const paidNotices = h.run<Json[]>(
+    `buildNotices(${JSON.stringify(paidFailed)})`,
+  )
+  assert.deepEqual(titles(paidNotices), [
+    'Tunnel provisioning pending',
+    'Renewal confirmation pending',
+    'Bandwidth reset failed',
+  ])
+  assert.doesNotMatch(texts(paidNotices), /Accept the Pay Invoice task/)
 })
 
 test('a handoff waiting on LND says so in the notice and the connection card', () => {
