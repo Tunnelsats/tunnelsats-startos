@@ -1862,7 +1862,6 @@ INVOICE_DEFAULT_TTL = timedelta(hours=1)
 INTENT_KINDS = ("buy", "renew", "reset")
 INTENT_DURATIONS = ("1m", "3m", "6m", "12m")
 INTENT_TTL = timedelta(seconds=120)
-INTENT_PROCESSING_GRACE = timedelta(minutes=3)
 INTENT_RATE_LIMIT_WINDOW = timedelta(seconds=30)
 INTENT_HOURLY_WINDOW = timedelta(hours=1)
 INTENT_HOURLY_CAP = 5
@@ -2118,10 +2117,11 @@ def _intent_slot_summary(kind, req_slot, res_slot, now):
             updated_at = _dashboard_time(res_slot.get("updatedAt")) or created_at
             if status == "failed":
                 error = _dashboard_error_text(res_slot.get("error")) or "The request failed."
-    # The runner refuses intents older than INTENT_TTL; one it picked up gets
-    # INTENT_PROCESSING_GRACE more to finish its upstream call and task.
-    deadline = INTENT_TTL + (INTENT_PROCESSING_GRACE if status == "processing" else timedelta(0))
-    if status in ("pending", "processing") and now - created_dt >= deadline:
+    # The runner refuses intents older than INTENT_TTL, so one it never
+    # picked up has failed. One it picked up stays "processing" until the
+    # runner records the outcome: the runner re-runs a processing slot after
+    # a restart and then records it, so it never stays processing for good.
+    if status == "pending" and now - created_dt >= INTENT_TTL:
         status = "failed"
         error = "The dashboard request timed out before StartOS processed it. Please try again."
 
@@ -2174,22 +2174,10 @@ def _current_configured_pubkey():
     return pubkey
 
 
-def _reusable_pending_for_intent(meta, kind, public_key, now):
-    """The summary of a still-payable invoice of this kind, or None. Any such
-    invoice is reused whatever its server or duration: the runner calls the
-    shared action core with reuseActive, so there is one payment slot per
-    kind and the dashboard cannot pile up orders."""
-    pending_key = {"buy": "pendingOrder", "renew": "pendingRenewal", "reset": "pendingReset"}[kind]
-    summary = _pending_summary(meta, pending_key, public_key, now=now)
-    if summary is None or not summary.get("invoice") or summary.get("paymentReceived"):
-        return None
-    return summary
-
-
 def submit_dashboard_intent(payload, now=None):
-    """Validates a POST /api/intents request, reuses a still-payable invoice
-    of the same kind, enforces rate limits, and writes the single-writer
-    dashboard-intents.json slot. Returns (http_status, response_dict)."""
+    """Validates a POST /api/intents request, enforces rate limits, and
+    writes the single-writer dashboard-intents.json slot. Returns
+    (http_status, response_dict)."""
     if not isinstance(payload, dict):
         return 400, {"error": "Request body must be a JSON object"}
     kind = payload.get("kind")
@@ -2221,11 +2209,11 @@ def submit_dashboard_intent(payload, now=None):
         action_label = "renew" if kind == "renew" else "reset bandwidth"
         return 409, {"error": f"Cannot {action_label} before a WireGuard configuration is installed."}
 
+    # Whether a payable invoice of this kind is reused, refused as a
+    # conflicting selection or replaced is decided in one place: the shared
+    # action core the runner calls (keepPayable). Re-submitting an identical
+    # request therefore also raises a Pay Invoice task that failed to raise.
     now = now or datetime.now(timezone.utc)
-    meta = read_meta()
-    reusable = _reusable_pending_for_intent(meta, kind, public_key, now)
-    if reusable is not None:
-        return 200, {"status": "reused", "kind": kind, "pending": reusable}
 
     import secrets
     with intents_lock():

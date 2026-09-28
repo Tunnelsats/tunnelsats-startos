@@ -39,10 +39,23 @@ export interface PurchaseInput {
   serverRegion: string
   duration: number
   /**
-   * When true (dashboard intents), any still-payable pendingOrder is reused
-   * regardless of parameters so a single active order slot is enforced.
+   * Dashboard intents: never replace a still-payable order. An identical
+   * request reuses it (and raises its Pay Invoice task again); a different
+   * one fails with PendingPaymentConflictError. The Buy action leaves this
+   * unset: the operator may replace a payable order.
    */
-  reuseActive?: boolean
+  keepPayable?: boolean
+}
+
+/**
+ * A dashboard request that would replace a still-payable invoice of the same
+ * kind. Only an operator-authenticated StartOS action may do that.
+ */
+export class PendingPaymentConflictError extends Error {
+  constructor(message: string) {
+    super(message)
+    this.name = 'PendingPaymentConflictError'
+  }
 }
 
 export interface PurchaseOps {
@@ -86,11 +99,24 @@ export type PurchaseRunResult =
       targetNode: TargetNode
     }
 
-export function reusablePendingOrder(
-  pending: PendingOrderRecord | null | undefined,
-  input: PurchaseInput,
+/**
+ * The expiry (epoch ms) of an unpaid invoice that can still be paid, or
+ * null. Without a stored expiry the invoice counts as valid for
+ * INVOICE_TTL_MS after createdAt.
+ */
+export function payableUntil(
+  pending:
+    | {
+        paymentHash?: string
+        invoice?: string
+        paymentReceivedFor?: string
+        createdAt: string
+        expiresAt?: string
+      }
+    | null
+    | undefined,
   now: Date,
-): (PendingOrderRecord & { invoice: string; expiresAt: string }) | null {
+): number | null {
   if (!pending || !pending.paymentHash || !pending.invoice) return null
   if (pending.paymentReceivedFor === pending.paymentHash) return null
   const createdMs = Date.parse(pending.createdAt)
@@ -100,11 +126,21 @@ export function reusablePendingOrder(
       ? createdMs + INVOICE_TTL_MS
       : NaN
   if (!Number.isFinite(expiresMs) || expiresMs <= now.getTime()) return null
+  return expiresMs
+}
+
+/** A payable pending order for exactly this server, plan and node, or null. */
+export function reusablePendingOrder(
+  pending: PendingOrderRecord | null | undefined,
+  input: PurchaseInput,
+  now: Date,
+): (PendingOrderRecord & { invoice: string; expiresAt: string }) | null {
+  const expiresMs = payableUntil(pending, now)
+  if (!pending || expiresMs === null || !pending.invoice) return null
   if (
-    !input.reuseActive &&
-    (pending.serverId !== input.serverRegion ||
-      pending.duration !== input.duration ||
-      pending.targetNode !== input.targetNode)
+    pending.serverId !== input.serverRegion ||
+    pending.duration !== input.duration ||
+    pending.targetNode !== input.targetNode
   ) {
     return null
   }
@@ -139,8 +175,9 @@ export function runPurchase(
     if (
       pending &&
       pending.paymentReceivedFor === pending.paymentHash &&
-      input.reuseActive
+      input.keepPayable
     ) {
+      // Paid, not claimed yet: the settlement watcher finishes it.
       return {
         kind: 'already-paid',
         paymentHash: pending.paymentHash,
@@ -153,6 +190,8 @@ export function runPurchase(
     if (reusable) {
       const amountSats =
         reusable.amountSats ?? bolt11AmountSats(reusable.invoice) ?? 0
+      // Raised again under the same replay ID: recovers a task that failed
+      // to raise, and is a no-op for one that exists.
       await ops.raiseTask({
         invoice: reusable.invoice,
         paymentHash: reusable.paymentHash,
@@ -170,6 +209,12 @@ export function runPurchase(
         },
         targetNode: reusable.targetNode,
       }
+    }
+    const otherPayableUntil = payableUntil(pending, now)
+    if (input.keepPayable && pending && otherPayableUntil !== null) {
+      throw new PendingPaymentConflictError(
+        `An unpaid subscription invoice (${pending.serverId}, ${pending.duration ?? '?'} month(s), ${pending.targetNode}) is still payable until ${new Date(otherPayableUntil).toISOString()}. Pay it, or replace it with the Buy Subscription action in StartOS.`,
+      )
     }
 
     const keypair = ops.generateKeypair()

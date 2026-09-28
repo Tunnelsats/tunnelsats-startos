@@ -589,7 +589,10 @@ class TestDashboardEndpoint(DashboardStateTestBase):
                 self.assertEqual(status, 409)
                 self.assertIn("before a WireGuard configuration is installed", json.loads(body)["error"])
 
-    def test_post_intents_reuses_matching_payable_invoice(self):
+    def test_post_intents_queues_even_with_a_payable_invoice(self):
+        """Reuse, conflict or replacement is decided by the shared action core
+        in the runner; the bridge queues the request, so an identical
+        request also re-raises a Pay Invoice task that failed to raise."""
         _, pub, _ = self.configure("lnd")
         order_priv, order_pub = new_keypair()
         self.write_json(bridge.META_FILE_PATH, {
@@ -609,12 +612,16 @@ class TestDashboardEndpoint(DashboardStateTestBase):
             body=json.dumps({"kind": "buy", "serverId": "eu-de", "duration": "3m"}).encode(),
             headers=csrf_headers,
         )
-        self.assertEqual(status, 200)
+        self.assertEqual(status, 202)
         self.assert_security_headers(headers)
         data = json.loads(body)
-        self.assertEqual(data["status"], "reused")
-        self.assertEqual(data["pending"]["invoice"], ORDER_INVOICE)
-        self.assertFalse(os.path.exists(bridge.INTENTS_FILE_PATH))
+        self.assertEqual(data["status"], "accepted")
+        self.assertEqual(forbidden_keys(data), [])
+        with open(bridge.INTENTS_FILE_PATH) as f:
+            self.assertEqual(json.load(f)["buy"]["serverId"], "eu-de")
+        # The payable invoice itself stays visible for scan/copy.
+        _, _, dash_body = self.get("/api/dashboard")
+        self.assertEqual(json.loads(dash_body)["pending"]["order"]["invoice"], ORDER_INVOICE)
 
     def test_post_intents_writes_slot_and_rate_limits_repeats(self):
         _, pub, _ = self.configure("lnd")
@@ -731,8 +738,11 @@ class TestDashboardEndpoint(DashboardStateTestBase):
         )
         self.assertEqual(code, 400)
 
-    def test_processing_intent_gets_grace_before_timing_out(self):
-        created = self.now - bridge.INTENT_TTL - timedelta(seconds=30)
+    def test_processing_intent_is_not_timed_out_by_the_bridge(self):
+        """Only the runner records the outcome of a request it picked up (it
+        re-runs a processing slot after a restart), so the bridge never
+        reports a processing request as failed while its action may run."""
+        created = self.now - bridge.INTENT_TTL - timedelta(hours=1)
         self.write_json(bridge.INTENTS_FILE_PATH, {
             "reset": {"id": "reset-1", "kind": "reset", "createdAt": self.iso(created)},
         })
@@ -743,35 +753,6 @@ class TestDashboardEndpoint(DashboardStateTestBase):
             },
         })
         self.assertEqual(bridge._intents_summary(now=self.now)["reset"]["status"], "processing")
-        later = created + bridge.INTENT_TTL + bridge.INTENT_PROCESSING_GRACE
-        summary = bridge._intents_summary(now=later)["reset"]
-        self.assertEqual(summary["status"], "failed")
-        self.assertIn("timed out", summary["error"])
-
-    def test_any_payable_invoice_of_the_kind_is_reused(self):
-        """One payment slot per kind, as the runner's reuseActive: a Buy for
-        another server or duration returns the payable order instead of
-        queueing a second one."""
-        _, pub, _ = self.configure("lnd")
-        order_priv, order_pub = new_keypair()
-        self.write_json(bridge.META_FILE_PATH, {
-            "publicKey": pub,
-            "pendingOrder": {
-                "paymentHash": ORDER_HASH, "orderId": "order-1", "privateKey": order_priv,
-                "publicKey": order_pub, "targetNode": "lnd", "serverId": "eu-de",
-                "duration": 3, "createdAt": self.iso(self.now), "invoice": ORDER_INVOICE,
-            },
-        })
-        code, res = bridge.submit_dashboard_intent(
-            {"kind": "buy", "serverId": "us-west", "duration": "12m"}, now=self.now,
-        )
-        self.assertEqual(code, 200)
-        self.assertEqual(res["status"], "reused")
-        self.assertEqual(res["pending"]["serverId"], "eu-de")
-        self.assertEqual(res["pending"]["duration"], "3m")
-        self.assertEqual(forbidden_keys(res), [])
-        self.assertFalse(os.path.exists(bridge.INTENTS_FILE_PATH))
-
 
 if __name__ == "__main__":
     unittest.main()

@@ -26,8 +26,8 @@ const INTENT_ORDER: readonly DashboardIntentKind[] = ['renew', 'reset', 'buy']
 const HEX64_RE = /\b[0-9a-fA-F]{64}\b/g
 
 /**
- * The action-core input for a dashboard Buy. Dashboard intents always reuse
- * a still-payable order (single slot per kind).
+ * The action-core input for a dashboard Buy. Dashboard intents never
+ * replace a still-payable order (see PurchaseInput.keepPayable).
  */
 export function purchaseInputFromIntent(
   intent: DashboardBuyIntent,
@@ -37,7 +37,7 @@ export function purchaseInputFromIntent(
     targetNode: intent.targetNode ?? configuredNode ?? 'lnd',
     serverRegion: intent.serverId,
     duration: intentDurationMonths(intent.duration),
-    reuseActive: true,
+    keepPayable: true,
   }
 }
 
@@ -47,7 +47,7 @@ export function renewalInputFromIntent(
 ): RenewalInput {
   return {
     duration: intentDurationMonths(intent.duration),
-    reuseActive: true,
+    keepPayable: true,
   }
 }
 

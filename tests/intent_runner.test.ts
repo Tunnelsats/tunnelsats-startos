@@ -8,6 +8,8 @@ import { FileHelper } from '@start9labs/start-sdk'
 import { bolt11AmountSats } from '../startos/apiClient'
 import {
   INVOICE_TTL_MS,
+  PendingPaymentConflictError,
+  payableUntil,
   reusablePendingOrder,
   runPurchase,
   startPurchase,
@@ -84,7 +86,7 @@ test('reusablePendingOrder reuses an unpaid unexpired order', () => {
     expiresAt: inMs(55 * 60_000),
   }
 
-  // Exact match on StartOS action (reuseActive omitted) reuses the invoice.
+  // An identical request reuses the invoice.
   const reusedSame = reusablePendingOrder(
     pending,
     { targetNode: 'lnd', serverRegion: 'eu-de', duration: 3 },
@@ -93,58 +95,40 @@ test('reusablePendingOrder reuses an unpaid unexpired order', () => {
   assert.ok(reusedSame)
   assert.equal(reusedSame.paymentHash, ORDER_HASH)
 
-  // Different plan on StartOS action (reuseActive omitted) does not reuse.
-  assert.equal(
-    reusablePendingOrder(
-      pending,
-      { targetNode: 'lnd', serverRegion: 'eu-de', duration: 12 },
-      NOW,
-    ),
-    null,
-  )
-
-  // Dashboard intent (reuseActive: true) reuses any active unpaid order so a
-  // second tab cannot overwrite the keypair of an order being paid.
-  const reusedIntent = reusablePendingOrder(
-    pending,
+  // A different plan, server or node is never reused, dashboard or not.
+  for (const input of [
+    { targetNode: 'lnd' as const, serverRegion: 'eu-de', duration: 12 },
+    { targetNode: 'lnd' as const, serverRegion: 'us-west', duration: 3 },
     {
-      targetNode: 'cln',
-      serverRegion: 'us-west',
-      duration: 12,
-      reuseActive: true,
+      targetNode: 'cln' as const,
+      serverRegion: 'eu-de',
+      duration: 3,
+      keepPayable: true,
     },
-    NOW,
-  )
-  assert.ok(reusedIntent)
-  assert.equal(reusedIntent.paymentHash, ORDER_HASH)
+  ]) {
+    assert.equal(reusablePendingOrder(pending, input, NOW), null)
+  }
 
   // Paid or expired orders are not reusable as unpaid invoices.
+  const same = {
+    targetNode: 'lnd' as const,
+    serverRegion: 'eu-de',
+    duration: 3,
+  }
   assert.equal(
     reusablePendingOrder(
       { ...pending, paymentReceivedFor: ORDER_HASH },
-      {
-        targetNode: 'lnd',
-        serverRegion: 'eu-de',
-        duration: 3,
-        reuseActive: true,
-      },
+      same,
       NOW,
     ),
     null,
   )
   assert.equal(
-    reusablePendingOrder(
-      { ...pending, expiresAt: inMs(-1) },
-      {
-        targetNode: 'lnd',
-        serverRegion: 'eu-de',
-        duration: 3,
-        reuseActive: true,
-      },
-      NOW,
-    ),
+    reusablePendingOrder({ ...pending, expiresAt: inMs(-1) }, same, NOW),
     null,
   )
+  assert.equal(payableUntil(pending, NOW), Date.parse(inMs(55 * 60_000)))
+  assert.equal(payableUntil({ ...pending, expiresAt: inMs(-1) }, NOW), null)
 })
 
 test('runPurchase creates, records, and raises a task, then reuses while payable', async () => {
@@ -194,14 +178,14 @@ test('runPurchase creates, records, and raises a task, then reuses while payable
   assert.equal(state.pending?.expiresAt, inMs(INVOICE_TTL_MS))
   assert.equal(raised.length, 1)
 
-  // Calling again via dashboard intent (reuseActive: true) reuses the invoice
-  // and keeps kp1.privateKey untouched.
+  // A dashboard intent for the same selection reuses the invoice, raises its
+  // task again (recovering a task that failed to raise) and keeps the key.
   const second = await runPurchase(
     {
-      targetNode: 'cln',
-      serverRegion: 'us-west',
-      duration: 12,
-      reuseActive: true,
+      targetNode: 'lnd',
+      serverRegion: 'eu-de',
+      duration: 3,
+      keepPayable: true,
     },
     ops,
   )
@@ -209,6 +193,27 @@ test('runPurchase creates, records, and raises a task, then reuses while payable
   assert.equal(createCalls, 1)
   assert.equal(state.pending?.privateKey, kp1.privateKey)
   assert.equal(raised.length, 2)
+
+  // A dashboard intent for a different selection never replaces a payable
+  // order: it fails with a conflict and nothing is created or raised.
+  await assert.rejects(
+    runPurchase(
+      {
+        targetNode: 'lnd',
+        serverRegion: 'us-west',
+        duration: 12,
+        keepPayable: true,
+      },
+      ops,
+    ),
+    (e: unknown) =>
+      e instanceof PendingPaymentConflictError &&
+      /eu-de, 3 month\(s\), lnd/.test(e.message) &&
+      /Buy Subscription action/.test(e.message),
+  )
+  assert.equal(createCalls, 1)
+  assert.equal(raised.length, 2)
+  assert.equal(state.pending?.privateKey, kp1.privateKey)
 
   // Calling via StartOS action with a different plan replaces the unpaid order
   // and queues the old pay task for clearing.
@@ -231,7 +236,7 @@ test('runPurchase creates, records, and raises a task, then reuses while payable
       targetNode: 'lnd',
       serverRegion: 'eu-de',
       duration: 1,
-      reuseActive: true,
+      keepPayable: true,
     },
     ops,
   )
@@ -298,18 +303,33 @@ test('runRenewal creates, records, and reuses a payable renewal invoice', async 
   assert.equal(state.pending?.publicKey, pub)
   assert.equal(state.pending?.targetNode, 'cln')
 
-  // Re-running with reuseActive: true reuses the active renewal invoice.
-  const second = await runRenewal({ duration: 6, reuseActive: true }, ops)
+  // The same plan from the dashboard reuses the renewal and raises its task.
+  const second = await runRenewal({ duration: 1, keepPayable: true }, ops)
   assert.equal(second.kind, 'reused')
   assert.equal(renewCalls, 1)
   assert.equal(raised.length, 2)
 
-  // Re-running reusablePendingRenewal for a different publicKey returns null.
+  // Another plan from the dashboard conflicts instead of replacing it.
+  await assert.rejects(
+    runRenewal({ duration: 6, keepPayable: true }, ops),
+    (e: unknown) =>
+      e instanceof PendingPaymentConflictError &&
+      /Renew Subscription action/.test(e.message),
+  )
+  assert.equal(renewCalls, 1)
+  assert.equal(raised.length, 2)
+
+  // The Renew action (operator) may replace it.
+  const third = await runRenewal({ duration: 6 }, ops)
+  assert.equal(third.kind, 'created')
+  assert.equal(renewCalls, 2)
+
+  // A renewal for a different key is never reused.
   assert.equal(
     reusablePendingRenewal(
       state.pending,
       'other-key=',
-      { duration: 1, reuseActive: true },
+      { duration: 6, keepPayable: true },
       'cln',
       NOW,
     ),
@@ -664,9 +684,9 @@ test('bridge.py intents parse in the runner and its results read back in bridge.
       targetNode: 'cln',
       serverRegion: 'eu-ch',
       duration: 6,
-      reuseActive: true,
+      keepPayable: true,
     })
-    assert.deepEqual(inputs.renew, { duration: 3, reuseActive: true })
+    assert.deepEqual(inputs.renew, { duration: 3, keepPayable: true })
 
     const summary = JSON.parse(
       bridgePython(dir, 'print(json.dumps(bridge._intents_summary()))'),

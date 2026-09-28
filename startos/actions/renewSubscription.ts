@@ -16,7 +16,12 @@ import {
   runPaymentExclusive,
   type TargetNode,
 } from '../settlement'
-import { INVOICE_TTL_MS, VALID_DURATIONS } from './buySubscription'
+import {
+  INVOICE_TTL_MS,
+  PendingPaymentConflictError,
+  VALID_DURATIONS,
+  payableUntil,
+} from './buySubscription'
 import { resolvePayInvoice } from './resolvePayInvoice'
 
 export interface PendingRenewalRecord {
@@ -37,10 +42,12 @@ export interface PendingRenewalRecord {
 export interface RenewalInput {
   duration: number
   /**
-   * When true (dashboard intents), any still-payable pendingRenewal for the
-   * configured key is reused regardless of duration.
+   * Dashboard intents: never replace a still-payable renewal for this key.
+   * An identical request reuses it (and raises its task again); a different
+   * one fails with PendingPaymentConflictError. The Renew action leaves this
+   * unset: the operator may replace a payable renewal.
    */
-  reuseActive?: boolean
+  keepPayable?: boolean
 }
 
 export interface RenewalOps {
@@ -91,6 +98,7 @@ export type RenewalRunResult =
       targetNode: TargetNode
     }
 
+/** A payable renewal for this key, plan and node, or null. */
 export function reusablePendingRenewal(
   pending: PendingRenewalRecord | null | undefined,
   publicKey: string,
@@ -99,20 +107,10 @@ export function reusablePendingRenewal(
   now: Date,
 ): (PendingRenewalRecord & { invoice: string; expiresAt: string }) | null {
   if (!pending || pending.publicKey !== publicKey) return null
-  if (!pending.paymentHash || !pending.invoice) return null
-  if (pending.paymentReceivedFor === pending.paymentHash) return null
-  const createdMs = Date.parse(pending.createdAt)
-  const expiresMs = pending.expiresAt
-    ? Date.parse(pending.expiresAt)
-    : Number.isFinite(createdMs)
-      ? createdMs + INVOICE_TTL_MS
-      : NaN
-  if (!Number.isFinite(expiresMs) || expiresMs <= now.getTime()) return null
+  const expiresMs = payableUntil(pending, now)
+  if (expiresMs === null || !pending.invoice) return null
   const node = pending.targetNode ?? targetNode
-  if (
-    !input.reuseActive &&
-    (pending.duration !== input.duration || node !== targetNode)
-  ) {
+  if (pending.duration !== input.duration || node !== targetNode) {
     return null
   }
   return {
@@ -155,7 +153,7 @@ export async function runRenewal(
       pending &&
       pending.publicKey === publicKey &&
       pending.paymentReceivedFor === pending.paymentHash &&
-      input.reuseActive
+      input.keepPayable
     ) {
       return {
         kind: 'already-paid',
@@ -192,6 +190,15 @@ export async function runRenewal(
         },
         targetNode: node,
       }
+    }
+    const otherPayableUntil =
+      pending && pending.publicKey === publicKey
+        ? payableUntil(pending, now)
+        : null
+    if (input.keepPayable && pending && otherPayableUntil !== null) {
+      throw new PendingPaymentConflictError(
+        `An unpaid renewal invoice (${pending.duration ?? '?'} month(s), ${pending.targetNode ?? targetNode}) is still payable until ${new Date(otherPayableUntil).toISOString()}. Pay it, or replace it with the Renew Subscription action in StartOS.`,
+      )
     }
 
     const renewal = await ops.requestRenewal({

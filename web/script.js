@@ -1249,17 +1249,9 @@ async function submitIntent(actionKey) {
       render()
       return
     }
-    if (data.status === 'reused') {
-      localIntentFeedback = {
-        level: 'info',
-        text:
-          'An unpaid invoice of this kind is already active below. Pay it, or let it expire before requesting another.',
-      }
-    } else {
-      localIntentFeedback = {
-        level: 'info',
-        text: 'Request accepted; creating invoice and raising Pay Invoice task…',
-      }
+    localIntentFeedback = {
+      level: 'info',
+      text: 'Request accepted; preparing the invoice and raising the Pay Invoice task…',
     }
   } catch (error) {
     console.error('Intent submission failed:', error)
