@@ -159,7 +159,7 @@ def meta_lock():
         os.close(fd)
 
 META_LOCK_ACQUIRE_TIMEOUT = 30
-META_LOCK_LEASE = 60
+META_LOCK_LEASE = 30
 META_LOCK_EXIT_BUSY = 2
 META_LOCK_EXIT_LEASE = 3
 
@@ -169,12 +169,16 @@ def hold_meta_lock(stdin_fd, out, acquire_timeout=META_LOCK_ACQUIRE_TIMEOUT, lea
     until `stdin_fd` reaches EOF, which is how the owner releases it. An
     owner that dies closes the pipe, so its lock is released as well.
 
+    The owner keeps the hold alive by writing to stdin (a heartbeat); every
+    write renews the lease. A slow file operation therefore never loses the
+    lock while its owner is alive, but an owner that hangs (a blocked event
+    loop sends no heartbeat) cannot block bridge.py's writers forever.
+
     Returns 0 after a release, META_LOCK_EXIT_BUSY (after writing a JSON
     error, never "locked") when the lock stays taken for acquire_timeout
-    seconds, and META_LOCK_EXIT_LEASE when the owner neither released nor
-    closed the pipe within `lease` seconds: a leak guard, so a stuck owner
-    cannot block bridge.py's writers forever. Owners hold the lock for a
-    file read and write only, well inside the lease."""
+    seconds, and META_LOCK_EXIT_LEASE when the owner sent neither a
+    heartbeat nor EOF for `lease` seconds. The owner treats that exit as a
+    lost lock and fails its job."""
     fd = os.open(META_FILE_PATH + ".lock", os.O_RDWR | os.O_CREAT, 0o600)
     try:
         deadline = time.monotonic() + acquire_timeout
@@ -200,8 +204,10 @@ def hold_meta_lock(stdin_fd, out, acquire_timeout=META_LOCK_ACQUIRE_TIMEOUT, lea
             if remaining <= 0:
                 return META_LOCK_EXIT_LEASE
             readable, _, _ = select.select([stdin_fd], [], [], remaining)
-            if readable and not os.read(stdin_fd, 4096):
-                return 0
+            if readable:
+                if not os.read(stdin_fd, 4096):
+                    return 0
+                lease_end = time.monotonic() + lease
     finally:
         os.close(fd)
 

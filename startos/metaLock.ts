@@ -7,8 +7,10 @@
  * take the same lock through a holder process: `bridge.py meta-lock` takes
  * it, prints `locked`, and keeps it until its stdin is closed. The kernel
  * releases it when the holder exits, so a crashed runtime (whose end of the
- * pipe closes) never leaves it taken; the holder's lease is the last guard
- * against an owner that hangs without closing the pipe.
+ * pipe closes) never leaves it taken. While the job runs this side sends a
+ * heartbeat that renews the holder's lease: a slow write keeps the lock, an
+ * owner whose event loop hangs loses it. A job whose holder exited before
+ * the release fails with a MetaLockError instead of reporting success.
  *
  * Nothing that waits for bridge.py (an exec of `bridge.py settle`, an API
  * request, a task call) may run under the lock: bridge.py blocks on the
@@ -25,6 +27,8 @@ import { sdk } from './sdk'
 /** Longer than the holder's own acquire timeout, so it reports first. */
 export const META_LOCK_ACQUIRE_TIMEOUT_MS = 40_000
 export const META_LOCK_RELEASE_TIMEOUT_MS = 5_000
+/** Well inside bridge.py's META_LOCK_LEASE (30 s). */
+export const META_LOCK_HEARTBEAT_MS = 5_000
 
 /** Starts one `bridge.py meta-lock` holder with piped stdio. */
 export type HolderSpawner = () => Promise<ChildProcess>
@@ -41,6 +45,7 @@ export type MetaLock = <R>(job: () => Promise<R>) => Promise<R>
 export interface MetaLockOptions {
   acquireTimeoutMs?: number
   releaseTimeoutMs?: number
+  heartbeatMs?: number
 }
 
 export class MetaLockError extends Error {
@@ -140,10 +145,18 @@ async function holdWhile<R>(
     throw e
   }
 
+  const heartbeat = setInterval(
+    () => child.stdin?.write('\n'),
+    options.heartbeatMs ?? META_LOCK_HEARTBEAT_MS,
+  )
+  heartbeat.unref()
+  let lostEarly = false
+  let result: R
   try {
-    return await holding.run(true, job)
+    result = await holding.run(true, job)
   } finally {
-    const lostEarly = exited
+    clearInterval(heartbeat)
+    lostEarly = exited
     child.stdin?.end()
     const released = await Promise.race([
       exit.then(() => true),
@@ -152,13 +165,13 @@ async function holdWhile<R>(
       ),
     ])
     if (!released) child.kill('SIGKILL')
-    if (lostEarly) {
-      // Only the lease ends a hold early; the job was not serialized.
-      console.error(
-        'TunnelSats: the metadata lock holder exited before the write finished',
-      )
-    }
   }
+  if (lostEarly) {
+    // The hold ended early (lease or holder killed), so the job's writes
+    // may have interleaved with bridge.py: never report them as done.
+    throw new MetaLockError('the lock was lost before the write finished')
+  }
+  return result
 }
 
 /** A MetaLock whose holders come from `scope`. */

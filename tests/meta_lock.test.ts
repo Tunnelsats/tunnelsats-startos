@@ -126,6 +126,41 @@ test('withMetaLock gives up (and kills the holder) after the acquire timeout', a
   assert.notEqual(child?.signalCode ?? child?.exitCode ?? null, null)
 })
 
+test('a job whose holder exits before the release fails', async () => {
+  // A holder that locks and then goes away (lease expiry, killed).
+  const lock = createMetaLock((use) =>
+    use(async () =>
+      spawn(
+        'python3',
+        ['-c', 'import time; print("locked", flush=True); time.sleep(0.1)'],
+        { stdio: 'pipe' },
+      ),
+    ),
+  )
+  await assert.rejects(
+    lock(async () => {
+      await new Promise((r) => setTimeout(r, 500))
+      return 'written'
+    }),
+    (e: unknown) => e instanceof MetaLockError && /lost/.test(e.message),
+  )
+})
+
+test(
+  'heartbeats to the real holder keep the lock held until the release',
+  withDir(async (dir) => {
+    // Lease renewal itself is tested in test_meta_lock.py; here the holder
+    // takes several heartbeats and stays locked through a longer job.
+    const lock = createMetaLock(localScope(dir), { heartbeatMs: 50 })
+    const heldAtEnd = await lock(async () => {
+      await new Promise((r) => setTimeout(r, 300))
+      return !lockIsFree(dir)
+    })
+    assert.equal(heldAtEnd, true)
+    assert.equal(lockIsFree(dir), true)
+  }),
+)
+
 test(
   'a TypeScript record and a concurrent bridge.py writer never lose an update',
   withDir(async (dir) => {

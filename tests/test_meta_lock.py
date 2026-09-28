@@ -132,6 +132,33 @@ class TestHoldMetaLockTimeouts(MetaLockBase):
             os.close(w)
             out.close()
 
+    def test_heartbeats_renew_the_lease(self):
+        r, w = os.pipe()
+        out = tempfile.TemporaryFile("w+")
+        result = {}
+
+        def hold():
+            result["code"] = bridge.hold_meta_lock(r, out, acquire_timeout=1, lease=0.3)
+
+        t = threading.Thread(target=hold)
+        t.start()
+        try:
+            # Held well past one lease while heartbeats keep coming.
+            for _ in range(10):
+                time.sleep(0.1)
+                os.write(w, b"\n")
+            self.assertTrue(t.is_alive())
+            self.assertFalse(lock_is_free(self.lock_path))
+            # Silence ends the hold after one lease.
+            t.join(timeout=5)
+            self.assertEqual(result["code"], bridge.META_LOCK_EXIT_LEASE)
+            self.assertTrue(lock_is_free(self.lock_path))
+        finally:
+            t.join()
+            os.close(r)
+            os.close(w)
+            out.close()
+
     def test_waits_for_a_python_writer_then_locks(self):
         released = threading.Event()
 
