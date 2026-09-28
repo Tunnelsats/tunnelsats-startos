@@ -287,7 +287,7 @@ class TestOrderSettlement(SettlementTestBase):
         self.assertEqual(self.only(self.settle())["result"], "waiting")
         pending = self.read_meta()["pendingOrder"]
         self.assertNotIn("lastError", pending)
-        self.assertTrue(pending.get("paymentReceived"))
+        self.assertEqual(pending.get("paymentReceivedFor"), HASH)
 
     def test_failure_backs_off_without_calling_the_api(self):
         self.write_meta({"pendingOrder": self.pending_order(
@@ -299,12 +299,14 @@ class TestOrderSettlement(SettlementTestBase):
 
     def test_retry_after_backoff_clears_the_error_once_it_waits_again(self):
         self.write_meta({"pendingOrder": self.pending_order(
-            lastError="HTTP 500", nextAttemptAt=iso(NOW - timedelta(seconds=1)))})
+            lastError="HTTP 500", nextAttemptAt=iso(NOW - timedelta(seconds=1)),
+            paymentReceivedFor="d" * 64)})
         self.api.on("GET", f"/subscription/{HASH}", response({"status": "unpaid"}))
         self.assertEqual(self.only(self.settle())["result"], "waiting")
         pending = self.read_meta()["pendingOrder"]
         self.assertNotIn("lastError", pending)
         self.assertNotIn("nextAttemptAt", pending)
+        self.assertNotIn("paymentReceivedFor", pending)
 
     def test_api_errors_are_recorded_as_failures(self):
         self.write_meta({"pendingOrder": self.pending_order()})
@@ -316,7 +318,7 @@ class TestOrderSettlement(SettlementTestBase):
         self.assertIn("HTTP 500", outcome["message"])
         pending = self.read_meta()["pendingOrder"]
         self.assertIn("Provisioning failed", pending["lastError"])
-        self.assertTrue(pending.get("paymentReceived"))
+        self.assertEqual(pending.get("paymentReceivedFor"), HASH)
 
     def test_unpaid_order_expires_after_24_hours(self):
         self.write_meta({"pendingOrder": self.pending_order(createdAt=iso(NOW - timedelta(hours=25)))})

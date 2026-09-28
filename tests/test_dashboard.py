@@ -260,10 +260,31 @@ class TestDashboardReadModel(DashboardStateTestBase):
         self.assertIsNone(model["connection"]["vpnIp"])
         self.assertIsNone(model["bandwidth"]["usedGb"])
         self.assertEqual(model["pending"]["order"]["targetNode"], "lnd")
+        self.assertFalse(model["pending"]["order"]["paymentReceived"])
         self.assertIsNone(model["pending"]["renewal"])
         self.assertIsNone(model["handoff"])
         self.assertIsNone(model["notices"])
         self.assertNotIn(order_priv, json.dumps(model))
+
+        # When settlement marks the invoice as received, paymentReceived is True,
+        # but if a new Buy deep-merges a different paymentHash without clearing
+        # paymentReceivedFor, the new invoice must not appear paid.
+        self.write_json(bridge.META_FILE_PATH, {
+            "pendingOrder": {
+                "paymentHash": ORDER_HASH, "orderId": "o", "privateKey": order_priv,
+                "publicKey": order_pub, "targetNode": "lnd", "serverId": "us-east",
+                "createdAt": self.iso(self.now), "paymentReceivedFor": ORDER_HASH,
+            },
+        })
+        self.assertTrue(bridge.get_dashboard()["pending"]["order"]["paymentReceived"])
+        self.write_json(bridge.META_FILE_PATH, {
+            "pendingOrder": {
+                "paymentHash": "e" * 64, "orderId": "o2", "privateKey": order_priv,
+                "publicKey": order_pub, "targetNode": "lnd", "serverId": "us-east",
+                "createdAt": self.iso(self.now), "paymentReceivedFor": ORDER_HASH,
+            },
+        })
+        self.assertFalse(bridge.get_dashboard()["pending"]["order"]["paymentReceived"])
 
     def test_state_of_a_previous_key_is_not_shown(self):
         _, pub, _ = self.configure("lnd")

@@ -998,11 +998,21 @@ def _unpaid(kind, key, pending, state, now):
     return _outcome(kind, "waiting", "Waiting for the invoice to be paid.", pending["paymentHash"])
 
 
+def _mark_payment_received(key, pending, payment_hash):
+    """Records that payment_hash was paid or is processing. Keyed by
+    payment_hash so a replacement Buy/Renew/Reset that deep-merges over
+    meta[key] without clearing extra keys never inherits the old payment's
+    received state."""
+    if pending.get("paymentReceivedFor") != payment_hash:
+        pending["paymentReceivedFor"] = payment_hash
+        _update_pending(key, payment_hash, {"paymentReceivedFor": payment_hash})
+
+
 def _settle_order(pending, now):
     payment_hash = pending["paymentHash"]
     state = _payment_state(payment_hash)
-    if state in ("processing", "paid") and not pending.get("paymentReceived"):
-        _update_pending("pendingOrder", payment_hash, {"paymentReceived": True})
+    if state in ("processing", "paid"):
+        _mark_payment_received("pendingOrder", pending, payment_hash)
     if state == "processing":
         return _outcome("order", "waiting", "Payment received; the tunnel is being provisioned.", payment_hash)
     if state != "paid":
@@ -1026,8 +1036,8 @@ def _settle_order(pending, now):
 def _settle_renewal(pending, now):
     payment_hash = pending["paymentHash"]
     state = _payment_state(payment_hash)
-    if state in ("processing", "paid") and not pending.get("paymentReceived"):
-        _update_pending("pendingRenewal", payment_hash, {"paymentReceived": True})
+    if state in ("processing", "paid"):
+        _mark_payment_received("pendingRenewal", pending, payment_hash)
     if state == "processing":
         return _outcome("renewal", "waiting", "Payment received; the renewal is being applied.", payment_hash)
     if state != "paid":
@@ -1089,8 +1099,8 @@ def _settle_reset(pending, now):
     created = _parse_iso(pending.get("createdAt"))
     stale = created is not None and now - created >= PENDING_TTL
 
-    if state in ("processing", "paid", "failed") and not pending.get("paymentReceived"):
-        _update_pending("pendingReset", payment_hash, {"paymentReceived": True})
+    if state in ("processing", "paid", "failed"):
+        _mark_payment_received("pendingReset", pending, payment_hash)
     if state == "processing":
         return _outcome("reset", "waiting", "Payment received; the bandwidth reset is being applied.", payment_hash)
     if state in ("unpaid", "unknown"):
@@ -1147,8 +1157,15 @@ def _settle_one(kind, key, pending, now):
         _update_pending(key, payment_hash, {"lastError": message,
                                             "nextAttemptAt": _iso(now + SETTLE_RETRY_DELAY)})
         return _outcome(kind, "failed", message, payment_hash)
-    if outcome["result"] == "waiting" and ("lastError" in pending or "nextAttemptAt" in pending):
-        _update_pending(key, payment_hash, {"lastError": None, "nextAttemptAt": None})
+    if outcome["result"] == "waiting":
+        stale_fields = {}
+        if "lastError" in pending or "nextAttemptAt" in pending:
+            stale_fields["lastError"] = None
+            stale_fields["nextAttemptAt"] = None
+        if "paymentReceivedFor" in pending and pending.get("paymentReceivedFor") != payment_hash:
+            stale_fields["paymentReceivedFor"] = None
+        if stale_fields:
+            _update_pending(key, payment_hash, stale_fields)
     return outcome
 
 
@@ -1918,7 +1935,7 @@ def _pending_summary(meta, key, public_key=None):
     summary = {name: clean(pending.get(name)) for name, clean in _PENDING_SUMMARY_FIELDS[key].items()}
     summary["lastError"] = _dashboard_error_text(pending.get("lastError"), pending)
     summary["paymentReceived"] = bool(
-        pending.get("paymentReceived") is True
+        pending.get("paymentReceivedFor") == pending["paymentHash"]
         or (isinstance(pending.get("lastError"), str) and _PAID_ERROR_RE.search(pending["lastError"]))
     )
     return summary
