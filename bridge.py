@@ -21,6 +21,10 @@ DATA_DIR = os.getenv("DATA_DIR", "/data")
 CONFIG_PATH = os.path.join(DATA_DIR, "tunnelsatsv3.conf")
 APP_CONFIG_PATH = os.path.join(DATA_DIR, "config.json")
 META_FILE_PATH = os.path.join(DATA_DIR, "tunnelsats-meta.json")
+# Written by the TypeScript side (startos/fileModels); only read here, by the
+# dashboard read model (get_dashboard).
+HANDOFF_FILE_PATH = os.path.join(DATA_DIR, "vpn-handoff.json")
+NOTICES_FILE_PATH = os.path.join(DATA_DIR, "subscription-notices.json")
 TUNNELSATS_API_URL = "https://tunnelsats.com/api/public/v1"
 # Fields that only hold for the key they were confirmed for (see lazy_sync).
 CONFIRMED_META_FIELDS = ("expiresAt", "expirySource", "lastSync", "syncSuccess", "bandwidth_used_gb")
@@ -1397,6 +1401,23 @@ class DashboardHTTPRequestHandler(BaseHTTPRequestHandler):
             self.wfile.write(json.dumps({"csrf_token": get_csrf_token()}).encode("utf-8"))
             return
 
+        if path_only == "/api/dashboard":
+            # Read-only: never triggers a sync or any other outbound call.
+            if not self.is_trusted_request():
+                return
+            try:
+                body = json.dumps(get_dashboard()).encode("utf-8")
+            except Exception as e:
+                print(f"Dashboard read model failed: {e}", file=sys.stderr)
+                self.send_error(500, "Dashboard state unavailable")
+                return
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Cache-Control", "no-store")
+            self.end_headers()
+            self.wfile.write(body)
+            return
+
         web_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "web"))
         target_path = path_only.lstrip("/")
         if not target_path or target_path == "":
@@ -1581,6 +1602,8 @@ def get_target_details():
     # Map to StartOS service ID and default port
     if target in ("cln", "c-lightning"):
         hostname = "c-lightning.embassy"
+    elif target == "eclair":
+        hostname = "eclair.embassy"
     else:
         hostname = "lnd.embassy"
     return hostname, 9735
@@ -1786,6 +1809,184 @@ def get_status():
         "bandwidth_limit_gb": 100,
         "version": get_package_version(),
         "allow_ipv6": is_allow_ipv6(),
+    }
+
+# ─── Dashboard read model ────────────────────────────────────────────────────
+# GET /api/dashboard. The dashboard is reachable from the LAN without operator
+# authentication, so it only ever sees what this allow-list copies out of the
+# state files: never a private key, an invoice, the WireGuard configuration or
+# any field not named here. Every value is type-checked and bounded, so a
+# malformed or tampered file cannot pass other data through an allowed name.
+# Money and state changes stay with the StartOS actions; this is read-only.
+
+DASHBOARD_TEXT_LIMIT = 300
+BANDWIDTH_LIMIT_GB = 100
+HANDOFF_PACKAGE_IDS = ("lnd", "c-lightning", "eclair")
+NOTICE_KINDS = ("7d", "3d", "lapsed")
+
+
+def _dashboard_text(value, limit=DASHBOARD_TEXT_LIMIT):
+    if not isinstance(value, str) or not value.strip():
+        return None
+    value = value.strip()
+    return value if len(value) <= limit else value[:limit - 1] + "…"
+
+
+def _dashboard_short_text(value):
+    return _dashboard_text(value, 64)
+
+
+def _dashboard_time(value):
+    dt = _parse_iso(value)
+    return _iso(dt) if dt is not None else None
+
+
+def _dashboard_amount(value):
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return None
+    return value if math.isfinite(value) and value >= 0 else None
+
+
+def _dashboard_node(value):
+    return value if value in TARGET_NODES else None
+
+
+def _read_json_object(path):
+    try:
+        with open(path, "r") as f:
+            data = json.load(f)
+    except (OSError, ValueError):
+        return None
+    return data if isinstance(data, dict) else None
+
+
+def get_target_node():
+    """The configured target node; "lnd" when config.json is missing or holds
+    anything else (the same default as the TypeScript file model)."""
+    data = _read_json_object(APP_CONFIG_PATH) or {}
+    node = data.get("target-node")
+    return node if node in TARGET_NODES else "lnd"
+
+
+# Per pending payment: the fields the dashboard may see, each with its
+# sanitizer. paymentHash, privateKey, publicKey, invoice and the order,
+# renewal and reset IDs are deliberately absent.
+_PENDING_SUMMARY_FIELDS = {
+    "pendingOrder": {
+        "targetNode": _dashboard_node,
+        "serverId": _dashboard_short_text,
+        "createdAt": _dashboard_time,
+        "lastError": _dashboard_text,
+        "nextAttemptAt": _dashboard_time,
+    },
+    "pendingRenewal": {
+        "targetNode": _dashboard_node,
+        "createdAt": _dashboard_time,
+        "oldExpiry": _dashboard_time,
+        "newExpiry": _dashboard_time,
+        "lastError": _dashboard_text,
+        "nextAttemptAt": _dashboard_time,
+    },
+    "pendingReset": {
+        "targetNode": _dashboard_node,
+        "createdAt": _dashboard_time,
+        "expiresAt": _dashboard_time,
+        "amountSats": _dashboard_amount,
+        "lastError": _dashboard_text,
+        "nextAttemptAt": _dashboard_time,
+    },
+}
+
+
+def _pending_summary(meta, key):
+    """A summary of meta[key], or None when no payment is pending there (the
+    same test the settlement tick applies)."""
+    pending = meta.get(key)
+    if not isinstance(pending, dict) or not isinstance(pending.get("paymentHash"), str) \
+            or not pending["paymentHash"]:
+        return None
+    return {name: clean(pending.get(name)) for name, clean in _PENDING_SUMMARY_FIELDS[key].items()}
+
+
+def _package_ids(value):
+    if not isinstance(value, list):
+        return []
+    return list(dict.fromkeys(p for p in value if p in HANDOFF_PACKAGE_IDS))
+
+
+def _handoff_summary():
+    """Which node holds the tunnel and which still owe an off, from
+    vpn-handoff.json (written by setDependencies); None without a record."""
+    data = _read_json_object(HANDOFF_FILE_PATH)
+    if data is None:
+        return None
+    active = data.get("activeTarget")
+    return {
+        "activeTarget": active if active in HANDOFF_PACKAGE_IDS else None,
+        "pendingOff": _package_ids(data.get("pendingOff")),
+        "unraised": _package_ids(data.get("unraised")),
+    }
+
+
+def _notices_summary(public_key):
+    """The subscription notices already posted for public_key (written by the
+    Subscription health check); None without a record or a key."""
+    data = _read_json_object(NOTICES_FILE_PATH)
+    if data is None or not public_key:
+        return None
+    sent = data.get("sent") if data.get("publicKey") == public_key else None
+    return {
+        "sent": [kind for kind in NOTICE_KINDS if isinstance(sent, list) and kind in sent],
+        "unknownKey": data.get("unknownKey") == public_key,
+    }
+
+
+def get_dashboard():
+    """The dashboard read model. See the section comment above: an explicit
+    allow-list, never a secret."""
+    status = get_status()
+    configured = bool(status.get("configured"))
+    public_key = status.get("pubkey") if configured else None
+    if public_key in ("Unknown", "None", "Not available") or not isinstance(public_key, str):
+        public_key = None
+    meta = read_meta()
+    same_key = public_key is not None and meta.get("publicKey") == public_key
+    server = status.get("server")
+    vpn_ip = status.get("vpn_ip")
+    days = status.get("days_remaining")
+    return {
+        "version": _dashboard_short_text(status.get("version")),
+        "enabled": bool(status.get("enabled")),
+        "configured": configured,
+        "status": _dashboard_short_text(status.get("status")),
+        "targetNode": get_target_node(),
+        "subscription": {
+            "active": bool(status.get("subscription_active")),
+            "linked": bool(status.get("subscription_linked")),
+            "expiresAt": _dashboard_time(status.get("expires_at")),
+            "daysRemaining": days if type(days) is int else None,
+            "keyUnknown": bool(status.get("key_unknown")),
+            "lastSync": _dashboard_time(status.get("last_sync")),
+            "syncError": _dashboard_text(status.get("sync_error")),
+        },
+        "connection": {
+            "server": _dashboard_text(server, 253) if server != "Unknown" else None,
+            "vpnPort": valid_vpn_port(status.get("vpn_port")) if configured else None,
+            "vpnIp": _dashboard_short_text(vpn_ip) if vpn_ip != "None" else None,
+            "publicKey": public_key,
+            "allowIpv6": bool(status.get("allow_ipv6")),
+        },
+        "bandwidth": {
+            "usedGb": _dashboard_amount(meta.get("bandwidth_used_gb")) if same_key else None,
+            "limitGb": BANDWIDTH_LIMIT_GB,
+        },
+        "pending": {
+            "order": _pending_summary(meta, "pendingOrder"),
+            "renewal": _pending_summary(meta, "pendingRenewal"),
+            "reset": _pending_summary(meta, "pendingReset"),
+        },
+        "handoff": _handoff_summary(),
+        "notices": _notices_summary(public_key),
     }
 
 def main():
