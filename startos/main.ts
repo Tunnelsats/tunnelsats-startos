@@ -67,6 +67,7 @@ export const main = sdk.setupMain(async ({ effects }) => {
       await subscriptionNotices.write(effects, {
         ...state,
         sent: state.sent ? [...state.sent] : undefined,
+        seen: state.seen ? [...state.seen] : undefined,
       })
     },
     notify: async (notice) => {
