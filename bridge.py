@@ -1001,6 +1001,8 @@ def _unpaid(kind, key, pending, state, now):
 def _settle_order(pending, now):
     payment_hash = pending["paymentHash"]
     state = _payment_state(payment_hash)
+    if state in ("processing", "paid") and not pending.get("paymentReceived"):
+        _update_pending("pendingOrder", payment_hash, {"paymentReceived": True})
     if state == "processing":
         return _outcome("order", "waiting", "Payment received; the tunnel is being provisioned.", payment_hash)
     if state != "paid":
@@ -1024,6 +1026,8 @@ def _settle_order(pending, now):
 def _settle_renewal(pending, now):
     payment_hash = pending["paymentHash"]
     state = _payment_state(payment_hash)
+    if state in ("processing", "paid") and not pending.get("paymentReceived"):
+        _update_pending("pendingRenewal", payment_hash, {"paymentReceived": True})
     if state == "processing":
         return _outcome("renewal", "waiting", "Payment received; the renewal is being applied.", payment_hash)
     if state != "paid":
@@ -1085,6 +1089,8 @@ def _settle_reset(pending, now):
     created = _parse_iso(pending.get("createdAt"))
     stale = created is not None and now - created >= PENDING_TTL
 
+    if state in ("processing", "paid", "failed") and not pending.get("paymentReceived"):
+        _update_pending("pendingReset", payment_hash, {"paymentReceived": True})
     if state == "processing":
         return _outcome("reset", "waiting", "Payment received; the bandwidth reset is being applied.", payment_hash)
     if state in ("unpaid", "unknown"):
@@ -1785,9 +1791,24 @@ def get_status():
 
 DASHBOARD_TEXT_LIMIT = 300
 BANDWIDTH_LIMIT_GB = 100
+BASE_PRICE_USD = 3.0
+PLAN_DISCOUNTS_PCT = ((1, 0), (3, 5), (6, 10), (12, 20))
+PLAN_PRICES_USD = [
+    {
+        "months": months,
+        "usd": round(BASE_PRICE_USD * months * (100 - discount_pct) / 100, 2),
+        "discountPct": discount_pct,
+    }
+    for months, discount_pct in PLAN_DISCOUNTS_PCT
+]
 HANDOFF_PACKAGE_IDS = ("lnd", "c-lightning", "eclair")
 NOTICE_KINDS = ("7d", "3d", "lapsed")
 _HEX64_RE = re.compile(r"\b[0-9a-fA-F]{64}\b")
+_PAID_ERROR_RE = re.compile(
+    r"payment was received|renewal is paid|bandwidth reset was applied|"
+    r"bandwidth reset failed|claim|Provisioning failed|stored private key",
+    re.IGNORECASE,
+)
 
 
 def _dashboard_text(value, limit=DASHBOARD_TEXT_LIMIT):
@@ -1882,15 +1903,24 @@ _PENDING_SUMMARY_FIELDS = {
 }
 
 
-def _pending_summary(meta, key):
-    """A summary of meta[key], or None when no payment is pending there (the
-    same test the settlement tick applies)."""
+def _pending_summary(meta, key, public_key=None):
+    """A summary of meta[key], or None when no payment is pending there for
+    the current key."""
     pending = meta.get(key)
     if not isinstance(pending, dict) or not isinstance(pending.get("paymentHash"), str) \
             or not pending["paymentHash"]:
         return None
+    if key in ("pendingRenewal", "pendingReset"):
+        if public_key is None or pending.get("publicKey") != public_key:
+            return None
+    elif key == "pendingOrder" and public_key is not None and pending.get("publicKey") == public_key:
+        return None
     summary = {name: clean(pending.get(name)) for name, clean in _PENDING_SUMMARY_FIELDS[key].items()}
     summary["lastError"] = _dashboard_error_text(pending.get("lastError"), pending)
+    summary["paymentReceived"] = bool(
+        pending.get("paymentReceived") is True
+        or (isinstance(pending.get("lastError"), str) and _PAID_ERROR_RE.search(pending["lastError"]))
+    )
     return summary
 
 
@@ -1946,6 +1976,7 @@ def get_dashboard():
         "configured": configured,
         "status": _dashboard_short_text(status.get("status")),
         "targetNode": get_target_node(),
+        "plans": PLAN_PRICES_USD,
         "subscription": {
             "active": bool(status.get("subscription_active")),
             "linked": bool(status.get("subscription_linked")),
@@ -1967,9 +1998,9 @@ def get_dashboard():
             "limitGb": BANDWIDTH_LIMIT_GB,
         },
         "pending": {
-            "order": _pending_summary(meta, "pendingOrder"),
-            "renewal": _pending_summary(meta, "pendingRenewal"),
-            "reset": _pending_summary(meta, "pendingReset"),
+            "order": _pending_summary(meta, "pendingOrder", public_key),
+            "renewal": _pending_summary(meta, "pendingRenewal", public_key),
+            "reset": _pending_summary(meta, "pendingReset", public_key),
         },
         "handoff": _handoff_summary(),
         "notices": _notices_summary(public_key),

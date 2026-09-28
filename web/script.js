@@ -15,16 +15,27 @@ const PROGRESS_TERM_MS = 30 * DAY_MS
 const BANDWIDTH_WARN_PCT = 70
 const BANDWIDTH_CRITICAL_PCT = 90
 
-// USD plan prices, from the TunnelSats backend's pricing module
+// Reference USD plan pricing from the TunnelSats backend's pricing module
 // (Tunnelsats/tunnelsats-v2-web, src/lib/pricing.ts: BASE_PRICE_USD = 3 per
-// month, DISCOUNTS 1/3/6/12 months = 0/5/10/20 %). The invoice created by
-// the Buy/Renew action carries the exact amount in sats.
-const PLAN_PRICES_USD = Object.freeze([
-  Object.freeze({ months: 1, usd: 3.0, discountPct: 0 }),
-  Object.freeze({ months: 3, usd: 8.55, discountPct: 5 }),
-  Object.freeze({ months: 6, usd: 16.2, discountPct: 10 }),
-  Object.freeze({ months: 12, usd: 28.8, discountPct: 20 }),
+// month, DISCOUNTS 1/3/6/12 months = 0/5/10/20 %). GET /api/dashboard supplies
+// m.plans from bridge.py; the Buy/Renew action fetches the live quote and
+// shows the exact amount in sats on the invoice.
+const BASE_PRICE_USD = 3
+const PLAN_DISCOUNTS_PCT = Object.freeze([
+  Object.freeze({ months: 1, discountPct: 0 }),
+  Object.freeze({ months: 3, discountPct: 5 }),
+  Object.freeze({ months: 6, discountPct: 10 }),
+  Object.freeze({ months: 12, discountPct: 20 }),
 ])
+const PLAN_PRICES_USD = Object.freeze(
+  PLAN_DISCOUNTS_PCT.map(({ months, discountPct }) =>
+    Object.freeze({
+      months,
+      usd: Math.round(BASE_PRICE_USD * months * (100 - discountPct)) / 100,
+      discountPct,
+    }),
+  ),
+)
 
 const NODE_LABELS = Object.freeze({
   lnd: 'LND',
@@ -96,6 +107,13 @@ function isPaidPendingError(err) {
   )
 }
 
+function isPaymentReceived(pending) {
+  if (!pending) return false
+  return Boolean(
+    pending.paymentReceived || isPaidPendingError(pending.lastError),
+  )
+}
+
 function nextRetrySuffix(pending) {
   const at = pending && formatTime(pending.nextAttemptAt)
   return at ? ` Next try: ${at}.` : ''
@@ -120,11 +138,13 @@ function buildNotices(m) {
   const target = nodeLabel(m.targetNode)
 
   if (pending.order) {
-    if (isPaidPendingError(pending.order.lastError)) {
+    if (isPaymentReceived(pending.order)) {
       notices.push({
-        level: 'warning',
+        level: pending.order.lastError ? 'warning' : 'info',
         title: 'Tunnel provisioning pending',
-        text: `${pending.order.lastError}${nextRetrySuffix(pending.order)}`,
+        text: pending.order.lastError
+          ? `${pending.order.lastError}${nextRetrySuffix(pending.order)}`
+          : 'Payment received; TunnelSats is provisioning the tunnel and will save the configuration automatically.',
       })
     } else {
       const node = nodeLabel(pending.order.targetNode)
@@ -136,11 +156,13 @@ function buildNotices(m) {
     }
   }
   if (pending.renewal) {
-    if (isPaidPendingError(pending.renewal.lastError)) {
+    if (isPaymentReceived(pending.renewal)) {
       notices.push({
-        level: 'warning',
+        level: pending.renewal.lastError ? 'warning' : 'info',
         title: 'Renewal confirmation pending',
-        text: `${pending.renewal.lastError}${nextRetrySuffix(pending.renewal)}`,
+        text: pending.renewal.lastError
+          ? `${pending.renewal.lastError}${nextRetrySuffix(pending.renewal)}`
+          : 'Payment received; waiting for TunnelSats to confirm the extended expiry.',
       })
     } else {
       const node = nodeLabel(pending.renewal.targetNode)
@@ -152,14 +174,18 @@ function buildNotices(m) {
     }
   }
   if (pending.reset) {
-    if (isPaidPendingError(pending.reset.lastError)) {
-      const failed = /bandwidth reset failed/i.test(pending.reset.lastError)
+    if (isPaymentReceived(pending.reset)) {
+      const failed = /bandwidth reset failed/i.test(
+        pending.reset.lastError || '',
+      )
       notices.push({
-        level: failed ? 'error' : 'warning',
+        level: failed ? 'error' : pending.reset.lastError ? 'warning' : 'info',
         title: failed
           ? 'Bandwidth reset failed'
           : 'Bandwidth reset confirmation pending',
-        text: `${pending.reset.lastError}${failed ? '' : nextRetrySuffix(pending.reset)}`,
+        text: pending.reset.lastError
+          ? `${pending.reset.lastError}${failed ? '' : nextRetrySuffix(pending.reset)}`
+          : 'Payment received; waiting for TunnelSats to apply the bandwidth reset.',
       })
     } else {
       const node = nodeLabel(pending.reset.targetNode)
@@ -294,6 +320,9 @@ function handoffText(m) {
   if (handoff.pendingOff && handoff.pendingOff.length) {
     return `Waiting for ${listNodes(handoff.pendingOff)} to turn off`
   }
+  if (handoff.unraised && handoff.unraised.length) {
+    return `Retrying task on ${listNodes(handoff.unraised)}`
+  }
   if (handoff.activeTarget) {
     return `Task raised on ${nodeLabel(handoff.activeTarget)}`
   }
@@ -304,9 +333,12 @@ function badgeState(m, failed) {
   if (failed) return { cls: 'neutral', text: 'Status unavailable' }
   if (!m) return { cls: 'neutral', text: 'Loading…' }
   if (!m.configured) {
-    return m.pending && m.pending.order
-      ? { cls: 'pending', text: 'Payment pending' }
-      : { cls: 'neutral', text: 'Not set up' }
+    if (m.pending && m.pending.order) {
+      return isPaymentReceived(m.pending.order)
+        ? { cls: 'pending', text: 'Provisioning tunnel' }
+        : { cls: 'pending', text: 'Payment pending' }
+    }
+    return { cls: 'neutral', text: 'Not set up' }
   }
   if (!m.enabled) return { cls: 'neutral', text: 'Switched off' }
   switch (m.status) {
@@ -348,10 +380,12 @@ function setLevel(el, pct) {
   else if (pct >= BANDWIDTH_WARN_PCT) el.classList.add('warning')
 }
 
-function renderPlans() {
+function renderPlans(m) {
   const list = byId('plan-list')
   if (!list) return
-  const items = PLAN_PRICES_USD.map((plan) => {
+  const plans =
+    m && Array.isArray(m.plans) && m.plans.length ? m.plans : PLAN_PRICES_USD
+  const items = plans.map((plan) => {
     const li = document.createElement('li')
     li.className = 'plan-card'
     const duration = document.createElement('span')
@@ -491,6 +525,7 @@ function render() {
     `start-cli package attach ${nodePackageId(model.targetNode)}`,
   )
   if (model.version) setText('footer-version', `v${model.version}`)
+  renderPlans(model)
   renderNotices(model)
   renderActions(model)
   if (model.configured) renderOverview(model)

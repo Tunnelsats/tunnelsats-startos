@@ -182,15 +182,18 @@ class TestDashboardReadModel(DashboardStateTestBase):
             "server": "de2.tunnelsats.com", "vpnPort": 24556, "vpnIp": "10.9.0.7",
             "publicKey": s["pub"], "allowIpv6": False,
         })
+        self.assertEqual(model["plans"], bridge.PLAN_PRICES_USD)
         self.assertEqual(model["bandwidth"], {"usedGb": 42.5, "limitGb": 100})
         self.assertEqual(model["pending"]["order"], {
             "targetNode": "cln", "serverId": "eu-de", "createdAt": self.iso(self.now),
-            "lastError": None, "nextAttemptAt": None,
+            "lastError": None, "nextAttemptAt": None, "paymentReceived": False,
         })
         self.assertEqual(model["pending"]["renewal"]["targetNode"], "eclair")
         self.assertEqual(model["pending"]["renewal"]["lastError"],
                          "HTTP 503 from the TunnelSats API: unavailable")
+        self.assertFalse(model["pending"]["renewal"]["paymentReceived"])
         self.assertEqual(model["pending"]["reset"]["amountSats"], 1500)
+        self.assertTrue(model["pending"]["reset"]["paymentReceived"])
         self.assertEqual(
             model["pending"]["reset"]["lastError"],
             "The payment was received, but the bandwidth reset failed. "
@@ -268,6 +271,18 @@ class TestDashboardReadModel(DashboardStateTestBase):
         self.write_json(bridge.META_FILE_PATH, {
             "publicKey": old_pub, "expiresAt": self.iso(self.now + timedelta(days=9)),
             "expirySource": "api", "syncSuccess": True, "bandwidth_used_gb": 77.0,
+            "pendingOrder": {
+                "paymentHash": ORDER_HASH, "publicKey": pub, "targetNode": "lnd",
+                "createdAt": self.iso(self.now),
+            },
+            "pendingRenewal": {
+                "paymentHash": RENEW_HASH, "publicKey": old_pub, "targetNode": "lnd",
+                "createdAt": self.iso(self.now),
+            },
+            "pendingReset": {
+                "paymentHash": RESET_HASH, "publicKey": old_pub, "targetNode": "lnd",
+                "createdAt": self.iso(self.now),
+            },
         })
         self.write_json(bridge.NOTICES_FILE_PATH, {"publicKey": old_pub, "sent": ["7d", "3d"],
                                                    "unknownKey": old_pub})
@@ -276,6 +291,9 @@ class TestDashboardReadModel(DashboardStateTestBase):
         self.assertIsNone(model["subscription"]["expiresAt"])
         self.assertFalse(model["subscription"]["active"])
         self.assertIsNone(model["bandwidth"]["usedGb"])
+        self.assertIsNone(model["pending"]["order"])
+        self.assertIsNone(model["pending"]["renewal"])
+        self.assertIsNone(model["pending"]["reset"])
         self.assertEqual(model["notices"], {"sent": [], "unknownKey": False})
 
     def test_key_unknown_is_reported(self):
@@ -299,10 +317,11 @@ class TestDashboardReadModel(DashboardStateTestBase):
             "publicKey": pub,
             "bandwidth_used_gb": "12",
             "pendingOrder": "not-an-object",
-            "pendingRenewal": {"paymentHash": "", "targetNode": "lnd"},
+            "pendingRenewal": {"paymentHash": "", "publicKey": pub, "targetNode": "lnd"},
             "pendingReset": {
-                "paymentHash": RESET_HASH, "targetNode": "evil", "createdAt": "yesterday",
-                "amountSats": True, "lastError": "x" * 5000, "expiresAt": 12,
+                "paymentHash": RESET_HASH, "publicKey": pub, "targetNode": "evil",
+                "createdAt": "yesterday", "amountSats": True, "lastError": "x" * 5000,
+                "expiresAt": 12,
             },
         })
         self.write_json(bridge.HANDOFF_FILE_PATH, {

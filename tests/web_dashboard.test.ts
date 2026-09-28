@@ -330,23 +330,48 @@ test('a pending order on Eclair asks for the Pay Invoice task on Eclair', () => 
   // Nothing to suggest while the order is being paid.
   assert.deepEqual([...h.run(`suggestedActions(${JSON.stringify(m)})`)], [])
 
-  // Post-payment settlement errors must not ask the operator to pay again.
+  // Post-payment settlement errors and processing states must not ask the operator to pay again.
+  const paidProcessing = model({
+    configured: false,
+    pending: {
+      order: {
+        targetNode: 'eclair',
+        paymentReceived: true,
+        lastError: null,
+        nextAttemptAt: null,
+      },
+      renewal: null,
+      reset: null,
+    },
+  })
+  assert.deepEqual(
+    h.run(`badgeState(${JSON.stringify(paidProcessing)}, false)`).text,
+    'Provisioning tunnel',
+  )
+  const processingNotices = h.run<Json[]>(
+    `buildNotices(${JSON.stringify(paidProcessing)})`,
+  )
+  assert.deepEqual(titles(processingNotices), ['Tunnel provisioning pending'])
+  assert.doesNotMatch(texts(processingNotices), /Pay Invoice/)
+
   const paidFailed = model({
     pending: {
       order: {
         targetNode: 'eclair',
-        lastError:
-          'HTTP 500 from the TunnelSats API: Provisioning failed. Please retry the claim.',
+        paymentReceived: true,
+        lastError: 'HTTP 502 from the TunnelSats API: Bad Gateway',
         nextAttemptAt: null,
       },
       renewal: {
         targetNode: 'eclair',
+        paymentReceived: true,
         lastError:
           'The renewal is paid, but its new expiry could not be confirmed yet',
         nextAttemptAt: null,
       },
       reset: {
         targetNode: 'eclair',
+        paymentReceived: true,
         lastError:
           'The payment was received, but the bandwidth reset failed. Contact TunnelSats support with the payment hash from the Reset Bandwidth action.',
         nextAttemptAt: null,
@@ -361,10 +386,10 @@ test('a pending order on Eclair asks for the Pay Invoice task on Eclair', () => 
     'Renewal confirmation pending',
     'Bandwidth reset failed',
   ])
-  assert.doesNotMatch(texts(paidNotices), /Accept the Pay Invoice task/)
+  assert.doesNotMatch(texts(paidNotices), /accept the Pay Invoice task/)
 })
 
-test('a handoff waiting on LND says so in the notice and the connection card', () => {
+test('a handoff waiting on LND or retrying an unraised task says so in the notice and the connection card', () => {
   const h = load(model())
   const m = model({
     targetNode: 'cln',
@@ -376,6 +401,14 @@ test('a handoff waiting on LND says so in the notice and the connection card', (
   assert.equal(
     h.run(`handoffText(${JSON.stringify(m)})`),
     'Waiting for LND to turn off',
+  )
+  const unraised = model({
+    targetNode: 'eclair',
+    handoff: { activeTarget: 'eclair', pendingOff: [], unraised: ['eclair'] },
+  })
+  assert.equal(
+    h.run(`handoffText(${JSON.stringify(unraised)})`),
+    'Retrying task on Eclair',
   )
 })
 

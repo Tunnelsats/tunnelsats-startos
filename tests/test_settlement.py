@@ -285,7 +285,9 @@ class TestOrderSettlement(SettlementTestBase):
         self.api.on("GET", f"/subscription/{HASH}", response({"status": "paid"}))
         self.api.on("POST", "/subscription/claim", response({"status": "processing"}, status=202))
         self.assertEqual(self.only(self.settle())["result"], "waiting")
-        self.assertNotIn("lastError", self.read_meta()["pendingOrder"])
+        pending = self.read_meta()["pendingOrder"]
+        self.assertNotIn("lastError", pending)
+        self.assertTrue(pending.get("paymentReceived"))
 
     def test_failure_backs_off_without_calling_the_api(self):
         self.write_meta({"pendingOrder": self.pending_order(
@@ -312,7 +314,9 @@ class TestOrderSettlement(SettlementTestBase):
         outcome = self.only(self.settle())
         self.assertEqual(outcome["result"], "failed")
         self.assertIn("HTTP 500", outcome["message"])
-        self.assertIn("Provisioning failed", self.read_meta()["pendingOrder"]["lastError"])
+        pending = self.read_meta()["pendingOrder"]
+        self.assertIn("Provisioning failed", pending["lastError"])
+        self.assertTrue(pending.get("paymentReceived"))
 
     def test_unpaid_order_expires_after_24_hours(self):
         self.write_meta({"pendingOrder": self.pending_order(createdAt=iso(NOW - timedelta(hours=25)))})
