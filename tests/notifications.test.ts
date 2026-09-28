@@ -233,6 +233,27 @@ test('a return to an expiry already seen in the period is a correction (#100)', 
   assert.deepEqual(sixAgain.steps, [])
 })
 
+test('a return to an unannounced reminder-window expiry recorded only in seen is a correction', () => {
+  // 30d -> 6d (7d notice announced for 6d) -> 5d (no new notice, so 5d is in
+  // seen but not announcedFor) -> 2d (3d notice announced for 2d) -> 5d:
+  // 5d must be recognised from seen alone so the period does not restart.
+  const recorded = planNotifications(inputs({ expiry: at(30) }), null, NOW)
+  const six = planNotifications(inputs({ expiry: at(6) }), recorded.next, NOW)
+  const five = planNotifications(inputs({ expiry: at(5) }), six.next, NOW)
+  assert.deepEqual(five.steps, [])
+  assert.ok(five.next.seen?.includes(at(5).toISOString()))
+  assert.ok(!five.next.announcedFor?.includes(at(5).toISOString()))
+  const two = planNotifications(inputs({ expiry: at(2) }), five.next, NOW)
+  assert.deepEqual(
+    two.steps.map((s) => s.notice.kind),
+    ['3d'],
+  )
+  const backToFive = planNotifications(inputs({ expiry: at(5) }), two.next, NOW)
+  assert.deepEqual(backToFive.steps, [])
+  assert.deepEqual(backToFive.next.sent, ['7d', '3d'])
+  assert.equal(backToFive.next.expiresAt, at(30).toISOString())
+})
+
 test('a renewal to an unseen expiry after repeated shortening starts a new period', () => {
   const recorded = planNotifications(inputs({ expiry: at(30) }), null, NOW)
   const six = planNotifications(inputs({ expiry: at(6) }), recorded.next, NOW)
