@@ -391,14 +391,18 @@ function renderCountdown() {
   )
 }
 
+function formatPublicAddress(server, vpnPort) {
+  if (!server || !vpnPort) return 'Unknown'
+  const clean = String(server).replace(/^\[|\]$/g, '')
+  const host = clean.includes(':') ? `[${clean}]` : clean
+  return `${host}:${vpnPort}`
+}
+
 function renderOverview(m) {
   const conn = m.connection || {}
   setText('val-target-node', nodeLabel(m.targetNode))
   setText('val-handoff', handoffText(m))
-  setText(
-    'val-endpoint',
-    conn.server && conn.vpnPort ? `${conn.server}:${conn.vpnPort}` : 'Unknown',
-  )
+  setText('val-endpoint', formatPublicAddress(conn.server, conn.vpnPort))
   const pubkey = byId('val-pubkey')
   if (pubkey) {
     pubkey.textContent = conn.publicKey || 'Unknown'

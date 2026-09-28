@@ -146,6 +146,10 @@ class TestDashboardReadModel(DashboardStateTestBase):
                 "paymentHash": RESET_HASH, "resetId": "reset-789", "invoice": RESET_INVOICE,
                 "expiresAt": self.iso(self.now + timedelta(hours=1)), "createdAt": self.iso(self.now),
                 "publicKey": pub, "serverId": "eu-de", "targetNode": "eclair", "amountSats": 1500,
+                "lastError": (
+                    f"The payment was received, but the bandwidth reset failed. "
+                    f"Contact TunnelSats support with payment hash {RESET_HASH}."
+                ),
             },
             "payTasksToClear": ["tunnelsats-order:lnd:" + ORDER_HASH[:16]],
         })
@@ -187,6 +191,11 @@ class TestDashboardReadModel(DashboardStateTestBase):
         self.assertEqual(model["pending"]["renewal"]["lastError"],
                          "HTTP 503 from the TunnelSats API: unavailable")
         self.assertEqual(model["pending"]["reset"]["amountSats"], 1500)
+        self.assertEqual(
+            model["pending"]["reset"]["lastError"],
+            "The payment was received, but the bandwidth reset failed. "
+            "Contact TunnelSats support with the payment hash from the Reset Bandwidth action.",
+        )
         self.assertEqual(model["handoff"], {"activeTarget": "eclair", "pendingOff": ["lnd"], "unraised": []})
         self.assertEqual(model["notices"], {"sent": ["7d"], "unknownKey": False})
 
@@ -204,6 +213,25 @@ class TestDashboardReadModel(DashboardStateTestBase):
         self.assertNotIn(s["order_pub"], body)
         self.assertNotIn("payTasksToClear", body)
         self.assertNotIn("handedOutKeys", body)
+
+    def test_imported_ipv6_endpoint_extracts_full_address(self):
+        priv, _ = new_keypair()
+        _, server_pub = new_keypair()
+        ipv6_conf = (
+            "[Interface]\n"
+            f"PrivateKey = {priv}\n"
+            "Address = 10.9.0.7/32\n\n"
+            "[Peer]\n"
+            f"PublicKey = {server_pub}\n"
+            f"PresharedKey = {PSK}\n"
+            "Endpoint = [2001:db8::42]:51820\n"
+            "AllowedIPs = 0.0.0.0/0, ::/0\n"
+            "# Port Forwarding: 24556\n"
+        )
+        bridge.save_configuration(ipv6_conf, "lnd")
+        model = bridge.get_dashboard()
+        self.assertEqual(model["connection"]["server"], "2001:db8::42")
+        self.assertEqual(model["connection"]["vpnPort"], 24556)
 
     def test_forbidden_key_check_catches_a_leak(self):
         # Guards the guard: a nested secret-like key is reported.

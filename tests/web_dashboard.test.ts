@@ -212,6 +212,20 @@ test('a configured model shows the overview and fills it with textContent', asyn
   assert.equal(h.el('footer-version').textContent, 'v0.4.0')
   assert.equal(h.el('load-error').hidden, true)
   assert.equal(h.el('notices').hidden, true)
+
+  const hIpv6 = load(
+    model({
+      connection: {
+        server: '2001:db8::42',
+        vpnPort: 24556,
+        vpnIp: '10.9.0.7',
+        publicKey: 'cHVibGljLWtleS1wdWJsaWMta2V5LXB1YmxpYy1rZXk=',
+        allowIpv6: true,
+      },
+    }),
+  )
+  await hIpv6.settle()
+  assert.equal(hIpv6.el('val-endpoint').textContent, '[2001:db8::42]:24556')
 })
 
 test('an unconfigured model shows the setup view and suggests Buy and Import', async () => {

@@ -1673,6 +1673,44 @@ def get_subscription_info(current_pubkey=None):
             "syncSuccess": False
         }
 
+def _strip_endpoint_port(endpoint):
+    endpoint = endpoint.strip()
+    if endpoint.startswith("["):
+        closing = endpoint.find("]")
+        if closing != -1:
+            return endpoint[1:closing].strip()
+        return endpoint.lstrip("[")
+    last_colon = endpoint.rfind(":")
+    if last_colon != -1:
+        host_part = endpoint[:last_colon]
+        try:
+            ipaddress.IPv6Address(host_part)
+            return host_part
+        except ValueError:
+            pass
+    try:
+        ipaddress.IPv6Address(endpoint)
+        return endpoint
+    except ValueError:
+        pass
+    return endpoint.partition(":")[0]
+
+
+def extract_server_host(config_content):
+    server_match = re.search(r"^#\s*Server:\s*([^\s#]+)", config_content, re.IGNORECASE | re.MULTILINE)
+    if server_match:
+        server = server_match.group(1).strip()
+        if server.startswith("[") and server.endswith("]"):
+            return server[1:-1]
+        return server
+    endpoint_match = re.search(r"^\s*(?!#|;)\s*Endpoint\s*=\s*([^\s#;]+)", config_content, re.IGNORECASE | re.MULTILINE)
+    if endpoint_match:
+        host = _strip_endpoint_port(endpoint_match.group(1))
+        if host:
+            return host
+    return "Unknown"
+
+
 def get_status():
     enabled = is_enabled()
     has_config = os.path.exists(CONFIG_PATH)
@@ -1687,13 +1725,7 @@ def get_status():
             with open(CONFIG_PATH, "r") as f:
                 content = f.read()
             vpn_port = extract_vpn_port(content)
-            server_match = re.search(r"^#\s*Server:\s*([^\s#]+)", content, re.IGNORECASE | re.MULTILINE)
-            if server_match:
-                server_domain = server_match.group(1).strip()
-            else:
-                endpoint_match = re.search(r"^\s*(?!#|;)\s*Endpoint\s*=\s*([^\s#:]+)", content, re.IGNORECASE | re.MULTILINE)
-                if endpoint_match:
-                    server_domain = endpoint_match.group(1).strip()
+            server_domain = extract_server_host(content)
         except Exception:
             pass
 
@@ -1755,6 +1787,7 @@ DASHBOARD_TEXT_LIMIT = 300
 BANDWIDTH_LIMIT_GB = 100
 HANDOFF_PACKAGE_IDS = ("lnd", "c-lightning", "eclair")
 NOTICE_KINDS = ("7d", "3d", "lapsed")
+_HEX64_RE = re.compile(r"\b[0-9a-fA-F]{64}\b")
 
 
 def _dashboard_text(value, limit=DASHBOARD_TEXT_LIMIT):
@@ -1762,6 +1795,25 @@ def _dashboard_text(value, limit=DASHBOARD_TEXT_LIMIT):
         return None
     value = value.strip()
     return value if len(value) <= limit else value[:limit - 1] + "…"
+
+
+def _dashboard_error_text(value, pending=None):
+    text = _dashboard_text(value, limit=1024)
+    if text is None:
+        return None
+    text = re.sub(
+        r"with payment hash\s+[0-9a-fA-F]{64}",
+        "with the payment hash from the Reset Bandwidth action",
+        text,
+        flags=re.IGNORECASE,
+    )
+    if isinstance(pending, dict):
+        for field in ("paymentHash", "orderId", "renewalId", "resetId", "privateKey", "invoice"):
+            secret = pending.get(field)
+            if isinstance(secret, str) and len(secret) >= 4:
+                text = text.replace(secret, "[redacted]")
+    text = _HEX64_RE.sub("[redacted]", text)
+    return _dashboard_text(text)
 
 
 def _dashboard_short_text(value):
@@ -1837,7 +1889,9 @@ def _pending_summary(meta, key):
     if not isinstance(pending, dict) or not isinstance(pending.get("paymentHash"), str) \
             or not pending["paymentHash"]:
         return None
-    return {name: clean(pending.get(name)) for name, clean in _PENDING_SUMMARY_FIELDS[key].items()}
+    summary = {name: clean(pending.get(name)) for name, clean in _PENDING_SUMMARY_FIELDS[key].items()}
+    summary["lastError"] = _dashboard_error_text(pending.get("lastError"), pending)
+    return summary
 
 
 def _package_ids(value):
@@ -1899,7 +1953,7 @@ def get_dashboard():
             "daysRemaining": days if type(days) is int else None,
             "keyUnknown": bool(status.get("key_unknown")),
             "lastSync": _dashboard_time(status.get("last_sync")),
-            "syncError": _dashboard_text(status.get("sync_error")),
+            "syncError": _dashboard_error_text(status.get("sync_error")),
         },
         "connection": {
             "server": _dashboard_text(server, 253) if server != "Unknown" else None,
