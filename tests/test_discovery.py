@@ -14,6 +14,7 @@ import io
 import json
 import os
 import sys
+import threading
 import unittest
 import urllib.error
 from unittest.mock import MagicMock, patch
@@ -139,6 +140,65 @@ class TestServerDiscovery(DiscoveryTestBase):
     def test_no_list_at_all_is_unavailable(self, _urlopen):
         with self.assertRaises(bridge.DiscoveryUnavailable):
             bridge.get_servers()
+
+    @patch("urllib.request.urlopen")
+    def test_a_slow_refresh_never_delays_the_stale_list(self, urlopen):
+        urlopen.return_value = response(LIVE_SERVERS)
+        fresh = bridge.get_servers()
+        self.clock.t += bridge.SERVERS_CACHE_TTL + 1
+        entered, release = threading.Event(), threading.Event()
+        updated = {"servers": [{"id": "eu-ch", "country": "Switzerland", "city": "Zurich",
+                                "flag": "🇨🇭", "status": "online"}]}
+
+        def slow_api(*_args, **_kwargs):
+            entered.set()
+            self.assertTrue(release.wait(5))
+            return response(updated)
+
+        urlopen.side_effect = slow_api
+        results = {}
+        refresher = threading.Thread(target=lambda: results.update(refresher=bridge.get_servers()))
+        refresher.start()
+        try:
+            self.assertTrue(entered.wait(5))
+            # The refresh is still waiting on the API; another request gets
+            # the cached list at once instead of queueing behind it.
+            reader = threading.Thread(target=lambda: results.update(reader=bridge.get_servers()))
+            reader.start()
+            reader.join(2)
+            self.assertFalse(reader.is_alive(), "a stale read waited for the API")
+            self.assertTrue(results["reader"]["stale"])
+            self.assertEqual(results["reader"]["servers"], fresh["servers"])
+        finally:
+            release.set()
+            refresher.join(5)
+        self.assertEqual([s["id"] for s in results["refresher"]["servers"]], ["eu-ch"])
+        self.assertEqual(urlopen.call_count, 2)
+        self.assertFalse(bridge.get_servers()["stale"])
+        self.assertEqual(urlopen.call_count, 2)
+
+    @patch("urllib.request.urlopen")
+    def test_first_load_requests_share_one_fetch(self, urlopen):
+        entered, release = threading.Event(), threading.Event()
+
+        def slow_api(*_args, **_kwargs):
+            entered.set()
+            self.assertTrue(release.wait(5))
+            return response(LIVE_SERVERS)
+
+        urlopen.side_effect = slow_api
+        results = []
+        threads = [threading.Thread(target=lambda: results.append(bridge.get_servers())) for _ in range(3)]
+        threads[0].start()
+        self.assertTrue(entered.wait(5))
+        for t in threads[1:]:
+            t.start()
+        release.set()
+        for t in threads:
+            t.join(5)
+        self.assertEqual(len(results), 3)
+        self.assertTrue(all(not r["stale"] and len(r["servers"]) == 3 for r in results))
+        self.assertEqual(urlopen.call_count, 1)
 
 
 class TestReachability(DiscoveryTestBase):

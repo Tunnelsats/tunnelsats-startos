@@ -88,6 +88,20 @@ class TestLazySyncQuotaFields(ProvenanceTestBase):
         for field in QUOTA_FIELDS:
             self.assertNotIn(field, meta)
 
+    @patch('urllib.request.urlopen')
+    def test_confirmed_answer_without_usage_drops_the_stored_usage(self, mock_urlopen):
+        # Last month's figure must not survive a sync that refreshes lastSync
+        # without confirming usage; it would read as this month's.
+        for bad in (..., None, "71.5x", -1, float("nan"), True):
+            with self.subTest(usage=bad):
+                self.write_meta({"publicKey": "pk_current", "bandwidth_used_gb": 140.0,
+                                 "lastSync": "2026-08-31T23:00:00+00:00"})
+                mock_urlopen.return_value = api_response(status_payload(bandwidth_used_gb=bad))
+                self.assertEqual(bridge.lazy_sync("pk_current"), "confirmed")
+                meta = self.read_meta()
+                self.assertNotIn("bandwidth_used_gb", meta)
+                self.assertEqual(meta["bandwidth_limit_gb"], 150)
+
     @patch('bridge.time.sleep')
     @patch('urllib.request.urlopen', side_effect=OSError("unreachable"))
     def test_failed_sync_keeps_the_values_for_the_same_key(self, _urlopen, _sleep):

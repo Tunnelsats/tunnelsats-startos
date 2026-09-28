@@ -544,6 +544,9 @@ def lazy_sync(wg_pubkey, require_usage=False):
 
         # The monthly quota. A confirmed answer without a valid value drops
         # the stored one: a stale limit or reset count is worse than none.
+        # The same holds for usage: lastSync dates every stored field, so a
+        # usage figure this answer did not confirm (possibly from last month)
+        # must not stay behind looking current.
         quota = {
             "bandwidth_limit_gb": valid_bandwidth_limit(response_data.get("bandwidth_limit_gb")),
             "bandwidth_resets_this_month": valid_reset_count(response_data.get("bandwidth_resets_this_month")),
@@ -551,6 +554,8 @@ def lazy_sync(wg_pubkey, require_usage=False):
         }
         fields.update({name: value for name, value in quota.items() if value is not None})
         dropped_quota = [name for name, value in quota.items() if value is None]
+        if "bandwidth_used_gb" not in fields:
+            dropped_quota.append("bandwidth_used_gb")
 
         with meta_lock():
             if _superseded(wg_pubkey):
@@ -2405,6 +2410,7 @@ _TUNNELSATS_HOST_RE = re.compile(r"^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+t
 _SERVER_STATUS_RE = re.compile(r"^[a-z_-]{1,16}$")
 
 _servers_lock = threading.Lock()
+_servers_fetch_lock = threading.Lock()
 _servers_cache = {}
 _reachability_lock = threading.Lock()
 _reachability_calls = collections.deque()
@@ -2463,27 +2469,60 @@ def _fetch_servers():
     return servers
 
 
+def _servers_result(stale):
+    """The cached list as a response; the caller holds _servers_lock."""
+    return {"servers": [dict(s) for s in _servers_cache["servers"]], "stale": stale,
+            "fetchedAt": _servers_cache["fetchedAt"]}
+
+
+def _servers_state(now):
+    """(fresh response or None, whether the API may be asked now, whether a
+    list is cached); the caller holds _servers_lock."""
+    cached = _servers_cache.get("servers")
+    if cached is not None and now - _servers_cache["at"] < SERVERS_CACHE_TTL:
+        return _servers_result(False), False, True
+    failed_at = _servers_cache.get("failedAt")
+    may_fetch = failed_at is None or now - failed_at >= SERVERS_RETRY_AFTER
+    return None, may_fetch, cached is not None
+
+
 def get_servers():
     """The TunnelSats server list for the dashboard: {servers, stale,
-    fetchedAt}. Raises DiscoveryUnavailable when no list was ever fetched."""
+    fetchedAt}. Raises DiscoveryUnavailable when no list was ever fetched.
+
+    One request at a time asks the API (_servers_fetch_lock), and never while
+    holding _servers_lock: with a list cached, other requests get it marked
+    stale right away instead of waiting for a slow API; only while no list
+    exists at all do they wait for the fetch in flight."""
     with _servers_lock:
-        now = time.monotonic()
-        cached = _servers_cache.get("servers")
-        if cached is not None and now - _servers_cache["at"] < SERVERS_CACHE_TTL:
-            return {"servers": [dict(s) for s in cached], "stale": False, "fetchedAt": _servers_cache["fetchedAt"]}
-        failed_at = _servers_cache.get("failedAt")
-        if failed_at is None or now - failed_at >= SERVERS_RETRY_AFTER:
-            try:
-                servers = _fetch_servers()
-            except Exception as e:
-                print(f"Could not fetch the TunnelSats server list: {e}", file=sys.stderr)
-                _servers_cache["failedAt"] = now
-            else:
-                fetched_at = _iso(datetime.now(timezone.utc))
-                _servers_cache.update(servers=servers, at=now, fetchedAt=fetched_at, failedAt=None)
-                return {"servers": [dict(s) for s in servers], "stale": False, "fetchedAt": fetched_at}
-        if cached is not None:
-            return {"servers": [dict(s) for s in cached], "stale": True, "fetchedAt": _servers_cache["fetchedAt"]}
+        fresh, may_fetch, has_list = _servers_state(time.monotonic())
+    if fresh is not None:
+        return fresh
+    if may_fetch and _servers_fetch_lock.acquire(blocking=not has_list):
+        try:
+            # Another request may have refreshed (or failed) while this one
+            # waited for the fetch lock.
+            with _servers_lock:
+                fresh, may_fetch, _ = _servers_state(time.monotonic())
+            if fresh is not None:
+                return fresh
+            if may_fetch:
+                try:
+                    servers = _fetch_servers()
+                except Exception as e:
+                    print(f"Could not fetch the TunnelSats server list: {e}", file=sys.stderr)
+                    with _servers_lock:
+                        _servers_cache["failedAt"] = time.monotonic()
+                else:
+                    with _servers_lock:
+                        _servers_cache.update(servers=servers, at=time.monotonic(),
+                                              fetchedAt=_iso(datetime.now(timezone.utc)), failedAt=None)
+                        return _servers_result(False)
+        finally:
+            _servers_fetch_lock.release()
+    with _servers_lock:
+        if _servers_cache.get("servers") is not None:
+            return _servers_result(True)
     raise DiscoveryUnavailable("The TunnelSats server list is unavailable right now. Please try again later.")
 
 
