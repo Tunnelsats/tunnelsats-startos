@@ -1044,20 +1044,22 @@ function activeIntentMessage(m) {
   return null
 }
 
+/** The m.pending invoice kind each dashboard request kind produces. */
+const INTENT_INVOICE_KIND = { buy: 'order', renew: 'renewal', reset: 'reset' }
+
 /**
- * The most recent failed dashboard request. While invoices are payable, a
- * failure older than the newest of them is left out (a later request
- * produced that invoice); a newer one is shown, for example a different
- * selection refused because an invoice is still payable.
+ * The most recent failed dashboard request. A failure is left out only when
+ * a payable invoice of the same kind was created after it (a later request
+ * of that kind produced it); an invoice of another kind never hides it, so
+ * a refused or failed request stays explained next to any invoice.
  */
 function latestIntentFailure(m) {
   const intents = (m && m.intents) || {}
-  const invoiceTimes = payableInvoices(m)
-    .map((item) => Date.parse(item.entry.createdAt))
-    .filter(Number.isFinite)
-  const newestInvoiceMs = invoiceTimes.length
-    ? Math.max(...invoiceTimes)
-    : -Infinity
+  const invoiceMsByKind = {}
+  for (const item of payableInvoices(m)) {
+    const ms = Date.parse(item.entry.createdAt)
+    if (Number.isFinite(ms)) invoiceMsByKind[item.kind] = ms
+  }
   let latest = null
   let latestMs = -Infinity
   for (const kind of ['buy', 'renew', 'reset']) {
@@ -1065,7 +1067,8 @@ function latestIntentFailure(m) {
     if (!slot || slot.status !== 'failed' || !slot.error) continue
     const ms = Date.parse(slot.updatedAt || slot.createdAt)
     const when = Number.isFinite(ms) ? ms : -Infinity
-    if (when < newestInvoiceMs) continue
+    const supersededAt = invoiceMsByKind[INTENT_INVOICE_KIND[kind]]
+    if (supersededAt !== undefined && when < supersededAt) continue
     if (!latest || when > latestMs) {
       latest = slot
       latestMs = when

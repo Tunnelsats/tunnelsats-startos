@@ -910,3 +910,50 @@ test('a request refused while an invoice is payable stays visible; older failure
   assert.equal(hOld.el('invoice-panel').hidden, false)
   assert.equal(hOld.el('intent-feedback').hidden, true)
 })
+
+test('an invoice of another kind never hides a failed request', async () => {
+  const invoice = 'lnbc250u1pjorderinvoiceorderinvoiceorderinvoice'
+  const resetError =
+    'The monthly bandwidth reset limit is reached (2 of 2 used). An unpaid reset invoice keeps its reset reserved until it expires.'
+  const h = load(
+    model({
+      pending: {
+        // A Buy invoice created after the Reset request failed.
+        order: {
+          targetNode: 'lnd',
+          serverId: 'eu-de',
+          duration: '3m',
+          amountSats: 25000,
+          createdAt: '2026-09-28T11:10:00Z',
+          expiresAt: '2026-09-28T12:10:00Z',
+          paymentReceived: false,
+          invoice,
+        },
+        renewal: null,
+        reset: null,
+      },
+      intents: {
+        buy: {
+          id: 'intent-buy-3',
+          kind: 'buy',
+          status: 'succeeded',
+          createdAt: '2026-09-28T11:09:58Z',
+          updatedAt: '2026-09-28T11:10:00Z',
+        },
+        renew: null,
+        reset: {
+          id: 'intent-reset-1',
+          kind: 'reset',
+          status: 'failed',
+          createdAt: '2026-09-28T11:00:00Z',
+          updatedAt: '2026-09-28T11:00:02Z',
+          error: resetError,
+        },
+      },
+    }),
+  )
+  await h.settle()
+  assert.equal(h.el('invoice-panel').hidden, false)
+  assert.equal(h.el('intent-feedback').hidden, false)
+  assert.equal(h.el('intent-feedback').textContent, resetError)
+})
