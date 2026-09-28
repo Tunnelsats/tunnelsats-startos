@@ -437,7 +437,7 @@ class TestDashboardReadModel(DashboardStateTestBase):
             self.assertEqual(bridge.get_target_details(), ("eclair.embassy", 9735))
 
 
-class TestDashboardEndpoint(DashboardStateTestBase):
+class LoopbackServerTestBase(DashboardStateTestBase):
     """The real handler behind a real HTTP server on loopback."""
 
     def setUp(self):
@@ -479,6 +479,8 @@ class TestDashboardEndpoint(DashboardStateTestBase):
         self.assertEqual(headers.get("X-Content-Type-Options"), "nosniff")
         self.assertEqual(headers.get("Referrer-Policy"), "no-referrer")
 
+
+class TestDashboardEndpoint(LoopbackServerTestBase):
     def test_get_dashboard_returns_the_read_model(self):
         priv, pub, _ = self.configure("eclair")
         status, headers, body = self.get("/api/dashboard")

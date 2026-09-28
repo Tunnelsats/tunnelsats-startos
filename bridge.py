@@ -10,6 +10,8 @@ import time
 import socket
 import ipaddress
 import math
+import threading
+import collections
 import urllib.request
 import urllib.error
 from contextlib import contextmanager
@@ -1449,6 +1451,20 @@ class DashboardHTTPRequestHandler(BaseHTTPRequestHandler):
             self.wfile.write(json.dumps({"csrf_token": get_csrf_token()}).encode("utf-8"))
             return
 
+        if path_only == "/api/servers":
+            # Outbound, but cached (see get_servers).
+            try:
+                result = get_servers()
+            except DiscoveryUnavailable as e:
+                self._send_json(503, {"error": str(e)})
+                return
+            except Exception as e:
+                print(f"Server discovery failed: {e}", file=sys.stderr)
+                self._send_json(500, {"error": "Server list unavailable"})
+                return
+            self._send_json(200, result)
+            return
+
         if path_only == "/api/dashboard":
             # Read-only: never triggers a sync or any other outbound call.
             try:
@@ -1519,24 +1535,42 @@ class DashboardHTTPRequestHandler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
+    def _read_json_body(self, max_bytes):
+        """The request's JSON body, or None after sending a 400."""
+        try:
+            length = int(self.headers.get("Content-Length", "0"))
+        except ValueError:
+            self._send_json(400, {"error": "Invalid Content-Length header"})
+            return None
+        if length <= 0 or length > max_bytes:
+            self._send_json(400, {"error": f"Request body must be between 1 and {max_bytes} bytes"})
+            return None
+        try:
+            raw_body = self.rfile.read(length)
+            return json.loads(raw_body.decode("utf-8"))
+        except (OSError, ValueError):
+            self._send_json(400, {"error": "Invalid JSON body"})
+            return None
+
     def do_POST(self):
         if not self.is_trusted_request():
             return
         path_only = self.path.partition('?')[0].partition('#')[0]
+        if path_only == "/api/reachability":
+            payload = self._read_json_body(REACHABILITY_MAX_BODY_BYTES)
+            if payload is None:
+                return
+            try:
+                status_code, response_body = check_reachability(payload)
+            except Exception as e:
+                print(f"Reachability check failed: {e}", file=sys.stderr)
+                self._send_json(500, {"error": "Could not run the reachability check"})
+                return
+            self._send_json(status_code, response_body)
+            return
         if path_only == "/api/intents":
-            try:
-                length = int(self.headers.get("Content-Length", "0"))
-            except ValueError:
-                self._send_json(400, {"error": "Invalid Content-Length header"})
-                return
-            if length <= 0 or length > INTENT_MAX_BODY_BYTES:
-                self._send_json(400, {"error": f"Request body must be between 1 and {INTENT_MAX_BODY_BYTES} bytes"})
-                return
-            try:
-                raw_body = self.rfile.read(length)
-                payload = json.loads(raw_body.decode("utf-8"))
-            except (OSError, ValueError):
-                self._send_json(400, {"error": "Invalid JSON body"})
+            payload = self._read_json_body(INTENT_MAX_BODY_BYTES)
+            if payload is None:
                 return
             try:
                 status_code, response_body = submit_dashboard_intent(payload)
@@ -2339,6 +2373,193 @@ def submit_dashboard_intent(payload, now=None):
     intent_view["updatedAt"] = created_at
     intent_view["error"] = None
     return 202, {"status": "accepted", "intent": intent_view}
+
+
+# ─── Server discovery & inbound reachability ─────────────────────────────────
+# GET /api/servers and POST /api/reachability are the only dashboard routes
+# that call out (to the TunnelSats API), and both are bounded. The server
+# list is cached for SERVERS_CACHE_TTL; while the API fails the last list is
+# served marked stale, and the API is asked again after SERVERS_RETRY_AFTER
+# at the earliest. The reachability check asks TunnelSats to open a Lightning
+# connection to the operator's node through the VPN server's forwarded port:
+# it proves inbound reachability only, never that outbound traffic leaves
+# through the tunnel. It takes nothing but the node's public key; the probed
+# host (a TunnelSats hostname) and port (the configuration's explicit
+# forwarded-port marker) come from the stored configuration, so a request
+# cannot aim the probe anywhere else. At most REACHABILITY_LIMIT checks run
+# per REACHABILITY_WINDOW for the whole process (the API allows 3 per minute
+# per IP).
+
+SERVERS_CACHE_TTL = 60
+SERVERS_RETRY_AFTER = 15
+SERVERS_MAX = 32
+SERVERS_MAX_RESPONSE_BYTES = 64 * 1024
+REACHABILITY_LIMIT = 2
+REACHABILITY_WINDOW = 60
+REACHABILITY_TIMEOUT = 30
+REACHABILITY_MAX_BODY_BYTES = 512
+REACHABILITY_MAX_RESPONSE_BYTES = 16 * 1024
+REACHABILITY_MAX_LATENCY_MS = 600_000
+_NODE_PUBKEY_RE = re.compile(r"^0[23][0-9a-f]{64}$")
+_TUNNELSATS_HOST_RE = re.compile(r"^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+tunnelsats\.com$")
+_SERVER_STATUS_RE = re.compile(r"^[a-z_-]{1,16}$")
+
+_servers_lock = threading.Lock()
+_servers_cache = {}
+_reachability_lock = threading.Lock()
+_reachability_calls = collections.deque()
+
+
+class DiscoveryUnavailable(Exception):
+    pass
+
+
+def _reset_discovery_state():
+    with _servers_lock:
+        _servers_cache.clear()
+    with _reachability_lock:
+        _reachability_calls.clear()
+
+
+def _server_entry(entry):
+    """One server from the API, reduced to the allow-listed fields; None
+    without a valid id."""
+    if not isinstance(entry, dict):
+        return None
+    server_id = _dashboard_server_id(entry.get("id"))
+    if server_id is None:
+        return None
+    status = entry.get("status")
+    return {
+        "id": server_id,
+        "country": _dashboard_text(entry.get("country"), 64),
+        "city": _dashboard_text(entry.get("city"), 64),
+        "flag": _dashboard_text(entry.get("flag"), 16),
+        "status": status if isinstance(status, str) and _SERVER_STATUS_RE.match(status) else None,
+    }
+
+
+def _fetch_servers():
+    req = urllib.request.Request(
+        f"{TUNNELSATS_API_URL}/servers",
+        headers={"Accept": "application/json", "User-Agent": f"TunnelSats-StartOS/{get_package_version()}"},
+        method="GET",
+    )
+    with urllib.request.urlopen(req, timeout=10) as response:
+        data = json.loads(response.read(SERVERS_MAX_RESPONSE_BYTES).decode("utf-8"))
+    if not isinstance(data, dict) or not isinstance(data.get("servers"), list):
+        raise ValueError("TunnelSats API returned an unexpected server list")
+    servers = []
+    seen = set()
+    for raw in data["servers"]:
+        entry = _server_entry(raw)
+        if entry is not None and entry["id"] not in seen:
+            seen.add(entry["id"])
+            servers.append(entry)
+        if len(servers) >= SERVERS_MAX:
+            break
+    if not servers:
+        raise ValueError("TunnelSats API returned no usable server")
+    return servers
+
+
+def get_servers():
+    """The TunnelSats server list for the dashboard: {servers, stale,
+    fetchedAt}. Raises DiscoveryUnavailable when no list was ever fetched."""
+    with _servers_lock:
+        now = time.monotonic()
+        cached = _servers_cache.get("servers")
+        if cached is not None and now - _servers_cache["at"] < SERVERS_CACHE_TTL:
+            return {"servers": [dict(s) for s in cached], "stale": False, "fetchedAt": _servers_cache["fetchedAt"]}
+        failed_at = _servers_cache.get("failedAt")
+        if failed_at is None or now - failed_at >= SERVERS_RETRY_AFTER:
+            try:
+                servers = _fetch_servers()
+            except Exception as e:
+                print(f"Could not fetch the TunnelSats server list: {e}", file=sys.stderr)
+                _servers_cache["failedAt"] = now
+            else:
+                fetched_at = _iso(datetime.now(timezone.utc))
+                _servers_cache.update(servers=servers, at=now, fetchedAt=fetched_at, failedAt=None)
+                return {"servers": [dict(s) for s in servers], "stale": False, "fetchedAt": fetched_at}
+        if cached is not None:
+            return {"servers": [dict(s) for s in cached], "stale": True, "fetchedAt": _servers_cache["fetchedAt"]}
+    raise DiscoveryUnavailable("The TunnelSats server list is unavailable right now. Please try again later.")
+
+
+def _reachability_target():
+    """(host, port, None) to probe, from the stored configuration, or
+    (None, None, reason)."""
+    try:
+        with open(CONFIG_PATH, "r") as f:
+            content = f.read()
+    except OSError:
+        return None, None, "Install a WireGuard configuration first."
+    host = extract_server_host(content).strip().lower()
+    if not _TUNNELSATS_HOST_RE.match(host):
+        return None, None, "The configured VPN server is not a TunnelSats hostname; only TunnelSats servers are checked."
+    marker = VPN_PORT_MARKER_RE.search(content)
+    port = valid_vpn_port(int(marker.group(2))) if marker else None
+    if port is None:
+        return None, None, "No forwarded VPN port is known for this configuration yet."
+    return host, port, None
+
+
+def check_reachability(payload):
+    """Validates a POST /api/reachability request and asks TunnelSats to
+    connect to the node through the forwarded port. Returns (http_status,
+    response_dict); the answer carries only success, latencyMs, error and the
+    probed host and port."""
+    if not isinstance(payload, dict) or set(payload.keys()) != {"nodePubkey"}:
+        return 400, {"error": "Expected exactly one field: nodePubkey"}
+    node_pubkey = payload["nodePubkey"]
+    node_pubkey = node_pubkey.strip().lower() if isinstance(node_pubkey, str) else ""
+    if not _NODE_PUBKEY_RE.match(node_pubkey):
+        return 400, {"error": "nodePubkey must be a 66-character hex Lightning node public key"}
+    host, port, reason = _reachability_target()
+    if reason is not None:
+        return 409, {"error": reason}
+
+    with _reachability_lock:
+        now = time.monotonic()
+        while _reachability_calls and now - _reachability_calls[0] >= REACHABILITY_WINDOW:
+            _reachability_calls.popleft()
+        if len(_reachability_calls) >= REACHABILITY_LIMIT:
+            retry_after = max(1, math.ceil(REACHABILITY_WINDOW - (now - _reachability_calls[0])))
+            return 429, {"error": f"Please wait {retry_after}s before checking again.", "retryAfterSeconds": retry_after}
+        _reachability_calls.append(now)
+
+    unavailable = (502, {"error": "The TunnelSats check service did not answer. Please try again later."})
+    req = urllib.request.Request(
+        f"{TUNNELSATS_API_URL}/ping/test",
+        data=json.dumps({"socket": f"{node_pubkey}@{host}:{port}"}).encode("utf-8"),
+        headers={"Content-Type": "application/json", "User-Agent": f"TunnelSats-StartOS/{get_package_version()}"},
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=REACHABILITY_TIMEOUT) as response:
+            data = json.loads(response.read(REACHABILITY_MAX_RESPONSE_BYTES).decode("utf-8"))
+    except urllib.error.HTTPError as e:
+        if e.code == 429:
+            return 429, {"error": "The TunnelSats check service is busy. Please wait a minute.",
+                         "retryAfterSeconds": 60}
+        print(f"Reachability check: HTTP {e.code} from the TunnelSats API", file=sys.stderr)
+        return unavailable
+    except Exception as e:
+        print(f"Reachability check failed: {e}", file=sys.stderr)
+        return unavailable
+    if not isinstance(data, dict):
+        return unavailable
+
+    success = data.get("success") is True
+    latency = data.get("latencyMs")
+    if isinstance(latency, bool) or not isinstance(latency, (int, float)) or not math.isfinite(latency) \
+            or not 0 <= latency <= REACHABILITY_MAX_LATENCY_MS:
+        latency = None
+    error = None if success else (
+        _dashboard_text(data.get("error"), 200) or "The node did not answer through the forwarded port."
+    )
+    return 200, {"success": success, "latencyMs": latency, "error": error, "host": host, "port": port}
 
 
 def confirmed_bandwidth_limit(meta, public_key):
