@@ -188,11 +188,19 @@ def hold_meta_lock(stdin_fd, out, acquire_timeout=META_LOCK_ACQUIRE_TIMEOUT, lea
                 fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
                 break
             except BlockingIOError:
-                if time.monotonic() >= deadline:
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
                     out.write(json.dumps({"error": "Timed out waiting for the TunnelSats metadata lock"}) + "\n")
                     out.flush()
                     return META_LOCK_EXIT_BUSY
-                time.sleep(0.02)
+                readable, _, _ = select.select([stdin_fd], [], [], min(0.02, remaining))
+                if readable and not os.read(stdin_fd, 4096):
+                    try:
+                        fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                        break
+                    except BlockingIOError:
+                        # The owner disconnected while the lock is still busy.
+                        return 0
         try:
             out.write("locked\n")
             out.flush()

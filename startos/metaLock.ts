@@ -57,7 +57,9 @@ export class MetaLockError extends Error {
 
 // Set while a job holds the lock: a nested request runs inside the outer
 // hold instead of waiting for it (flock is not reentrant across holders).
-const holding = new AsyncLocalStorage<true>()
+// `active` is cleared as soon as the outer job finishes, so a deferred
+// callback that outlives the job cannot bypass locking.
+const holding = new AsyncLocalStorage<{ active: boolean }>()
 // One holder at a time per runtime: all package procedures share one JS
 // runtime, and a second holder would only queue on the flock.
 let tail: Promise<unknown> = Promise.resolve()
@@ -150,11 +152,13 @@ async function holdWhile<R>(
     options.heartbeatMs ?? META_LOCK_HEARTBEAT_MS,
   )
   heartbeat.unref()
+  const hold = { active: true }
   let heldUntilRelease = false
   let result: R
   try {
-    result = await holding.run(true, job)
+    result = await holding.run(hold, job)
   } finally {
+    hold.active = false
     clearInterval(heartbeat)
     const activeAtEnd = !exited
     child.stdin?.end()
@@ -190,7 +194,7 @@ export function createMetaLock(
   options: MetaLockOptions = {},
 ): MetaLock {
   return <R>(job: () => Promise<R>): Promise<R> => {
-    if (holding.getStore()) return job()
+    if (holding.getStore()?.active) return job()
     const run = tail.then(
       () => scope((spawn) => holdWhile(spawn, job, options)),
       () => scope((spawn) => holdWhile(spawn, job, options)),
@@ -206,18 +210,6 @@ export function createMetaLock(
  * lock file. Works while the service is stopped too.
  */
 export function metaLockFor(effects: T.Effects): MetaLock {
-  return metaLockProvider.forEffects(effects)
-}
-
-/**
- * Where metaLockFor gets its lock. Tests that run an action outside StartOS
- * point it at the same bridge.py holder run locally (no subcontainer there).
- */
-export const metaLockProvider = {
-  forEffects: subcontainerMetaLock,
-}
-
-function subcontainerMetaLock(effects: T.Effects): MetaLock {
   return createMetaLock((use) =>
     sdk.SubContainer.withTemp(
       effects,

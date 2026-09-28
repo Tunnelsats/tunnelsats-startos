@@ -9,10 +9,10 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import {
   createMetaLock,
-  metaLockProvider,
   type HolderScope,
   type MetaLock,
 } from '../startos/metaLock'
+import { sdk } from '../startos/sdk'
 
 export const BRIDGE = join(__dirname, '..', 'bridge.py')
 
@@ -55,10 +55,81 @@ export function testLockDir(): string {
 export const testMetaLock: MetaLock = <R>(job: () => Promise<R>) =>
   createMetaLock(localScope(testLockDir()))(job)
 
+export interface MetaLockSubcontainerCall {
+  effects: unknown
+  image: { imageId: string; sharedRun?: boolean }
+  mounts: Array<{ mountpoint: string; options: Record<string, unknown> }>
+  name: string
+  command: readonly string[]
+  stdio: unknown
+}
+
+const origWithTemp = sdk.SubContainer.withTemp.bind(sdk.SubContainer)
+
 /**
- * Makes metaLockFor(effects) return testMetaLock, for tests that run an
- * action or its default ops outside StartOS.
+ * Intercepts `sdk.SubContainer.withTemp` for `'meta-lock'` so `metaLockFor`
+ * runs its real `SubContainer.withTemp`, `Mounts` and `sub.spawn` setup
+ * while executing the spawned `/app/bridge.py meta-lock` against `dataDir`.
+ */
+export function stubMetaLockSubcontainer(
+  dataDir: string,
+  onCall?: (call: MetaLockSubcontainerCall) => void,
+): () => void {
+  const prev = sdk.SubContainer.withTemp
+  ;(sdk.SubContainer as any).withTemp = async (
+    effects: unknown,
+    image: { imageId: string; sharedRun?: boolean },
+    mounts: {
+      build(): Array<{ mountpoint: string; options: Record<string, unknown> }>
+    },
+    name: string,
+    fn: (sub: {
+      spawn: (
+        cmd: readonly string[],
+        opts?: { stdio?: unknown },
+      ) => Promise<ReturnType<typeof spawn>>
+    }) => Promise<unknown>,
+  ) => {
+    if (name !== 'meta-lock') {
+      return (origWithTemp as any)(effects, image, mounts, name, fn)
+    }
+    const builtMounts = mounts.build()
+    return fn({
+      spawn: async (command, opts) => {
+        onCall?.({
+          effects,
+          image,
+          mounts: builtMounts,
+          name,
+          command,
+          stdio: opts?.stdio,
+        })
+        if (
+          command[0] !== 'python3' ||
+          command[1] !== '/app/bridge.py' ||
+          command[2] !== 'meta-lock' ||
+          opts?.stdio !== 'pipe'
+        ) {
+          throw new Error(
+            `Unexpected meta-lock subcontainer spawn: ${JSON.stringify({ command, opts })}`,
+          )
+        }
+        return spawn('python3', [BRIDGE, 'meta-lock'], {
+          env: { ...process.env, DATA_DIR: dataDir },
+          stdio: 'pipe',
+        })
+      },
+    })
+  }
+  return () => {
+    ;(sdk.SubContainer as any).withTemp = prev
+  }
+}
+
+/**
+ * Routes `metaLockFor(effects)`'s temporary subcontainer spawn to the real
+ * local `bridge.py meta-lock` holder on `testLockDir()`.
  */
 export function useTestMetaLock(): void {
-  metaLockProvider.forEffects = () => testMetaLock
+  stubMetaLockSubcontainer(testLockDir())
 }

@@ -6,11 +6,17 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { FileHelper, type T } from '@start9labs/start-sdk'
 import { metaShape } from '../startos/fileModels/tunnelsatsMeta'
-import { createMetaLock, MetaLockError } from '../startos/metaLock'
+import { createMetaLock, metaLockFor, MetaLockError } from '../startos/metaLock'
 import { payTaskReplayId, recordThenRaise } from '../startos/settlement'
 // The real bridge.py holder, run locally instead of in a subcontainer:
 // metaLockFor(effects) differs only in where the same command runs.
-import { BRIDGE, localScope, lockIsFree } from './metaLockSupport'
+import {
+  BRIDGE,
+  localScope,
+  lockIsFree,
+  stubMetaLockSubcontainer,
+  type MetaLockSubcontainerCall,
+} from './metaLockSupport'
 
 function withDir(fn: (dir: string) => Promise<void>) {
   return async () => {
@@ -34,6 +40,40 @@ test(
 )
 
 test(
+  'metaLockFor spawns bridge.py meta-lock in a temporary main subcontainer with /data mounted read-write',
+  withDir(async (dir) => {
+    const calls: MetaLockSubcontainerCall[] = []
+    const restore = stubMetaLockSubcontainer(dir, (call) => calls.push(call))
+    const effects = { id: 'effects-stub' } as unknown as T.Effects
+    try {
+      const heldDuring = await metaLockFor(effects)(
+        async () => !lockIsFree(dir),
+      )
+      assert.equal(heldDuring, true)
+      assert.equal(lockIsFree(dir), true)
+    } finally {
+      restore()
+    }
+    assert.equal(calls.length, 1)
+    assert.equal(calls[0].effects, effects)
+    assert.deepEqual(calls[0].image, { imageId: 'main' })
+    assert.equal(calls[0].name, 'meta-lock')
+    assert.deepEqual(calls[0].command, [
+      'python3',
+      '/app/bridge.py',
+      'meta-lock',
+    ])
+    assert.equal(calls[0].stdio, 'pipe')
+    assert.equal(calls[0].mounts.length, 1)
+    assert.equal(calls[0].mounts[0].mountpoint, '/data')
+    assert.equal(calls[0].mounts[0].options.type, 'volume')
+    assert.equal(calls[0].mounts[0].options.volumeId, 'main')
+    assert.equal(calls[0].mounts[0].options.subpath, null)
+    assert.equal(calls[0].mounts[0].options.readonly, false)
+  }),
+)
+
+test(
   'withMetaLock releases the lock when the job throws',
   withDir(async (dir) => {
     const lock = createMetaLock(localScope(dir))
@@ -48,17 +88,39 @@ test(
 )
 
 test(
-  'withMetaLock is reentrant and serializes jobs of one runtime',
+  'withMetaLock is reentrant while held, but a deferred callback after release acquires a fresh lock',
   withDir(async (dir) => {
-    const lock = createMetaLock(localScope(dir))
+    let spawns = 0
+    const baseScope = localScope(dir)
+    const lock = createMetaLock((use) =>
+      baseScope((spawnHolder) =>
+        use(async () => {
+          spawns++
+          return spawnHolder()
+        }),
+      ),
+    )
     const log: string[] = []
-    const nested = await lock(async () =>
-      lock(async () => {
+    let deferred!: Promise<boolean>
+    const nested = await lock(async () => {
+      deferred = new Promise<boolean>((resolve, reject) => {
+        setTimeout(() => {
+          lock(async () => !lockIsFree(dir)).then(resolve, reject)
+        }, 30)
+      })
+      return lock(async () => {
         log.push('nested')
         return 'ok'
-      }),
-    )
+      })
+    })
     assert.equal(nested, 'ok')
+    assert.equal(spawns, 1, 'nested call must reuse the outer holder')
+    assert.equal(
+      await deferred,
+      true,
+      'deferred callback after release must acquire a new holder',
+    )
+    assert.equal(spawns, 2)
     let active = 0
     let maxActive = 0
     await Promise.all(

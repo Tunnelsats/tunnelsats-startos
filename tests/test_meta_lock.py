@@ -162,24 +162,44 @@ class TestHoldMetaLockTimeouts(MetaLockBase):
 
     def test_waits_for_a_python_writer_then_locks(self):
         released = threading.Event()
+        r, w = os.pipe()
 
         def python_writer():
             with bridge.meta_lock():
                 time.sleep(0.3)
             released.set()
+            os.close(w)  # EOF once the holder can take the lock
 
         t = threading.Thread(target=python_writer)
         t.start()
         time.sleep(0.05)
-        r, w = os.pipe()
-        os.close(w)  # EOF right after locking
         out = tempfile.TemporaryFile("w+")
         try:
             code = bridge.hold_meta_lock(r, out, acquire_timeout=5, lease=5)
             self.assertTrue(released.is_set())
             self.assertEqual(code, 0)
+            out.seek(0)
+            self.assertEqual(out.read(), "locked\nreleased\n")
         finally:
             t.join()
+            os.close(r)
+            out.close()
+
+    def test_disconnected_owner_stops_polling_before_acquire_timeout(self):
+        fd = os.open(self.lock_path, os.O_RDWR | os.O_CREAT, 0o600)
+        fcntl.flock(fd, fcntl.LOCK_EX)
+        r, w = os.pipe()
+        os.close(w)  # Owner already disconnected while the lock is busy
+        out = tempfile.TemporaryFile("w+")
+        try:
+            started = time.monotonic()
+            code = bridge.hold_meta_lock(r, out, acquire_timeout=10, lease=5)
+            self.assertEqual(code, 0)
+            self.assertLess(time.monotonic() - started, 1)
+            out.seek(0)
+            self.assertEqual(out.read(), "")
+        finally:
+            os.close(fd)
             os.close(r)
             out.close()
 
