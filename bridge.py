@@ -1217,9 +1217,28 @@ def get_package_version():
     _package_version_cache = "0.4.0"
     return _package_version_cache
 
+DASHBOARD_CSP = (
+    "default-src 'self'; "
+    "script-src 'self'; "
+    "style-src 'self'; "
+    "img-src 'self' data:; "
+    "connect-src 'self'; "
+    "font-src 'self'; "
+    "object-src 'none'; "
+    "base-uri 'none'; "
+    "form-action 'none'"
+)
+
+
 class DashboardHTTPRequestHandler(BaseHTTPRequestHandler):
     def log_message(self, format, *args):
         pass
+
+    def end_headers(self):
+        self.send_header("X-Content-Type-Options", "nosniff")
+        self.send_header("Content-Security-Policy", DASHBOARD_CSP)
+        self.send_header("Referrer-Policy", "no-referrer")
+        super().end_headers()
 
     def is_trusted_request(self):
         client_ip = self.client_address[0]
@@ -1312,11 +1331,11 @@ class DashboardHTTPRequestHandler(BaseHTTPRequestHandler):
         return True
 
     def do_GET(self):
+        if not self.is_trusted_request():
+            return
+
         path_only = self.path.partition('?')[0].partition('#')[0]
         if path_only == "/api/status":
-            if not self.is_trusted_request():
-                return
-
             from urllib.parse import urlparse, parse_qs
             query_params = parse_qs(urlparse(self.path).query)
             force_sync = query_params.get("force", ["0"])[0] in ("1", "true", "yes")
@@ -1364,8 +1383,6 @@ class DashboardHTTPRequestHandler(BaseHTTPRequestHandler):
             return
 
         if path_only == "/api/csrf":
-            if not self.is_trusted_request():
-                return
             self.send_response(200)
             self.send_header("Content-Type", "application/json")
             self.end_headers()
@@ -1374,8 +1391,6 @@ class DashboardHTTPRequestHandler(BaseHTTPRequestHandler):
 
         if path_only == "/api/dashboard":
             # Read-only: never triggers a sync or any other outbound call.
-            if not self.is_trusted_request():
-                return
             try:
                 body = json.dumps(get_dashboard()).encode("utf-8")
             except Exception as e:
@@ -1389,12 +1404,12 @@ class DashboardHTTPRequestHandler(BaseHTTPRequestHandler):
             self.wfile.write(body)
             return
 
-        web_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "web"))
+        web_dir = os.path.realpath(os.path.join(os.path.dirname(__file__), "web"))
         target_path = path_only.lstrip("/")
         if not target_path or target_path == "":
             target_path = "index.html"
 
-        safe_path = os.path.abspath(os.path.join(web_dir, target_path))
+        safe_path = os.path.realpath(os.path.join(web_dir, target_path))
         if os.path.commonpath([web_dir, safe_path]) != web_dir:
             self.send_error(403, "Access denied")
             return

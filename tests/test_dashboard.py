@@ -331,12 +331,27 @@ class TestDashboardEndpoint(DashboardStateTestBase):
         finally:
             conn.close()
 
+    def post(self, path, body=b"{}", headers=None):
+        conn = http.client.HTTPConnection("127.0.0.1", self.server.server_address[1], timeout=5)
+        try:
+            conn.request("POST", path, body=body, headers=headers or {})
+            res = conn.getresponse()
+            return res.status, dict(res.getheaders()), res.read()
+        finally:
+            conn.close()
+
+    def assert_security_headers(self, headers):
+        self.assertEqual(headers.get("Content-Security-Policy"), bridge.DASHBOARD_CSP)
+        self.assertEqual(headers.get("X-Content-Type-Options"), "nosniff")
+        self.assertEqual(headers.get("Referrer-Policy"), "no-referrer")
+
     def test_get_dashboard_returns_the_read_model(self):
         priv, pub, _ = self.configure("eclair")
         status, headers, body = self.get("/api/dashboard")
         self.assertEqual(status, 200)
         self.assertEqual(headers["Content-Type"], "application/json")
         self.assertEqual(headers["Cache-Control"], "no-store")
+        self.assert_security_headers(headers)
         model = json.loads(body)
         self.assertEqual(model["targetNode"], "eclair")
         self.assertEqual(model["connection"]["publicKey"], pub)
@@ -344,9 +359,12 @@ class TestDashboardEndpoint(DashboardStateTestBase):
         self.assertEqual(forbidden_keys(model), [])
 
     def test_get_dashboard_rejects_untrusted_hosts(self):
-        status, _, _ = self.get("/api/dashboard", {"Host": "attacker.example"})
+        status, headers, _ = self.get("/api/dashboard", {"Host": "attacker.example"})
         self.assertEqual(status, 403)
+        self.assert_security_headers(headers)
         status, _, _ = self.get("/api/dashboard", {"Origin": "https://attacker.example"})
+        self.assertEqual(status, 403)
+        status, _, _ = self.get("/", {"Host": "attacker.example"})
         self.assertEqual(status, 403)
 
     def test_get_dashboard_never_syncs(self):
@@ -357,6 +375,39 @@ class TestDashboardEndpoint(DashboardStateTestBase):
         self.assertEqual(status, 200)
         sync.assert_not_called()
         urlopen.assert_not_called()
+
+    def test_static_assets_and_security_headers(self):
+        for path, expected_type in (
+            ("/", "text/html; charset=utf-8"),
+            ("/script.js", "application/javascript"),
+            ("/style.css", "text/css"),
+        ):
+            with self.subTest(path=path):
+                status, headers, body = self.get(path)
+                self.assertEqual(status, 200)
+                self.assertEqual(headers.get("Content-Type"), expected_type)
+                self.assert_security_headers(headers)
+                self.assertGreater(len(body), 0)
+
+        status, headers, _ = self.get("/qrcode.js")
+        self.assertEqual(status, 404)
+        self.assert_security_headers(headers)
+
+        status, headers, body = self.get("/../bridge.py")
+        self.assertEqual(status, 403)
+        self.assert_security_headers(headers)
+        self.assertNotIn(b"DashboardHTTPRequestHandler", body)
+
+    def test_removed_post_routes_return_404_over_http(self):
+        csrf_headers = {
+            "Content-Type": "application/json",
+            "X-CSRF-Token": bridge.get_csrf_token(),
+        }
+        for path in ("/api/keys/generate", "/api/config/save"):
+            with self.subTest(path=path):
+                status, headers, _ = self.post(path, body=b'{"target_node":"lnd"}', headers=csrf_headers)
+                self.assertEqual(status, 404)
+                self.assert_security_headers(headers)
 
 
 if __name__ == "__main__":
