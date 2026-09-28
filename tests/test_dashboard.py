@@ -194,7 +194,10 @@ class TestDashboardReadModel(DashboardStateTestBase):
             "publicKey": s["pub"], "allowIpv6": False,
         })
         self.assertEqual(model["plans"], bridge.PLAN_PRICES_USD)
-        self.assertEqual(model["bandwidth"], {"usedGb": 42.5, "limitGb": 100})
+        self.assertEqual(model["bandwidth"], {
+            "usedGb": 42.5, "limitGb": 100, "resetsThisMonth": None, "maxResetsPerMonth": None,
+            "resetThresholdPct": 70,
+        })
         self.assertEqual(model["pending"]["order"], {
             "targetNode": "cln", "serverId": "eu-de", "duration": "3m",
             "createdAt": self.iso(self.now),

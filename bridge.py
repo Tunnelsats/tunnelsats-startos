@@ -31,7 +31,8 @@ INTENTS_FILE_PATH = os.path.join(DATA_DIR, "dashboard-intents.json")
 INTENT_RESULTS_FILE_PATH = os.path.join(DATA_DIR, "dashboard-intent-results.json")
 TUNNELSATS_API_URL = "https://tunnelsats.com/api/public/v1"
 # Fields that only hold for the key they were confirmed for (see lazy_sync).
-CONFIRMED_META_FIELDS = ("expiresAt", "expirySource", "lastSync", "syncSuccess", "bandwidth_used_gb")
+CONFIRMED_META_FIELDS = ("expiresAt", "expirySource", "lastSync", "syncSuccess", "bandwidth_used_gb",
+                         "bandwidth_limit_gb", "bandwidth_resets_this_month", "max_resets_per_month")
 # The unknown-key state (see _record_not_found) belongs to one key as well.
 KEY_BOUND_META_FIELDS = CONFIRMED_META_FIELDS + ("keyUnknown", "notFoundSince")
 # The status endpoint's error code for "no subscription for this key".
@@ -439,6 +440,26 @@ def _is_not_found_answer(http_error):
     return isinstance(body, dict) and body.get("error") == STATUS_NOT_FOUND_CODE
 
 
+MAX_BANDWIDTH_LIMIT_GB = 1_000_000
+MAX_RESET_COUNT = 1000
+
+
+def valid_bandwidth_limit(value):
+    """A monthly bandwidth limit in GB from the API: a finite number above 0
+    (and below a sanity bound); None for anything else."""
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return None
+    return value if math.isfinite(value) and 0 < value <= MAX_BANDWIDTH_LIMIT_GB else None
+
+
+def valid_reset_count(value):
+    """A count of bandwidth resets from the API: a whole number from 0 (and
+    below a sanity bound); None for anything else."""
+    if isinstance(value, bool) or not isinstance(value, int):
+        return None
+    return value if 0 <= value <= MAX_RESET_COUNT else None
+
+
 def lazy_sync(wg_pubkey, require_usage=False):
     """Refreshes the confirmed subscription state for wg_pubkey.
 
@@ -519,6 +540,16 @@ def lazy_sync(wg_pubkey, require_usage=False):
         if require_usage and "bandwidth_used_gb" not in fields:
             raise ValueError("TunnelSats API returned no valid bandwidth usage for this key")
 
+        # The monthly quota. A confirmed answer without a valid value drops
+        # the stored one: a stale limit or reset count is worse than none.
+        quota = {
+            "bandwidth_limit_gb": valid_bandwidth_limit(response_data.get("bandwidth_limit_gb")),
+            "bandwidth_resets_this_month": valid_reset_count(response_data.get("bandwidth_resets_this_month")),
+            "max_resets_per_month": valid_reset_count(response_data.get("max_resets_per_month")),
+        }
+        fields.update({name: value for name, value in quota.items() if value is not None})
+        dropped_quota = [name for name, value in quota.items() if value is None]
+
         with meta_lock():
             if _superseded(wg_pubkey):
                 print("Subscription sync result dropped: the configured key changed", file=sys.stderr)
@@ -528,6 +559,8 @@ def lazy_sync(wg_pubkey, require_usage=False):
             meta = read_meta()
             _bind_meta_to_key(meta, wg_pubkey)
             meta.update(fields)
+            for name in dropped_quota:
+                meta.pop(name, None)
             meta["lastSync"] = datetime.now(timezone.utc).isoformat()
             meta["syncSuccess"] = True
             meta["syncError"] = None
@@ -1403,7 +1436,7 @@ class DashboardHTTPRequestHandler(BaseHTTPRequestHandler):
                 "internal_octet": status_data.get("internal_octet", "Unknown"),
                 "last_sync": status_data.get("last_sync"),
                 "bandwidth_used_gb": status_data.get("bandwidth_used_gb", 0.0),
-                "bandwidth_limit_gb": 100,
+                "bandwidth_limit_gb": status_data.get("bandwidth_limit_gb", BANDWIDTH_LIMIT_GB),
                 "csrf_token": get_csrf_token(),
             }
             self.wfile.write(json.dumps(response).encode("utf-8"))
@@ -1829,7 +1862,7 @@ def get_status():
         "sync_error": sub_info.get("syncError"),
         "key_unknown": bool(sub_info.get("keyUnknown")),
         "bandwidth_used_gb": sub_info.get("bandwidthUsedGb", 0.0),
-        "bandwidth_limit_gb": 100,
+        "bandwidth_limit_gb": confirmed_bandwidth_limit(read_meta(), current_pubkey),
         "version": get_package_version(),
         "allow_ipv6": is_allow_ipv6(),
     }
@@ -1845,7 +1878,11 @@ def get_status():
 # an allowed name.
 
 DASHBOARD_TEXT_LIMIT = 300
+# Shown until the API confirmed the limit for the current key.
 BANDWIDTH_LIMIT_GB = 100
+# The server's default usage threshold for a paid bandwidth reset. The server
+# may configure another one and decides; the dashboard only uses it as a hint.
+RESET_THRESHOLD_DEFAULT_PCT = 70
 BASE_PRICE_USD = 3.0
 PLAN_DISCOUNTS_PCT = ((1, 0), (3, 5), (6, 10), (12, 20))
 PLAN_PRICES_USD = [
@@ -2304,6 +2341,32 @@ def submit_dashboard_intent(payload, now=None):
     return 202, {"status": "accepted", "intent": intent_view}
 
 
+def confirmed_bandwidth_limit(meta, public_key):
+    """The monthly limit the API confirmed for public_key, else the default."""
+    if public_key and meta.get("publicKey") == public_key:
+        limit = valid_bandwidth_limit(meta.get("bandwidth_limit_gb"))
+        if limit is not None:
+            return limit
+    return BANDWIDTH_LIMIT_GB
+
+
+def _bandwidth_summary(meta, public_key, now):
+    """Usage and reset quota for the current key. Usage and the resets used
+    reset on the 1st (UTC), so they are shown only from a sync in the
+    current UTC month; the limit and the allowance are not monthly."""
+    same_key = public_key is not None and meta.get("publicKey") == public_key
+    synced = _parse_iso(meta.get("lastSync")) if same_key else None
+    synced = synced.astimezone(timezone.utc) if synced is not None else None
+    this_month = synced is not None and (synced.year, synced.month) == (now.year, now.month)
+    return {
+        "usedGb": _dashboard_amount(meta.get("bandwidth_used_gb")) if this_month else None,
+        "limitGb": confirmed_bandwidth_limit(meta, public_key),
+        "resetsThisMonth": valid_reset_count(meta.get("bandwidth_resets_this_month")) if this_month else None,
+        "maxResetsPerMonth": valid_reset_count(meta.get("max_resets_per_month")) if same_key else None,
+        "resetThresholdPct": RESET_THRESHOLD_DEFAULT_PCT,
+    }
+
+
 def get_dashboard():
     """The dashboard read model. See the section comment above: an explicit
     allow-list, never a secret."""
@@ -2313,7 +2376,6 @@ def get_dashboard():
     if public_key in ("Unknown", "None", "Not available") or not isinstance(public_key, str):
         public_key = None
     meta = read_meta()
-    same_key = public_key is not None and meta.get("publicKey") == public_key
     server = status.get("server")
     vpn_ip = status.get("vpn_ip")
     days = status.get("days_remaining")
@@ -2341,10 +2403,7 @@ def get_dashboard():
             "publicKey": public_key,
             "allowIpv6": bool(status.get("allow_ipv6")),
         },
-        "bandwidth": {
-            "usedGb": _dashboard_amount(meta.get("bandwidth_used_gb")) if same_key else None,
-            "limitGb": BANDWIDTH_LIMIT_GB,
-        },
+        "bandwidth": _bandwidth_summary(meta, public_key, now),
         "pending": {
             "order": _pending_summary(meta, "pendingOrder", public_key, now=now),
             "renewal": _pending_summary(meta, "pendingRenewal", public_key, now=now),
