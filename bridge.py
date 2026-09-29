@@ -3763,7 +3763,7 @@ def _record_nwc_failure(wg_pubkey, payment_hash, err, now, force_fallback=False,
         trip_fallback = bool(
             force_fallback
             or budget_warning
-            or (payment_hash and attempts >= NWC_MAX_ATTEMPTS)
+            or attempts >= NWC_MAX_ATTEMPTS
         )
         if meta.get("nwcConnected") is True:
             nwc_state.update({
@@ -3930,11 +3930,25 @@ def maybe_nwc_auto_renew(wg_pubkey, now=None):
                 reusable_pending = dict(pending)
 
         if reusable_pending is None:
+            raw_server = meta.get("serverDomain")
+            if not isinstance(raw_server, str) or not raw_server.strip() or raw_server.strip() in ("Unknown", "None"):
+                cfg_host = None
+                try:
+                    with open(CONFIG_PATH, "r") as f:
+                        cfg_host = extract_server_host(f.read())
+                except OSError:
+                    cfg_host = None
+                raw_server = (
+                    cfg_host
+                    if isinstance(cfg_host, str) and cfg_host.strip() and cfg_host.strip() not in ("Unknown", "None")
+                    else "eu-de"
+                )
+            server_id = raw_server.strip()
             try:
                 _status, renew_data = _api_call(
                     "POST",
                     "/subscription/renew",
-                    {"wgPublicKey": wg_pubkey, "duration": months},
+                    {"serverId": server_id, "wgPublicKey": wg_pubkey, "duration": months},
                 )
             except Exception as e:
                 err = NwcError(f"Could not create TunnelSats renewal invoice: {e}", code="API_ERROR", permanent=False)

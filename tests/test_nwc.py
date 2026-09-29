@@ -380,7 +380,10 @@ class TestNwcAutoRenew(unittest.TestCase):
 
         def fake_api_call(method, path, payload=None):
             if method == "POST" and path == "/subscription/renew":
-                self.assertEqual(payload, {"wgPublicKey": self.wg_pubkey, "duration": 3})
+                self.assertEqual(
+                    payload,
+                    {"serverId": "eu-de", "wgPublicKey": self.wg_pubkey, "duration": 3},
+                )
                 return 200, {
                     "renewalId": "ren-123",
                     "paymentHash": self.payment_hash,
