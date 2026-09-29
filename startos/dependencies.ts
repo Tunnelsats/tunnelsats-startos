@@ -278,8 +278,12 @@ export function isCurrentPeriodNwcFailure(
 ): boolean {
   const st = meta?.nwcAutoRenewState
   if (!st?.fallbackTaskRaised && !st?.budgetWarning) return false
-  if (st.periodExpiry && meta?.expiresAt && st.periodExpiry !== meta.expiresAt) {
-    return false
+  if (st.periodExpiry && meta?.expiresAt) {
+    const periodMs = new Date(st.periodExpiry).getTime()
+    const currentMs = new Date(meta.expiresAt).getTime()
+    if (!isNaN(periodMs) && !isNaN(currentMs) && currentMs > periodMs) {
+      return false
+    }
   }
   return true
 }

@@ -213,6 +213,15 @@ class TestNwcAutoRenew(unittest.TestCase):
         self.assertTrue(parsed_onion["hasOnionRelay"])
         self.assertEqual(parsed_onion["relays"], ["ws://myhub.onion:8080/v1"])
 
+        # Preserves relay query strings and bracketed IPv6 addresses
+        query_ipv6_uri = (
+            f"nostr+walletconnect://{self.wallet_pubkey}"
+            f"?relay=wss%3A%2F%2F%5B2001%3Adb8%3A%3A1%5D%3A8443%2Fws%3Ftoken%3Dxyz&secret={self.client_secret}"
+        )
+        parsed_q = bridge.parse_nwc_uri(query_ipv6_uri)
+        self.assertEqual(parsed_q["relays"], ["wss://[2001:db8::1]:8443/ws?token=xyz"])
+        self.assertEqual(parsed_q["relayHost"], "[2001:db8::1]")
+
         with self.assertRaisesRegex(ValueError, r"only allowed for \.onion"):
             bridge.parse_nwc_uri(
                 f"nostr+walletconnect://{self.wallet_pubkey}?relay=ws://relay.getalby.com/v1&secret={self.client_secret}"
@@ -250,13 +259,13 @@ class TestNwcAutoRenew(unittest.TestCase):
         decrypted = bridge._nip04_decrypt(shared_b, encrypted)
         self.assertEqual(json.loads(decrypted), {"method": "get_budget", "params": {}})
 
-        # Verify bit-for-bit interoperability with OpenSSL/cryptography AES-256-CBC
-        from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
-        ct_b64, _, iv_b64 = encrypted.partition("?iv=")
-        ossl_dec = Cipher(algorithms.AES(shared_a), modes.CBC(base64.b64decode(iv_b64))).decryptor()
-        padded = ossl_dec.update(base64.b64decode(ct_b64)) + ossl_dec.finalize()
-        pad_len = padded[-1]
-        self.assertEqual(padded[:-pad_len].decode("utf-8"), '{"method":"get_budget","params":{}}')
+        # Verify bit-for-bit interoperability against NIST FIPS-197 Appendix C.3 AES-256 test vector
+        nist_key = bytes.fromhex("000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f")
+        nist_pt = bytes.fromhex("00112233445566778899aabbccddeeff")
+        nist_ct = bytes.fromhex("8ea2b7ca516745bfeafc49904b496089")
+        rk = bridge._aes256_expand_key(nist_key)
+        self.assertEqual(bridge._aes256_encrypt_block(nist_pt, rk), nist_ct)
+        self.assertEqual(bridge._aes256_decrypt_block(nist_ct, rk), nist_pt)
 
         req_event, shared_key = bridge._build_nip47_request_event(
             self.client_secret, self.wallet_pubkey, "pay_invoice", {"invoice": self.valid_invoice}, created_at=1700000000
@@ -458,9 +467,47 @@ class TestNwcAutoRenew(unittest.TestCase):
         self.assertTrue(meta["nwcAutoRenewState"]["budgetWarning"])
         self.assertTrue(meta["nwcAutoRenewState"]["fallbackTaskRaised"])
         self.assertTrue(meta["pendingRenewal"]["raisePayTask"])
+        # Because pay_invoice was never called, paidViaNwc is False so manual payment is not misattributed
+        self.assertFalse(meta["pendingRenewal"]["paidViaNwc"])
 
-        # 2. Transient errors retry up to K=3 attempts before raising fallback
+        # Shortened or same expiry does not clear fallback state, only strictly later expiry does
+        self.assertFalse(bridge._nwc_period_advanced(old_expiry, _iso_in(now, days=3)))
+        self.assertFalse(bridge._nwc_period_advanced(old_expiry, old_expiry))
+        self.assertTrue(bridge._nwc_period_advanced(old_expiry, _iso_in(now, days=30)))
+
+        # Disconnecting wallet during budget preflight aborts before pay_invoice is called
         reset_state()
+        pay_called = False
+
+        def disconnect_during_preflight(_parsed, method, _params, **_kw):
+            nonlocal pay_called
+            if method == "get_budget":
+                os.remove(self.wallet_path)
+                m = bridge.read_meta()
+                m["nwcConnected"] = False
+                bridge.atomic_write_json(self.meta_path, m)
+                return {"remaining_budget": 50_000_000}
+            if method == "pay_invoice":
+                pay_called = True
+            return {}
+
+        with (
+            patch.object(bridge, "_api_call", side_effect=fake_renew),
+            patch.object(bridge, "nwc_execute_command", side_effect=disconnect_during_preflight),
+        ):
+            res_disc = bridge.maybe_nwc_auto_renew(self.wg_pubkey, now=now)
+        self.assertEqual(res_disc["result"], "disabled")
+        self.assertFalse(pay_called)
+
+        # 2. Transient errors retry up to K=3 attempts before raising fallback,
+        # and an "unknown" payment status preserves the existing pending invoice
+        reset_state()
+        renew_api_calls = 0
+
+        def counting_renew(*_a, **_kw):
+            nonlocal renew_api_calls
+            renew_api_calls += 1
+            return 200, {"renewalId": "r1", "paymentHash": self.payment_hash, "invoice": self.valid_invoice}
 
         def transient_fail_nwc(_parsed, method, _params, **_kw):
             if method in ("get_budget", "get_balance", "lookup_invoice"):
@@ -468,21 +515,29 @@ class TestNwcAutoRenew(unittest.TestCase):
             raise bridge.NwcError("Relay timeout", code="INTERNAL", permanent=False)
 
         with (
-            patch.object(bridge, "_api_call", side_effect=fake_renew),
+            patch.object(bridge, "_api_call", side_effect=counting_renew),
             patch.object(bridge, "_payment_state", return_value="unpaid"),
             patch.object(bridge, "nwc_execute_command", side_effect=transient_fail_nwc),
         ):
             r1 = bridge.maybe_nwc_auto_renew(self.wg_pubkey, now=now)
             self.assertEqual(r1["result"], "retry-scheduled")
+            self.assertEqual(renew_api_calls, 1)
             self.assertFalse(bridge.read_meta()["pendingRenewal"].get("raisePayTask"))
 
             # Within backoff window -> returns backoff
             r_backoff = bridge.maybe_nwc_auto_renew(self.wg_pubkey, now=now + timedelta(minutes=10))
             self.assertEqual(r_backoff["result"], "backoff")
 
-            # Attempt 2 after 1 hour
+            # If _payment_state returns "unknown" after an NWC attempt, existing invoice is preserved (no new /subscription/renew call)
+            with patch.object(bridge, "_payment_state", return_value="unknown"):
+                r_unk = bridge.maybe_nwc_auto_renew(self.wg_pubkey, now=now + timedelta(hours=1, minutes=1))
+            self.assertEqual(r_unk["result"], "deferred-unknown-status")
+            self.assertEqual(renew_api_calls, 1)
+
+            # Attempt 2 after 1 hour (1h invoice TTL elapsed and API confirms unpaid -> fetches fresh invoice)
             r2 = bridge.maybe_nwc_auto_renew(self.wg_pubkey, now=now + timedelta(hours=1, minutes=1))
             self.assertEqual(r2["result"], "retry-scheduled")
+            self.assertEqual(renew_api_calls, 2)
             self.assertFalse(bridge.read_meta()["pendingRenewal"].get("raisePayTask"))
 
             # Attempt 3 after another hour -> trips fallback!

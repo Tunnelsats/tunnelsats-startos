@@ -148,7 +148,14 @@ export function startConnectWallet(
         .catch(() => null),
     writeWalletFile: async (record) => {
       await nwcWallet.write(effects, record)
-      await chmod(walletPath, 0o600).catch(() => undefined)
+      try {
+        await chmod(walletPath, 0o600)
+      } catch (e) {
+        await rm(walletPath, { force: true }).catch(() => undefined)
+        throw new Error(
+          `Could not apply restrictive 0600 permissions to nwc-wallet.json: ${e instanceof Error ? e.message : String(e)}`,
+        )
+      }
     },
     removeWalletFile: async () => {
       await rm(walletPath, { force: true })

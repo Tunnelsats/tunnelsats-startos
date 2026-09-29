@@ -641,7 +641,7 @@ def lazy_sync(wg_pubkey, require_usage=False):
             nwc_state = meta.get("nwcAutoRenewState")
             if isinstance(nwc_state, dict):
                 period_exp = nwc_state.get("periodExpiry")
-                if (period_exp and period_exp != expiry) or (old_expiry and old_expiry != expiry):
+                if _nwc_period_advanced(period_exp or old_expiry, expiry):
                     nwc_state = dict(nwc_state)
                     nwc_state.update({
                         "periodExpiry": expiry,
@@ -2777,14 +2777,23 @@ def _nwc_recommended_budget(resolved_months, last_amount_sats=None, last_months=
     }
 
 
+def _nwc_period_advanced(period_expiry_iso, current_expiry_iso):
+    """True only when the confirmed expiry strictly advanced past periodExpiry
+    (indicating a completed renewal into a new period, rather than a server-side
+    shortening or timestamp format difference)."""
+    p_dt = _parse_iso(period_expiry_iso)
+    c_dt = _parse_iso(current_expiry_iso)
+    if p_dt is None or c_dt is None:
+        return False
+    return c_dt > p_dt
+
+
 def _is_current_nwc_period_failure(meta, state):
     if not isinstance(state, dict):
         return False
     if not state.get("fallbackTaskRaised") and not state.get("budgetWarning") and not state.get("lastError"):
         return False
-    period_exp = state.get("periodExpiry")
-    current_exp = meta.get("expiresAt")
-    if period_exp and current_exp and period_exp != current_exp:
+    if _nwc_period_advanced(state.get("periodExpiry"), meta.get("expiresAt")):
         return False
     return True
 
@@ -2924,13 +2933,17 @@ def parse_nwc_uri(raw_input):
             raise ValueError(f"Invalid port in relay URL ({hostname}).")
         if is_onion:
             has_onion_relay = True
+        host_literal = f"[{hostname}]" if ":" in hostname else hostname
         path = parsed_relay.path if parsed_relay.path and parsed_relay.path != "/" else ""
+        query_suffix = f"?{parsed_relay.query}" if parsed_relay.query else ""
+        if query_suffix and not path:
+            path = "/"
         port_suffix = f":{port}" if port else ""
-        normalized_relay = f"{scheme}://{hostname}{port_suffix}{path}"
+        normalized_relay = f"{scheme}://{host_literal}{port_suffix}{path}{query_suffix}"
         if normalized_relay not in relays:
             relays.append(normalized_relay)
-        if hostname not in relay_hosts:
-            relay_hosts.append(hostname)
+        if host_literal not in relay_hosts:
+            relay_hosts.append(host_literal)
 
     secrets_list = [v.strip().lower() for k, v in params if k == "secret" and v.strip()]
     if not secrets_list:
@@ -3356,9 +3369,14 @@ def _parse_nip47_response_event(resp_event, request_event_id, wallet_pubkey_hex,
 
 # ─── Minimal RFC 6455 WebSocket + SOCKS5h Client ─────────────────────────────
 
-def _recv_exact(sock, length):
+def _recv_exact(sock, length, deadline=None):
     buf = bytearray()
     while len(buf) < length:
+        if deadline is not None:
+            rem = deadline - time.monotonic()
+            if rem <= 0:
+                raise TimeoutError("Timed out reading from NWC relay")
+            sock.settimeout(min(rem, 15.0))
         chunk = sock.recv(length - len(buf))
         if not chunk:
             raise ConnectionError("Socket closed prematurely")
@@ -3373,12 +3391,13 @@ def _connect_socks5h(target_host, target_port, timeout=15):
     host_bytes = target_host.encode("idna")
     if not (1 <= len(host_bytes) <= 255):
         raise NwcError("Invalid relay hostname for SOCKS5h proxy")
+    deadline = time.monotonic() + timeout
     try:
         sock = socket.create_connection((TOR_SOCKS_HOST, TOR_SOCKS_PORT), timeout=timeout)
         sock.settimeout(timeout)
         # RFC 1928 Greeting: VER=5, NMETHODS=1, METHOD=0 (No Auth)
         sock.sendall(b"\x05\x01\x00")
-        ver, method = _recv_exact(sock, 2)
+        ver, method = _recv_exact(sock, 2, deadline=deadline)
         if ver != 5 or method != 0:
             sock.close()
             raise NwcError("Tor SOCKS5 proxy rejected authentication method")
@@ -3390,17 +3409,17 @@ def _connect_socks5h(target_host, target_port, timeout=15):
             + int(target_port).to_bytes(2, "big")
         )
         sock.sendall(req)
-        ver, rep, _rsv, atyp = _recv_exact(sock, 4)
+        ver, rep, _rsv, atyp = _recv_exact(sock, 4, deadline=deadline)
         if ver != 5 or rep != 0:
             sock.close()
             raise NwcError(f"Tor SOCKS5 proxy could not connect to relay (SOCKS code {rep})")
         if atyp == 1:
-            _recv_exact(sock, 4 + 2)
+            _recv_exact(sock, 4 + 2, deadline=deadline)
         elif atyp == 3:
-            addr_len = _recv_exact(sock, 1)[0]
-            _recv_exact(sock, addr_len + 2)
+            addr_len = _recv_exact(sock, 1, deadline=deadline)[0]
+            _recv_exact(sock, addr_len + 2, deadline=deadline)
         elif atyp == 4:
-            _recv_exact(sock, 16 + 2)
+            _recv_exact(sock, 16 + 2, deadline=deadline)
         else:
             sock.close()
             raise NwcError("Tor SOCKS5 proxy returned unknown address type")
@@ -3428,34 +3447,34 @@ def _ws_send_frame(sock, opcode, payload_bytes):
     sock.sendall(bytes(header) + masked)
 
 
-def _ws_read_single_frame(sock, max_bytes=262144):
-    b0, b1 = _recv_exact(sock, 2)
+def _ws_read_single_frame(sock, max_bytes=262144, deadline=None):
+    b0, b1 = _recv_exact(sock, 2, deadline=deadline)
     fin = bool(b0 & 0x80)
     opcode = b0 & 0x0F
     masked = bool(b1 & 0x80)
     length = b1 & 0x7F
     if length == 126:
-        length = int.from_bytes(_recv_exact(sock, 2), "big")
+        length = int.from_bytes(_recv_exact(sock, 2, deadline=deadline), "big")
     elif length == 127:
-        length = int.from_bytes(_recv_exact(sock, 8), "big")
+        length = int.from_bytes(_recv_exact(sock, 8, deadline=deadline), "big")
     if length > max_bytes:
         raise NwcError("Relay WebSocket frame exceeds size limit")
-    mask_key = _recv_exact(sock, 4) if masked else None
-    payload = _recv_exact(sock, length) if length > 0 else b""
+    mask_key = _recv_exact(sock, 4, deadline=deadline) if masked else None
+    payload = _recv_exact(sock, length, deadline=deadline) if length > 0 else b""
     if mask_key:
         payload = bytes(b ^ mask_key[i & 3] for i, b in enumerate(payload))
     return fin, opcode, payload
 
 
-def _ws_recv_frame(sock, max_bytes=262144):
-    fin, opcode, payload = _ws_read_single_frame(sock, max_bytes=max_bytes)
+def _ws_recv_frame(sock, max_bytes=262144, deadline=None):
+    fin, opcode, payload = _ws_read_single_frame(sock, max_bytes=max_bytes, deadline=deadline)
     if fin or opcode >= 0x8:
         return opcode, payload
     if opcode == 0x0:
         raise NwcError("Unexpected WebSocket continuation frame without initial frame")
     assembled = bytearray(payload)
     while True:
-        c_fin, c_opcode, c_payload = _ws_read_single_frame(sock, max_bytes=max_bytes)
+        c_fin, c_opcode, c_payload = _ws_read_single_frame(sock, max_bytes=max_bytes, deadline=deadline)
         if c_opcode == 0x8:
             return 0x8, c_payload
         if c_opcode == 0x9:
@@ -3489,6 +3508,7 @@ def _ws_open(relay_url, route_via_tor=False, timeout=15):
     if parsed.query:
         path = f"{path}?{parsed.query}"
 
+    deadline = time.monotonic() + timeout
     use_tor = bool(route_via_tor or is_onion)
     if use_tor:
         raw_sock = _connect_socks5h(hostname, port, timeout=timeout)
@@ -3508,7 +3528,8 @@ def _ws_open(relay_url, route_via_tor=False, timeout=15):
 
         ws_key = base64.b64encode(os.urandom(16)).decode("ascii")
         default_port = (scheme == "wss" and port == 443) or (scheme == "ws" and port == 80)
-        host_hdr = hostname if default_port else f"{hostname}:{port}"
+        host_literal = f"[{hostname}]" if ":" in hostname else hostname
+        host_hdr = host_literal if default_port else f"{host_literal}:{port}"
         handshake = (
             f"GET {path} HTTP/1.1\r\n"
             f"Host: {host_hdr}\r\n"
@@ -3522,6 +3543,10 @@ def _ws_open(relay_url, route_via_tor=False, timeout=15):
 
         resp_buf = bytearray()
         while b"\r\n\r\n" not in resp_buf:
+            rem = deadline - time.monotonic()
+            if rem <= 0:
+                raise NwcError(f"Timed out waiting for WebSocket handshake from relay {hostname}")
+            sock.settimeout(min(rem, 15.0))
             chunk = sock.recv(1)
             if not chunk:
                 raise NwcError(f"Relay {hostname} closed connection during WebSocket handshake")
@@ -3586,7 +3611,7 @@ def nwc_execute_command(parsed_uri, method, params, route_via_tor=False, timeout
 
             deadline = time.monotonic() + timeout
             while time.monotonic() < deadline:
-                opcode, payload = _ws_recv_frame(sock)
+                opcode, payload = _ws_recv_frame(sock, deadline=deadline)
                 if opcode == 0x8:  # Close
                     break
                 if opcode == 0x9:  # Ping -> Pong
@@ -3731,7 +3756,7 @@ def _record_nwc_failure(wg_pubkey, payment_hash, err, now, force_fallback=False,
         meta = read_meta()
         nwc_state = dict(meta.get("nwcAutoRenewState")) if isinstance(meta.get("nwcAutoRenewState"), dict) else {}
         current_exp = meta.get("expiresAt")
-        if nwc_state.get("periodExpiry") and current_exp and nwc_state.get("periodExpiry") != current_exp:
+        if _nwc_period_advanced(nwc_state.get("periodExpiry"), current_exp):
             attempts = 1
         else:
             attempts = int(nwc_state.get("attempts") or 0) + 1
@@ -3740,17 +3765,18 @@ def _record_nwc_failure(wg_pubkey, payment_hash, err, now, force_fallback=False,
             or budget_warning
             or (payment_hash and attempts >= NWC_MAX_ATTEMPTS)
         )
-        nwc_state.update({
-            "periodExpiry": current_exp,
-            "attempts": attempts,
-            "lastAttemptAt": _iso(now),
-            "nextAttemptAt": None if trip_fallback else _iso(now + NWC_RETRY_DELAY),
-            "lastError": _dashboard_error_text(str(err)),
-            "lastErrorCode": getattr(err, "code", "INTERNAL"),
-            "budgetWarning": bool(budget_warning),
-            "fallbackTaskRaised": trip_fallback,
-        })
-        meta["nwcAutoRenewState"] = nwc_state
+        if meta.get("nwcConnected") is True:
+            nwc_state.update({
+                "periodExpiry": current_exp,
+                "attempts": attempts,
+                "lastAttemptAt": _iso(now),
+                "nextAttemptAt": None if trip_fallback else _iso(now + NWC_RETRY_DELAY),
+                "lastError": _dashboard_error_text(str(err)),
+                "lastErrorCode": getattr(err, "code", "INTERNAL"),
+                "budgetWarning": bool(budget_warning),
+                "fallbackTaskRaised": trip_fallback,
+            })
+            meta["nwcAutoRenewState"] = nwc_state
         pending = meta.get("pendingRenewal")
         if trip_fallback and payment_hash and isinstance(pending, dict) and pending.get("paymentHash") == payment_hash:
             pending["raisePayTask"] = True
@@ -3783,10 +3809,10 @@ def maybe_nwc_auto_renew(wg_pubkey, now=None):
                     atomic_write_json(META_FILE_PATH, meta)
                 return {"result": "restore-reconnect-needed", "message": "NWC wallet credentials missing after restore."}
 
-            # Reset period-specific failure flags if confirmed expiresAt advanced to a new period
+            # Reset period-specific failure flags if confirmed expiresAt strictly advanced to a new period
             current_exp = meta.get("expiresAt")
             raw_state = meta.get("nwcAutoRenewState")
-            if isinstance(raw_state, dict) and raw_state.get("periodExpiry") and current_exp and raw_state.get("periodExpiry") != current_exp:
+            if isinstance(raw_state, dict) and _nwc_period_advanced(raw_state.get("periodExpiry"), current_exp):
                 cleaned_state = dict(raw_state)
                 cleaned_state.update({
                     "periodExpiry": current_exp,
@@ -3865,15 +3891,22 @@ def maybe_nwc_auto_renew(wg_pubkey, now=None):
             try:
                 api_state = _payment_state(payment_hash)
             except Exception:
-                api_state = "unpaid"
+                api_state = "unknown"
             if api_state in ("processing", "paid"):
                 _mark_payment_received("pendingRenewal", pending, payment_hash)
                 settle_pending(now=now)
                 return {"result": "already-paid", "paymentHash": payment_hash}
-            if pending.get("paidViaNwc") is True and _nwc_lookup_already_paid(
+            nwc_was_attempted = bool(pending.get("paidViaNwc") or pending.get("nwcAttempted"))
+            if nwc_was_attempted and _nwc_lookup_already_paid(
                 parsed_uri, payment_hash, route_via_tor=route_via_tor
             ):
-                _mark_payment_received("pendingRenewal", pending, payment_hash)
+                with meta_lock():
+                    fresh_meta = read_meta()
+                    cur_p = fresh_meta.get("pendingRenewal")
+                    if isinstance(cur_p, dict) and cur_p.get("paymentHash") == payment_hash:
+                        cur_p["paidViaNwc"] = True
+                        cur_p["paymentReceivedFor"] = payment_hash
+                        atomic_write_json(META_FILE_PATH, fresh_meta)
                 settle_pending(now=now)
                 return {"result": "already-paid", "paymentHash": payment_hash}
 
@@ -3882,8 +3915,14 @@ def maybe_nwc_auto_renew(wg_pubkey, now=None):
             inv_exp_dt = _parse_iso(pending.get("expiresAt")) or (
                 created_dt + INVOICE_DEFAULT_TTL if created_dt is not None else None
             )
+            if api_state == "unknown" and nwc_was_attempted:
+                return {
+                    "result": "deferred-unknown-status",
+                    "paymentHash": payment_hash,
+                    "message": "TunnelSats payment status is temporarily unavailable; keeping existing invoice.",
+                }
             if (
-                api_state == "unpaid"
+                api_state in ("unpaid", "unknown")
                 and isinstance(inv, str)
                 and inv_exp_dt is not None
                 and now < inv_exp_dt
@@ -3922,7 +3961,8 @@ def maybe_nwc_auto_renew(wg_pubkey, now=None):
                 "expiresAt": renew_data.get("expiresAt") or _iso(now + INVOICE_DEFAULT_TTL),
                 "oldExpiry": meta.get("expiresAt") or "",
                 "newExpiry": renew_data.get("newExpiry") or "",
-                "paidViaNwc": True,
+                "paidViaNwc": False,
+                "nwcAttempted": False,
                 "raisePayTask": False,
             }
             # Persist pendingRenewal under meta_lock BEFORE attempting payment,
@@ -3971,6 +4011,26 @@ def maybe_nwc_auto_renew(wg_pubkey, now=None):
             _record_nwc_failure(wg_pubkey, payment_hash, err, now, force_fallback=True, budget_warning=True)
             return {"result": "budget-insufficient", "paymentHash": payment_hash, "message": budget_msg}
 
+        # Re-verify under meta_lock that the wallet was not disconnected or
+        # replaced during invoice creation / budget preflight, and mark
+        # nwcAttempted = True before sending pay_invoice.
+        with meta_lock():
+            pre_pay_meta = read_meta()
+            latest_wallet_doc = _read_json_object(NWC_WALLET_FILE_PATH)
+            if (
+                pre_pay_meta.get("nwcConnected") is not True
+                or not isinstance(latest_wallet_doc, dict)
+                or latest_wallet_doc.get("uri") != wallet_doc["uri"]
+            ):
+                return {
+                    "result": "disabled",
+                    "message": "NWC wallet was disconnected or updated before payment.",
+                }
+            cur_pending = pre_pay_meta.get("pendingRenewal")
+            if isinstance(cur_pending, dict) and cur_pending.get("paymentHash") == payment_hash:
+                cur_pending["nwcAttempted"] = True
+                atomic_write_json(META_FILE_PATH, pre_pay_meta)
+
         try:
             nwc_execute_command(
                 parsed_uri,
@@ -4006,24 +4066,30 @@ def maybe_nwc_auto_renew(wg_pubkey, now=None):
                 current_pending["raisePayTask"] = False
             fresh_meta["lastDuration"] = months
             fresh_meta["lastAmountSats"] = verified_sats
-            nwc_state = dict(fresh_meta.get("nwcAutoRenewState")) if isinstance(fresh_meta.get("nwcAutoRenewState"), dict) else {}
-            nwc_state.update({
-                "periodExpiry": fresh_meta.get("expiresAt"),
-                "attempts": 0,
-                "lastAttemptAt": _iso(now),
-                "nextAttemptAt": None,
-                "lastError": None,
-                "lastErrorCode": None,
-                "budgetWarning": False,
-                "fallbackTaskRaised": False,
-                "restoreReconnectNeeded": False,
-                "lastPaidHash": payment_hash,
-                "lastPaidAt": _iso(now),
-                "lastPaidDuration": months,
-                "lastPaidAmountSats": verified_sats,
-                "lastPaidNewExpiry": None,
-            })
-            fresh_meta["nwcAutoRenewState"] = nwc_state
+            post_pay_wallet = _read_json_object(NWC_WALLET_FILE_PATH)
+            if (
+                fresh_meta.get("nwcConnected") is True
+                and isinstance(post_pay_wallet, dict)
+                and post_pay_wallet.get("uri") == wallet_doc["uri"]
+            ):
+                nwc_state = dict(fresh_meta.get("nwcAutoRenewState")) if isinstance(fresh_meta.get("nwcAutoRenewState"), dict) else {}
+                nwc_state.update({
+                    "periodExpiry": fresh_meta.get("expiresAt"),
+                    "attempts": 0,
+                    "lastAttemptAt": _iso(now),
+                    "nextAttemptAt": None,
+                    "lastError": None,
+                    "lastErrorCode": None,
+                    "budgetWarning": False,
+                    "fallbackTaskRaised": False,
+                    "restoreReconnectNeeded": False,
+                    "lastPaidHash": payment_hash,
+                    "lastPaidAt": _iso(now),
+                    "lastPaidDuration": months,
+                    "lastPaidAmountSats": verified_sats,
+                    "lastPaidNewExpiry": None,
+                })
+                fresh_meta["nwcAutoRenewState"] = nwc_state
             atomic_write_json(META_FILE_PATH, fresh_meta)
 
         settle_pending(now=now)

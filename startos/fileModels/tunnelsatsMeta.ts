@@ -71,6 +71,8 @@ export const metaShape = z.object({
       nextAttemptAt: z.string().optional().catch(undefined),
       /** True when paid automatically via NWC. */
       paidViaNwc: z.boolean().optional().catch(undefined),
+      /** True when an NWC pay_invoice attempt has been dispatched for this invoice. */
+      nwcAttempted: z.boolean().optional().catch(undefined),
       /** True when NWC fell back and the node's Pay Invoice task must be raised. */
       raisePayTask: z.boolean().optional().catch(undefined),
     })
