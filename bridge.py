@@ -4078,9 +4078,20 @@ def maybe_nwc_auto_renew(wg_pubkey, now=None):
                     "message": "NWC wallet was disconnected or updated before payment.",
                 }
             cur_pending = pre_pay_meta.get("pendingRenewal")
-            if isinstance(cur_pending, dict) and cur_pending.get("paymentHash") == payment_hash:
-                cur_pending["nwcAttempted"] = True
-                atomic_write_json(META_FILE_PATH, pre_pay_meta)
+            if (
+                not isinstance(cur_pending, dict)
+                or cur_pending.get("paymentHash") != payment_hash
+                or cur_pending.get("paymentReceivedFor")
+            ):
+                # Replaced, cleared or already paid by a concurrent writer
+                # while the preflight ran: never pay a discarded invoice.
+                return {
+                    "result": "superseded",
+                    "paymentHash": payment_hash,
+                    "message": "Pending renewal changed before payment; not paying the discarded invoice.",
+                }
+            cur_pending["nwcAttempted"] = True
+            atomic_write_json(META_FILE_PATH, pre_pay_meta)
 
         try:
             nwc_execute_command(

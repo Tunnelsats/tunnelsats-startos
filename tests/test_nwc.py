@@ -463,11 +463,13 @@ class TestNwcAutoRenew(unittest.TestCase):
         entry.update(extra)
         return entry
 
-    def _run_auto_renew(self, now, concurrent_write=None):
-        """Runs the real maybe_nwc_auto_renew with only API/NWC transport patched.
-        concurrent_write, if given, is written as pendingRenewal while the
-        /subscription/renew call is in flight (i.e. between the initial read
-        and the meta_lock re-check)."""
+    def _run_auto_renew(self, now, concurrent_write=None, during_preflight=None):
+        """Runs the real maybe_nwc_auto_renew (including the real settle_pending)
+        with only API/NWC transport patched. concurrent_write, if given, is
+        written as pendingRenewal while the /subscription/renew call is in
+        flight (between the initial read and the meta_lock re-check);
+        during_preflight, if given, is a callable run inside the NWC get_budget
+        preflight (after the invoice is chosen, before pay_invoice)."""
         paid_invoices = []
 
         def fake_api_call(method, path, payload=None):
@@ -481,6 +483,8 @@ class TestNwcAutoRenew(unittest.TestCase):
 
         def fake_nwc(_parsed, method, params, **_kw):
             if method == "get_budget":
+                if during_preflight is not None:
+                    during_preflight()
                 return {"remaining_budget": 50_000_000}
             if method == "get_balance":
                 return {"balance": 100_000_000}
@@ -493,7 +497,6 @@ class TestNwcAutoRenew(unittest.TestCase):
             patch.object(bridge, "_api_call", side_effect=fake_api_call),
             patch.object(bridge, "_payment_state", return_value="expired"),
             patch.object(bridge, "nwc_execute_command", side_effect=fake_nwc),
-            patch.object(bridge, "settle_pending", return_value={"outcomes": [], "clearPayTasks": [], "busy": False}),
         ):
             res = bridge.maybe_nwc_auto_renew(self.wg_pubkey, now=now)
         return res, paid_invoices
@@ -567,6 +570,29 @@ class TestNwcAutoRenew(unittest.TestCase):
         pending_after = bridge.read_meta()["pendingRenewal"]
         self.assertEqual(pending_after["paymentHash"], other_hash)
         self.assertEqual(pending_after["paymentReceivedFor"], other_hash)
+
+    def test_auto_renew_does_not_pay_invoice_superseded_during_preflight(self):
+        now = datetime(2026, 9, 28, 12, 0, 0, tzinfo=timezone.utc)
+        other_hash = "ef" * 32
+        replacement = self._pending(now, other_hash, _build_test_bolt11("45u", other_hash), expires_in_minutes=30)
+
+        def replace_pending():
+            m = bridge.read_meta()
+            m["pendingRenewal"] = replacement
+            bridge.atomic_write_json(self.meta_path, m)
+
+        def clear_pending():
+            m = bridge.read_meta()
+            m.pop("pendingRenewal", None)
+            bridge.atomic_write_json(self.meta_path, m)
+
+        for mutate in (replace_pending, clear_pending):
+            with self.subTest(mutate=mutate.__name__):
+                self._seed_auto_renew_state(now)
+                res, paid = self._run_auto_renew(now, during_preflight=mutate)
+                self.assertEqual(res["result"], "superseded")
+                self.assertEqual(res["paymentHash"], self.payment_hash)
+                self.assertEqual(paid, [])
 
     def test_maybe_nwc_auto_renew_preflight_budget_and_transient_retry_fallback(self):
         now = datetime(2026, 9, 28, 12, 0, 0, tzinfo=timezone.utc)
