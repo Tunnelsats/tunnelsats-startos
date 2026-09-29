@@ -4012,9 +4012,11 @@ def maybe_nwc_auto_renew(wg_pubkey, now=None):
                     used_concurrent = True
                 else:
                     fresh_meta["pendingRenewal"] = reusable_pending
-                    if stale_hash and stale_node in TARGET_NODES and stale_hash != reusable_pending.get("paymentHash"):
+                    hash_to_clear = c_hash if c_hash else stale_hash
+                    node_to_clear = concurrent_pending.get("targetNode") if (isinstance(concurrent_pending, dict) and c_hash) else stale_node
+                    if hash_to_clear and node_to_clear in TARGET_NODES and hash_to_clear != reusable_pending.get("paymentHash"):
                         tasks = [t for t in fresh_meta.get("payTasksToClear") or [] if isinstance(t, str)]
-                        replay_id = pay_task_replay_id("renewal", stale_node, stale_hash)
+                        replay_id = pay_task_replay_id("renewal", node_to_clear, hash_to_clear)
                         if replay_id not in tasks:
                             tasks.append(replay_id)
                         fresh_meta["payTasksToClear"] = tasks
