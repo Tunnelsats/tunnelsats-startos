@@ -790,9 +790,10 @@ test('planDependencies declares the paying node and watches it, installed or not
   })
 })
 
-test('planDependencies leaves the running target and nodes owed an off to their own watches', () => {
-  // The renewal is on the running target, the reset on a node that still
-  // owes an off-task, which the handoff already watches.
+test('planDependencies watches neither the running target nor a node owed an off', () => {
+  // The renewal is on the running target, which is declared from the
+  // configuration, and the reset on a node that still owes an off-task,
+  // which the handoff already watches.
   const read = {
     config: { enabled: true, 'target-node': 'lnd' } as const,
     meta: metaShape.parse({
@@ -843,8 +844,9 @@ test('declareDependencies watches the planned paying nodes before it returns the
   // setDependencies passes watchNodeStatus bound to its effects; the stub
   // records the call instead. LND is installed, so it is declared and
   // watched (uninstalling it drops its entry). Eclair is not installed, so it
-  // is only watched (installing it declares it). The running target has its
-  // own watch.
+  // is only watched (installing it declares it). Core Lightning, the running
+  // target, holds the renewal's task but is not watched: it is declared from
+  // the configuration, installed or not.
   const calls: { nodes: readonly string[]; onFailure: string }[] = []
   let settled = false
   const deps = await declareDependencies(
@@ -852,6 +854,7 @@ test('declareDependencies watches the planned paying nodes before it returns the
       config: { enabled: true, 'target-node': 'cln' },
       meta: metaShape.parse({
         pendingOrder: pendingOrderFor('lnd'),
+        pendingRenewal: pendingRenewalFor('cln'),
         pendingReset: pendingResetFor('eclair'),
       }),
     },
