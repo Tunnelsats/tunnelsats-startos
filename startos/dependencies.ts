@@ -635,27 +635,55 @@ export function getDependenciesForConfig(
   return deps
 }
 
+/**
+ * What setDependencies declares, and the paying nodes it watches. The handoff
+ * watches only nodes that may still run the tunnel, so a node declared only
+ * for a Pay Invoice task would keep its `exists` entry after it is
+ * uninstalled (and a paying node installed later would not be declared)
+ * until something else re-runs setDependencies. Its status watch re-runs it
+ * on an install or uninstall. Watching a package that is not installed is
+ * harmless. Not watched here: the running target (declared from the
+ * configuration) and the nodes still owed an off (watched by the handoff).
+ */
+export function planDependencies(
+  read: {
+    config: Parameters<typeof getDependenciesForConfig>[0]
+    meta: Parameters<typeof getDependenciesForConfig>[2]
+  },
+  handoff: { pendingOff: readonly PackageId[]; installed: readonly string[] },
+) {
+  const deps = getDependenciesForConfig(
+    read.config,
+    handoff.pendingOff,
+    read.meta,
+    handoff.installed,
+  )
+  const watch = [...new Set(payTaskNodes(read.config, read.meta))].filter(
+    (p) => deps[p]?.kind !== 'running' && !handoff.pendingOff.includes(p),
+  )
+  return { deps, watch }
+}
+
 /** Serializes handoff runs; see createHandoffQueue. */
 const enqueueHandoff = createHandoffQueue()
 
 /**
- * Registers a status watch on nodes that may still run the tunnel, so a
- * status change re-runs setupDependencies: accepting the off-task on a
- * running node rewrites its store.json, which restarts its main. Starting a
- * stopped node re-runs it as well.
+ * Registers a status watch on each node, so a change of its status re-runs
+ * setupDependencies. That includes an install or uninstall: StartOS watches
+ * `/public/packageData/<id>/statusInfo`, which appears and disappears with
+ * the package. Never throws; `onFailure` says what the next re-run catches
+ * up on.
  */
-async function watchPreviousNodes(
+async function watchNodeStatus(
   effects: Parameters<typeof sdk.checkDependencies>[0],
   nodes: readonly PackageId[],
+  onFailure: string,
 ): Promise<void> {
   for (const p of nodes) {
     try {
       await sdk.getStatus(effects, { packageId: p }).const()
     } catch (e) {
-      console.warn(
-        `TunnelSats: could not watch ${p} status; the held on-task is released on the next re-run:`,
-        e,
-      )
+      console.warn(`TunnelSats: could not watch ${p} status; ${onFailure}:`, e)
     }
   }
 }
@@ -781,7 +809,13 @@ async function handOffClearnetVpn(
   const installed = await effects.getInstalledPackages()
   const desired = getTargetVpnConfig(config)
   const nodes = previousNodes(state, installed, handedOverTarget(desired))
-  await watchPreviousNodes(effects, nodes)
+  // Accepting the off-task on a running node rewrites its store.json, which
+  // restarts its main; starting a stopped node changes its status as well.
+  await watchNodeStatus(
+    effects,
+    nodes,
+    'the held on-task is released on the next re-run',
+  )
   const nodeVpn = await readNodeVpnStates(effects, nodes, {
     ownConf: config?.['tunnelsats-conf'],
     handedOutKeys: state?.handedOutKeys ?? [],
@@ -978,10 +1012,11 @@ export const setDependencies = sdk.setupDependencies(async ({ effects }) => {
     },
   )
 
-  return getDependenciesForConfig(
-    config.config,
-    handoff.pendingOff,
-    config.meta,
-    handoff.installed,
+  const { deps, watch } = planDependencies(config, handoff)
+  await watchNodeStatus(
+    effects,
+    watch,
+    'its dependency entry is updated on the next re-run',
   )
+  return deps
 })

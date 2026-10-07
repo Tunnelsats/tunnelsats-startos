@@ -11,6 +11,7 @@ import {
   UNKNOWN_KEY_TASK_KEY,
   isKeyUnknown,
   getUnknownKeyTask,
+  planDependencies,
 } from '../startos/dependencies'
 import { clearnetVpnReplayId } from '../startos/vpnHandoff'
 import { generateWireguardKeypair } from '../startos/keygen'
@@ -760,4 +761,79 @@ test('the declared package is the one the Pay Invoice task is raised on', () => 
       [resolvePayInvoice(node).packageId],
     )
   }
+})
+
+// ---------------------------------------------------------------------------
+// planDependencies: what setDependencies declares from the configuration,
+// the metadata and the handoff result, and which paying nodes it watches.
+// ---------------------------------------------------------------------------
+
+test('planDependencies declares the paying node and watches it, installed or not', () => {
+  // The handoff watches only nodes that may still run the tunnel. A node
+  // declared only for a Pay Invoice task gets its own status watch, so
+  // installing or uninstalling it re-runs setDependencies and its entry
+  // follows.
+  const read = {
+    config: null,
+    meta: metaShape.parse({ pendingOrder: pendingOrderFor('lnd') }),
+  }
+  assert.deepEqual(
+    planDependencies(read, { pendingOff: [], installed: ['lnd'] }),
+    { deps: { lnd: LND_EXISTS }, watch: ['lnd'] },
+  )
+  // Not installed (yet): not declared, but watched, so installing it
+  // declares it.
+  assert.deepEqual(planDependencies(read, { pendingOff: [], installed: [] }), {
+    deps: {},
+    watch: ['lnd'],
+  })
+})
+
+test('planDependencies leaves the running target and nodes owed an off to their own watches', () => {
+  // The renewal is on the running target, the reset on a node that still
+  // owes an off-task, which the handoff already watches.
+  const read = {
+    config: { enabled: true, 'target-node': 'lnd' } as const,
+    meta: metaShape.parse({
+      pendingRenewal: pendingRenewalFor('lnd'),
+      pendingReset: pendingResetFor('cln'),
+    }),
+  }
+  assert.deepEqual(
+    planDependencies(read, {
+      pendingOff: ['c-lightning'],
+      installed: ALL_NODES,
+    }),
+    { deps: { lnd: LND_RUNNING, 'c-lightning': CLN_EXISTS }, watch: [] },
+  )
+})
+
+test('planDependencies watches each paying node once, and none without a pending payment', () => {
+  const config = { enabled: true, 'target-node': 'cln' } as const
+  const meta = metaShape.parse({
+    pendingOrder: pendingOrderFor('lnd'),
+    pendingRenewal: pendingRenewalFor('eclair'),
+    pendingReset: pendingResetFor('lnd'),
+  })
+  assert.deepEqual(
+    planDependencies(
+      { config, meta },
+      { pendingOff: [], installed: ALL_NODES },
+    ),
+    {
+      deps: {
+        'c-lightning': CLN_RUNNING,
+        lnd: LND_EXISTS,
+        eclair: ECLAIR_EXISTS,
+      },
+      watch: ['lnd', 'eclair'],
+    },
+  )
+  assert.deepEqual(
+    planDependencies(
+      { config, meta: null },
+      { pendingOff: [], installed: ALL_NODES },
+    ),
+    { deps: { 'c-lightning': CLN_RUNNING }, watch: [] },
+  )
 })
