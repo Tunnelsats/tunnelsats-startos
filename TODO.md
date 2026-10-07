@@ -63,7 +63,7 @@
 
 The upstream reset (Sep 18) replaced the host-managed StartOS gateway model with the node-owned `clearnet-vpn` model: the Lightning node runs the tunnel itself (`wg0`, policy routing table 51820) and nothing is configured box-wide. The following completed items no longer apply and their code and guidance were removed:
 
-- ~~Gateway classification markers injected into every WireGuard config~~. New configs carry none; configs stored with markers by earlier versions are kept byte-identical, because the node task accepts the stored string exactly.
+- ~~Gateway classification markers injected into every WireGuard config~~. New configs carry none; configs stored with markers by earlier versions are kept byte-identical, because the node task accepts the stored string (trimmed, as the StartOS form submits it, or verbatim), so removing a marker would re-raise it.
 - ~~3-step gateway setup guidance~~ (adding a system gateway, a custom external host, and the interface firewall toggle).
 - ~~Routing node egress through a host gateway~~ and the matching `verify.sh` remediation hints.
 - ~~Host-interface audit in `verify.sh`~~ (host gateway list, host port bindings).
