@@ -509,16 +509,76 @@ const NODE_HEALTH_CHECKS = {
 
 const TOR_VERSION_RANGE = '>=0.4.0:0' as const
 
+/** The metadata fields that decide which nodes hold a Pay Invoice task. */
+export interface PayTaskMeta {
+  pendingOrder?: { paymentHash?: string; targetNode?: TargetNode } | null
+  pendingRenewal?: {
+    paymentHash?: string
+    targetNode?: TargetNode
+    raisePayTask?: boolean
+  } | null
+  pendingReset?: { paymentHash?: string; targetNode?: TargetNode } | null
+}
+
+/**
+ * The node a pending renewal's Pay Invoice task is on. Renewals written
+ * before the node was recorded fall back to the configured target, then LND.
+ */
+function renewalPayNode(
+  pending: { targetNode?: TargetNode },
+  config: { 'target-node'?: TargetNode } | null | undefined,
+): TargetNode {
+  return pending.targetNode ?? config?.['target-node'] ?? 'lnd'
+}
+
+/**
+ * The nodes that hold a TunnelSats Pay Invoice task: those of the pending
+ * order, renewal and bandwidth reset. bridge.py retires an entry once its
+ * payment settles or its unpaid invoice is given up, and queues the task's
+ * clear in the same write, so a node stays declared while its task is
+ * outstanding.
+ *
+ * Not counted, because no task of theirs is outstanding:
+ * - an NWC renewal (`raisePayTask` false), which NWC pays without a task.
+ *   On fallback the flag turns true, the task is raised and the flag is
+ *   removed, so true and absent both count;
+ * - replaced orders (`previousPendingOrders`): the write that replaces an
+ *   order queues its task for clearing (see recordThenRaise).
+ */
+function payTaskNodes(
+  config: { 'target-node'?: TargetNode } | null | undefined,
+  meta: PayTaskMeta | null | undefined,
+): PackageId[] {
+  const nodes: PackageId[] = []
+  const order = meta?.pendingOrder
+  if (order?.paymentHash && order.targetNode) {
+    nodes.push(resolvePackageId(order.targetNode))
+  }
+  const renewal = meta?.pendingRenewal
+  if (renewal?.paymentHash && renewal.raisePayTask !== false) {
+    nodes.push(resolvePackageId(renewalPayNode(renewal, config)))
+  }
+  const reset = meta?.pendingReset
+  if (reset?.paymentHash && reset.targetNode) {
+    nodes.push(resolvePackageId(reset.targetNode))
+  }
+  return nodes
+}
+
 /**
  * The target node is a running dependency. Nodes that still owe us a
  * confirmed "off" stay declared (as `exists`), because StartOS hides tasks on
- * packages that are not current dependencies. When NWC is connected with Tor
+ * packages that are not current dependencies. For the same reason a node
+ * that holds a TunnelSats Pay Invoice task is declared (as `exists`) while
+ * the payment is pending, if it is installed. When NWC is connected with Tor
  * routing enabled, `tor` is also declared as a running dependency.
  */
 export function getDependenciesForConfig(
   config: { enabled?: boolean; 'target-node'?: TargetNode } | null | undefined,
   pendingOff: readonly PackageId[] = [],
-  meta?: { nwcConnected?: boolean; nwcRouteViaTor?: boolean } | null,
+  meta?:
+    (PayTaskMeta & { nwcConnected?: boolean; nwcRouteViaTor?: boolean }) | null,
+  installed: readonly string[] = [],
 ) {
   const deps: Partial<
     Record<
@@ -552,6 +612,14 @@ export function getDependenciesForConfig(
 
   for (const p of pendingOff) {
     if (!deps[p]) {
+      deps[p] = { kind: 'exists', versionRange: NODE_VERSION_RANGES[p] }
+    }
+  }
+
+  // Only installed nodes can be declared: a task raised on a node that is
+  // not installed must not surface as a missing dependency.
+  for (const p of payTaskNodes(config, meta)) {
+    if (!deps[p] && installed.includes(p)) {
       deps[p] = { kind: 'exists', versionRange: NODE_VERSION_RANGES[p] }
     }
   }
@@ -680,8 +748,7 @@ export async function raiseFallbackRenewalPayTask(params: {
   if (!pending?.raisePayTask || !pending.invoice || !pending.paymentHash) {
     return false
   }
-  const targetNode: TargetNode =
-    pending.targetNode ?? params.config?.['target-node'] ?? 'lnd'
+  const targetNode = renewalPayNode(pending, params.config)
   const { packageId, payInvoiceAction } = resolvePayInvoice(targetNode)
   await params.createTask({
     packageId: packageId as PackageId,
@@ -700,7 +767,7 @@ async function handOffClearnetVpn(
   effects: Parameters<typeof sdk.checkDependencies>[0],
   config: Parameters<typeof getTargetVpnConfig>[0],
   retryOwnTasks: boolean,
-): Promise<PackageId[]> {
+): Promise<{ pendingOff: PackageId[]; installed: string[] }> {
   const state = await vpnHandoff
     .read()
     .once()
@@ -777,7 +844,10 @@ async function handOffClearnetVpn(
 
   // Only installed nodes can be declared: a queued clear for an uninstalled
   // node must not surface as a missing dependency.
-  return next.pendingOff.filter((p) => installed.includes(p))
+  return {
+    pendingOff: next.pendingOff.filter((p) => installed.includes(p)),
+    installed,
+  }
 }
 
 export const setDependencies = sdk.setupDependencies(async ({ effects }) => {
@@ -796,7 +866,7 @@ export const setDependencies = sdk.setupDependencies(async ({ effects }) => {
     .const(effects)
     .catch(() => null)
 
-  const { config, result: pendingOff } = await enqueueHandoff(
+  const { config, result: handoff } = await enqueueHandoff(
     async () => ({
       config: await configJson.read().once(),
       meta: await tunnelsatsMeta
@@ -908,5 +978,10 @@ export const setDependencies = sdk.setupDependencies(async ({ effects }) => {
     },
   )
 
-  return getDependenciesForConfig(config.config, pendingOff, config.meta)
+  return getDependenciesForConfig(
+    config.config,
+    handoff.pendingOff,
+    config.meta,
+    handoff.installed,
+  )
 })
