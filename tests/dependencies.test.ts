@@ -12,6 +12,7 @@ import {
   isKeyUnknown,
   getUnknownKeyTask,
   planDependencies,
+  declareDependencies,
 } from '../startos/dependencies'
 import { clearnetVpnReplayId } from '../startos/vpnHandoff'
 import { generateWireguardKeypair } from '../startos/keygen'
@@ -836,4 +837,37 @@ test('planDependencies watches each paying node once, and none without a pending
     ),
     { deps: { 'c-lightning': CLN_RUNNING }, watch: [] },
   )
+})
+
+test('declareDependencies watches the planned paying nodes before it returns the declaration', async () => {
+  // setDependencies passes watchNodeStatus bound to its effects; the stub
+  // records the call instead. LND is installed, so it is declared and
+  // watched (uninstalling it drops its entry). Eclair is not installed, so it
+  // is only watched (installing it declares it). The running target has its
+  // own watch.
+  const calls: { nodes: readonly string[]; onFailure: string }[] = []
+  let settled = false
+  const deps = await declareDependencies(
+    {
+      config: { enabled: true, 'target-node': 'cln' },
+      meta: metaShape.parse({
+        pendingOrder: pendingOrderFor('lnd'),
+        pendingReset: pendingResetFor('eclair'),
+      }),
+    },
+    { pendingOff: [], installed: ['c-lightning', 'lnd'] },
+    async (nodes, onFailure) => {
+      calls.push({ nodes, onFailure })
+      await new Promise((resolve) => setImmediate(resolve))
+      settled = true
+    },
+  )
+  assert.deepEqual(calls, [
+    {
+      nodes: ['lnd', 'eclair'],
+      onFailure: 'its dependency entry is updated on the next re-run',
+    },
+  ])
+  assert.ok(settled, 'the watches are registered before the hook returns')
+  assert.deepEqual(deps, { 'c-lightning': CLN_RUNNING, lnd: LND_EXISTS })
 })

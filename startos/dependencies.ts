@@ -688,6 +688,27 @@ async function watchNodeStatus(
   }
 }
 
+/**
+ * What setDependencies returns, once the status watch on each paying node
+ * of the plan is registered. The hook passes watchNodeStatus bound to its
+ * effects; tests pass a recording stub.
+ */
+export async function declareDependencies(
+  read: Parameters<typeof planDependencies>[0],
+  handoff: Parameters<typeof planDependencies>[1],
+  watchStatus: (
+    nodes: readonly PackageId[],
+    onFailure: string,
+  ) => Promise<void>,
+) {
+  const plan = planDependencies(read, handoff)
+  await watchStatus(
+    plan.watch,
+    'its dependency entry is updated on the next re-run',
+  )
+  return plan.deps
+}
+
 export interface OwnTaskOps {
   raiseExpiry: (
     severity: NonNullable<SubscriptionExpiryTask['severity']>,
@@ -1012,11 +1033,7 @@ export const setDependencies = sdk.setupDependencies(async ({ effects }) => {
     },
   )
 
-  const { deps, watch } = planDependencies(config, handoff)
-  await watchNodeStatus(
-    effects,
-    watch,
-    'its dependency entry is updated on the next re-run',
+  return declareDependencies(config, handoff, (nodes, onFailure) =>
+    watchNodeStatus(effects, nodes, onFailure),
   )
-  return deps
 })
