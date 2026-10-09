@@ -83,6 +83,8 @@ let countdownTimer = null
 let lastPollAt = 0
 // GET /api/dashboard requests started so far (see acceptedIntent).
 let dashboardReads = 0
+// The newest dashboard read whose answer was applied (see refresh).
+let appliedRead = 0
 let submittingIntent = false
 let localIntentFeedback = null
 // The request whose "Request accepted" note localIntentFeedback shows:
@@ -1706,7 +1708,7 @@ const INTENT_INVOICE_KIND = { buy: 'order', renew: 'renewal', reset: 'reset' }
  * a payable invoice of the same kind was created after it (a later request
  * of that kind produced it); an invoice of another kind never hides it, so
  * a refused or failed request stays explained next to any invoice. The read
- * model stops reporting a failure 15 minutes after it failed
+ * model drops a failure 15 minutes after its updatedAt
  * (INTENT_FAILURE_SHOWN_FOR in bridge.py), so an old one does not stay.
  */
 function latestIntentFailure(m) {
@@ -2438,13 +2440,20 @@ async function refresh() {
       credentials: 'same-origin',
     })
     if (!response.ok) throw new Error(`HTTP ${response.status}`)
-    model = await response.json()
+    const next = await response.json()
+    // An answer that arrives after a newer one was applied must not put
+    // older state back (e.g. the poll in flight when a request was accepted).
+    if (read < appliedRead) return
+    appliedRead = read
+    model = next
     loadFailed = false
     if (activePayableInvoice(model) || acceptedIntentSettled(model, read)) {
       localIntentFeedback = null
       acceptedIntent = null
     }
   } catch (error) {
+    // Nor may a failed read that started before the newest applied one.
+    if (read < appliedRead) return
     console.error('Failed to load the dashboard state:', error)
     loadFailed = true
   }

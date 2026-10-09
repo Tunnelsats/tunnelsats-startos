@@ -1232,7 +1232,8 @@ test('a dashboard read started before the request was accepted cannot settle it'
   const h = load(m, 200, acceptedAnswer('reset', 'reset-5'))
   await settleAll(h)
   // A poll read is in flight when Reset is pressed and answers only after
-  // the 202, with the state from before the request.
+  // the 202 and after the read that followed it, with the state from before
+  // the request. That answer is older than the one on screen: it is dropped.
   const before = JSON.parse(JSON.stringify(m))
   const fetchNow = h.context.fetch
   let answerLate = () => {}
@@ -1249,8 +1250,63 @@ test('a dashboard read started before the request was accepted cannot settle it'
   answerLate()
   await poll
   await settleAll(h)
+  assert.match(feedbackOf(h).text, /^Requesting Lightning invoice/)
+  assert.equal(h.el('btn-intent-reset').disabled, true)
+})
+
+test('a pre-202 read that answers before the next read leaves the note', async () => {
+  const older = intentSlot('reset', 'reset-old', 'failed', 'An older failure.')
+  const m = model({ intents: { buy: null, renew: null, reset: older } })
+  const h = load(m, 200, acceptedAnswer('reset', 'reset-6'))
+  await settleAll(h)
+  // Every dashboard read waits for the test to answer it; the POST does not.
+  const before = JSON.parse(JSON.stringify(m))
+  const fetchNow = h.context.fetch
+  const answers: ((body: Json) => void)[] = []
+  h.context.fetch = (url: string, init?: Json) =>
+    url === '/api/dashboard'
+      ? new Promise((resolve) => {
+          answers.push((body) =>
+            resolve({ ok: true, status: 200, json: async () => body }),
+          )
+        })
+      : fetchNow(url, init)
+  const poll = vm.runInContext('refresh()', h.context)
+  m.intents.reset = intentSlot('reset', 'reset-6', 'pending')
+  const submit = vm.runInContext(`submitIntent('reset')`, h.context)
+  await settleAll(h)
+  assert.equal(answers.length, 2, 'the poll and the read after the 202')
+  // The poll answers first, with the state from before the request: it is
+  // the newest answer so far, but it cannot settle the request it predates.
+  answers[0](before)
+  await poll
+  await settleAll(h)
   assert.match(feedbackOf(h).text, /^Request accepted/)
   assert.equal(feedbackOf(h).isError, false)
+  answers[1](m)
+  await submit
+  await settleAll(h)
+  assert.match(feedbackOf(h).text, /^Requesting Lightning invoice/)
+  h.context.fetch = fetchNow
+})
+
+test('a dashboard read that fails after a newer one answered changes nothing', async () => {
+  const h = load(model())
+  await settleAll(h)
+  const fetchNow = h.context.fetch
+  let failLate = () => {}
+  h.context.fetch = () =>
+    new Promise((_resolve, reject) => {
+      failLate = () => reject(new Error('timed out'))
+    })
+  const slow = vm.runInContext('refresh()', h.context)
+  h.context.fetch = fetchNow
+  await vm.runInContext('refresh()', h.context)
+  await settleAll(h)
+  failLate()
+  await slow
+  await settleAll(h)
+  assert.equal(h.el('load-error').hidden, true)
 })
 
 // ─── W3: visuals and discovery ───────────────────────────────────────────────
