@@ -1705,7 +1705,9 @@ const INTENT_INVOICE_KIND = { buy: 'order', renew: 'renewal', reset: 'reset' }
  * The most recent failed dashboard request. A failure is left out only when
  * a payable invoice of the same kind was created after it (a later request
  * of that kind produced it); an invoice of another kind never hides it, so
- * a refused or failed request stays explained next to any invoice.
+ * a refused or failed request stays explained next to any invoice. The read
+ * model stops reporting a failure 15 minutes after it failed
+ * (INTENT_FAILURE_SHOWN_FOR in bridge.py), so an old one does not stay.
  */
 function latestIntentFailure(m) {
   const intents = (m && m.intents) || {}

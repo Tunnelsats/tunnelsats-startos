@@ -2335,6 +2335,11 @@ INVOICE_DEFAULT_TTL = timedelta(hours=1)
 INTENT_KINDS = ("buy", "renew", "reset")
 INTENT_DURATIONS = ("1m", "3m", "6m", "12m")
 INTENT_TTL = timedelta(seconds=120)
+# How long the read model reports a failed request after it failed. It
+# answers a click made seconds before (the runner refuses requests older
+# than INTENT_TTL); 15 minutes leaves time to come back to the page or
+# reload it, and later visits start clean instead of showing it forever.
+INTENT_FAILURE_SHOWN_FOR = timedelta(minutes=15)
 INTENT_RATE_LIMIT_WINDOW = timedelta(seconds=30)
 INTENT_HOURLY_WINDOW = timedelta(hours=1)
 INTENT_HOURLY_CAP = 5
@@ -2597,6 +2602,11 @@ def _intent_slot_summary(kind, req_slot, res_slot, now):
     if status == "pending" and now - created_dt >= INTENT_TTL:
         status = "failed"
         error = "The dashboard request timed out before StartOS processed it. Please try again."
+    # A failure answers the click that caused it. Past
+    # INTENT_FAILURE_SHOWN_FOR it is old news: the slot reads as empty, so
+    # the dashboard stops showing it on every visit.
+    if status == "failed" and now - _parse_iso(updated_at) >= INTENT_FAILURE_SHOWN_FOR:
+        return None
 
     summary = {
         "id": intent_id,
