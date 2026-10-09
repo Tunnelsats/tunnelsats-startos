@@ -769,6 +769,58 @@ class TestDashboardEndpoint(LoopbackServerTestBase):
         })
         self.assertEqual(bridge._intents_summary(now=self.now)["reset"]["status"], "processing")
 
+    def test_a_failed_intent_is_reported_for_a_limited_time(self):
+        """A failure answers the click that caused it. The read model reports
+        it for INTENT_FAILURE_SHOWN_FOR after it failed (this box's clock, as
+        for INTENT_TTL) and then shows no request of that kind, so an old
+        failure does not greet every later visit."""
+        error = "Maximum 2 bandwidth resets per month reached"
+
+        def reset_failed_at(failed_at):
+            created = failed_at - timedelta(seconds=5)
+            self.write_json(bridge.INTENTS_FILE_PATH, {
+                "reset": {"id": "reset-1", "kind": "reset", "createdAt": self.iso(created)},
+            })
+            self.write_json(bridge.INTENT_RESULTS_FILE_PATH, {
+                "reset": {
+                    "id": "reset-1", "kind": "reset", "status": "failed",
+                    "createdAt": self.iso(created), "updatedAt": self.iso(failed_at),
+                    "error": error,
+                },
+            })
+            return bridge._intents_summary(now=self.now)["reset"]
+
+        shown_for = bridge.INTENT_FAILURE_SHOWN_FOR
+        recent = reset_failed_at(self.now - shown_for + timedelta(seconds=1))
+        self.assertEqual((recent["status"], recent["error"]), ("failed", error))
+        self.assertIsNone(reset_failed_at(self.now - shown_for))
+
+        # A request the runner never picked up fails at INTENT_TTL; it is
+        # dropped the same time after it was made.
+        os.remove(bridge.INTENT_RESULTS_FILE_PATH)
+        self.write_json(bridge.INTENTS_FILE_PATH, {
+            "buy": {"id": "buy-1", "kind": "buy", "serverId": "eu-de", "duration": "1m",
+                    "createdAt": self.iso(self.now - shown_for)},
+        })
+        self.assertIsNone(bridge._intents_summary(now=self.now)["buy"])
+
+        # Only failures age out: an old success is still reported.
+        long_ago = self.iso(self.now - shown_for - timedelta(hours=1))
+        self.write_json(bridge.INTENTS_FILE_PATH, {
+            "renew": {"id": "renew-1", "kind": "renew", "duration": "1m", "createdAt": long_ago},
+        })
+        self.write_json(bridge.INTENT_RESULTS_FILE_PATH, {
+            "renew": {"id": "renew-1", "kind": "renew", "status": "succeeded",
+                      "createdAt": long_ago, "updatedAt": long_ago},
+        })
+        self.assertEqual(bridge._intents_summary(now=self.now)["renew"]["status"], "succeeded")
+
+        # The next request of that kind is accepted as usual.
+        self.configure("lnd")
+        reset_failed_at(self.now - shown_for)
+        code, _ = bridge.submit_dashboard_intent({"kind": "reset"}, now=self.now)
+        self.assertEqual(code, 202)
+
 
 class TestStaticServingHardening(LoopbackServerTestBase):
     """Static files over the real handler: odd paths always get an answer."""

@@ -1113,6 +1113,202 @@ test('an invoice of another kind never hides a failed request', async () => {
   assert.equal(h.el('intent-feedback').textContent, resetError)
 })
 
+/** The 202 bridge.py answers POST /api/intents with: the slot it wrote. */
+const acceptedAnswer = (kind: string, id: string) => ({
+  status: 202,
+  body: { status: 'accepted', intent: intentSlot(kind, id, 'pending') },
+})
+
+/** A dashboard request as the read model reports it. */
+function intentSlot(
+  kind: string,
+  id: string,
+  status: string,
+  error: string | null = null,
+): Json {
+  const at = new Date().toISOString()
+  return { id, kind, status, createdAt: at, updatedAt: at, error }
+}
+
+const feedbackOf = (h: Harness) => ({
+  hidden: h.el('intent-feedback').hidden,
+  text: h.el('intent-feedback').textContent,
+  isError: h.el('intent-feedback').classList.contains('is-error'),
+})
+
+test('a request that fails after it was accepted shows its error right away', async () => {
+  for (const kind of ['buy', 'renew', 'reset'] as const) {
+    const id = `${kind}-1`
+    const error = `TunnelSats refused this ${kind} request.`
+    const m = model()
+    const h = load(m, 200, acceptedAnswer(kind, id))
+    await settleAll(h)
+    // bridge.py writes the slot before it answers, so the dashboard read
+    // that follows the 202 already shows the request pending.
+    m.intents[kind] = intentSlot(kind, id, 'pending')
+    await vm.runInContext(`submitIntent('${kind}')`, h.context)
+    await settleAll(h)
+    assert.match(feedbackOf(h).text, /^Requesting Lightning invoice/, kind)
+
+    m.intents[kind] = intentSlot(kind, id, 'processing')
+    await vm.runInContext('refresh()', h.context)
+    await settleAll(h)
+    assert.match(feedbackOf(h).text, /^Requesting Lightning invoice/, kind)
+
+    // The runner records the failure: the same page shows it at once.
+    m.intents[kind] = intentSlot(kind, id, 'failed', error)
+    await vm.runInContext('refresh()', h.context)
+    await settleAll(h)
+    assert.deepEqual(
+      feedbackOf(h),
+      { hidden: false, text: error, isError: true },
+      kind,
+    )
+
+    // A reload explains it the same way.
+    const reloaded = load(m)
+    await settleAll(reloaded)
+    assert.deepEqual(
+      feedbackOf(reloaded),
+      { hidden: false, text: error, isError: true },
+      kind,
+    )
+  }
+})
+
+test('the accepted note gives way to the outcome of the request it announced', async () => {
+  // Failed before the first dashboard read after the 202.
+  const error = 'Maximum 2 bandwidth resets per month reached'
+  const fast = model()
+  const h = load(fast, 200, acceptedAnswer('reset', 'reset-2'))
+  await settleAll(h)
+  fast.intents.reset = intentSlot('reset', 'reset-2', 'failed', error)
+  await vm.runInContext(`submitIntent('reset')`, h.context)
+  await settleAll(h)
+  assert.deepEqual(feedbackOf(h), { hidden: false, text: error, isError: true })
+
+  // Succeeded without a payable invoice (the reset was already paid): the
+  // note does not claim an invoice is still being prepared.
+  const paid = model()
+  const hPaid = load(paid, 200, acceptedAnswer('reset', 'reset-3'))
+  await settleAll(hPaid)
+  paid.intents.reset = intentSlot('reset', 'reset-3', 'succeeded')
+  await vm.runInContext(`submitIntent('reset')`, hPaid.context)
+  await settleAll(hPaid)
+  assert.equal(feedbackOf(hPaid).hidden, true)
+
+  // The 202 carried no ID: the note still gives way to the outcome of the
+  // request of that kind.
+  const bare = model()
+  const hBare = load(bare)
+  await settleAll(hBare)
+  bare.intents.renew = intentSlot('renew', 'renew-9', 'pending')
+  await vm.runInContext(`submitIntent('renew')`, hBare.context)
+  await settleAll(hBare)
+  bare.intents.renew = intentSlot('renew', 'renew-9', 'failed', 'Refused.')
+  await vm.runInContext('refresh()', hBare.context)
+  await settleAll(hBare)
+  assert.deepEqual(feedbackOf(hBare), {
+    hidden: false,
+    text: 'Refused.',
+    isError: true,
+  })
+})
+
+test('the accepted note stays while the dashboard cannot be read', async () => {
+  const routes: Record<string, { status: number; body: Json }> = {}
+  const h = load(model(), 200, acceptedAnswer('reset', 'reset-4'), routes)
+  await settleAll(h)
+  routes['/api/dashboard'] = { status: 503, body: {} }
+  await vm.runInContext(`submitIntent('reset')`, h.context)
+  await settleAll(h)
+  assert.match(feedbackOf(h).text, /^Request accepted/)
+  assert.equal(feedbackOf(h).isError, false)
+})
+
+test('a dashboard read started before the request was accepted cannot settle it', async () => {
+  const older = intentSlot('reset', 'reset-old', 'failed', 'An older failure.')
+  const m = model({ intents: { buy: null, renew: null, reset: older } })
+  const h = load(m, 200, acceptedAnswer('reset', 'reset-5'))
+  await settleAll(h)
+  // A poll read is in flight when Reset is pressed and answers only after
+  // the 202 and after the read that followed it, with the state from before
+  // the request. That answer is older than the one on screen: it is dropped.
+  const before = JSON.parse(JSON.stringify(m))
+  const fetchNow = h.context.fetch
+  let answerLate = () => {}
+  h.context.fetch = () =>
+    new Promise((resolve) => {
+      answerLate = () =>
+        resolve({ ok: true, status: 200, json: async () => before })
+    })
+  const poll = vm.runInContext('refresh()', h.context)
+  h.context.fetch = fetchNow
+  m.intents.reset = intentSlot('reset', 'reset-5', 'pending')
+  await vm.runInContext(`submitIntent('reset')`, h.context)
+  await settleAll(h)
+  answerLate()
+  await poll
+  await settleAll(h)
+  assert.match(feedbackOf(h).text, /^Requesting Lightning invoice/)
+  assert.equal(h.el('btn-intent-reset').disabled, true)
+})
+
+test('a pre-202 read that answers before the next read leaves the note', async () => {
+  const older = intentSlot('reset', 'reset-old', 'failed', 'An older failure.')
+  const m = model({ intents: { buy: null, renew: null, reset: older } })
+  const h = load(m, 200, acceptedAnswer('reset', 'reset-6'))
+  await settleAll(h)
+  // Every dashboard read waits for the test to answer it; the POST does not.
+  const before = JSON.parse(JSON.stringify(m))
+  const fetchNow = h.context.fetch
+  const answers: ((body: Json) => void)[] = []
+  h.context.fetch = (url: string, init?: Json) =>
+    url === '/api/dashboard'
+      ? new Promise((resolve) => {
+          answers.push((body) =>
+            resolve({ ok: true, status: 200, json: async () => body }),
+          )
+        })
+      : fetchNow(url, init)
+  const poll = vm.runInContext('refresh()', h.context)
+  m.intents.reset = intentSlot('reset', 'reset-6', 'pending')
+  const submit = vm.runInContext(`submitIntent('reset')`, h.context)
+  await settleAll(h)
+  assert.equal(answers.length, 2, 'the poll and the read after the 202')
+  // The poll answers first, with the state from before the request: it is
+  // the newest answer so far, but it cannot settle the request it predates.
+  answers[0](before)
+  await poll
+  await settleAll(h)
+  assert.match(feedbackOf(h).text, /^Request accepted/)
+  assert.equal(feedbackOf(h).isError, false)
+  answers[1](m)
+  await submit
+  await settleAll(h)
+  assert.match(feedbackOf(h).text, /^Requesting Lightning invoice/)
+  h.context.fetch = fetchNow
+})
+
+test('a dashboard read that fails after a newer one answered changes nothing', async () => {
+  const h = load(model())
+  await settleAll(h)
+  const fetchNow = h.context.fetch
+  let failLate = () => {}
+  h.context.fetch = () =>
+    new Promise((_resolve, reject) => {
+      failLate = () => reject(new Error('timed out'))
+    })
+  const slow = vm.runInContext('refresh()', h.context)
+  h.context.fetch = fetchNow
+  await vm.runInContext('refresh()', h.context)
+  await settleAll(h)
+  failLate()
+  await slow
+  await settleAll(h)
+  assert.equal(h.el('load-error').hidden, true)
+})
+
 // ─── W3: visuals and discovery ───────────────────────────────────────────────
 
 const settleAll = async (h: Harness, rounds = 5) => {

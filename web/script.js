@@ -81,8 +81,17 @@ let model = null
 let loadFailed = false
 let countdownTimer = null
 let lastPollAt = 0
+// GET /api/dashboard requests started so far (see acceptedIntent).
+let dashboardReads = 0
+// The newest dashboard read whose answer was applied (see refresh).
+let appliedRead = 0
 let submittingIntent = false
 let localIntentFeedback = null
+// The request whose "Request accepted" note localIntentFeedback shows:
+// { kind, id, afterRead } from the 202 answer (id null if the answer carried
+// none). Only a dashboard read started after the answer (a number above
+// afterRead) shows the request, so only such a read can settle it.
+let acceptedIntent = null
 let lastRenderedInvoice = null
 let selectedInvoiceKind = null
 let activeTab = 'overview'
@@ -1676,6 +1685,21 @@ function activeIntentMessage(m) {
   return null
 }
 
+/**
+ * Whether the read model no longer shows the accepted request as pending or
+ * processing: the runner recorded its outcome, or the slot of its kind no
+ * longer holds it. Its "Request accepted" note then gives way to the outcome.
+ * `read` is the number of the dashboard read that produced `m`.
+ */
+function acceptedIntentSettled(m, read) {
+  if (!acceptedIntent || read <= acceptedIntent.afterRead) return false
+  const slot = ((m && m.intents) || {})[acceptedIntent.kind]
+  if (!slot || (acceptedIntent.id && slot.id !== acceptedIntent.id)) {
+    return true
+  }
+  return slot.status !== 'pending' && slot.status !== 'processing'
+}
+
 /** The m.pending invoice kind each dashboard request kind produces. */
 const INTENT_INVOICE_KIND = { buy: 'order', renew: 'renewal', reset: 'reset' }
 
@@ -1683,7 +1707,9 @@ const INTENT_INVOICE_KIND = { buy: 'order', renew: 'renewal', reset: 'reset' }
  * The most recent failed dashboard request. A failure is left out only when
  * a payable invoice of the same kind was created after it (a later request
  * of that kind produced it); an invoice of another kind never hides it, so
- * a refused or failed request stays explained next to any invoice.
+ * a refused or failed request stays explained next to any invoice. The read
+ * model drops a failure 15 minutes after its updatedAt
+ * (INTENT_FAILURE_SHOWN_FOR in bridge.py), so an old one does not stay.
  */
 function latestIntentFailure(m) {
   const intents = (m && m.intents) || {}
@@ -2407,18 +2433,27 @@ function hasActiveAsyncWork(m) {
 
 async function refresh() {
   lastPollAt = Date.now()
+  const read = ++dashboardReads
   try {
     const response = await fetch(DASHBOARD_URL, {
       cache: 'no-store',
       credentials: 'same-origin',
     })
     if (!response.ok) throw new Error(`HTTP ${response.status}`)
-    model = await response.json()
+    const next = await response.json()
+    // An answer that arrives after a newer one was applied must not put
+    // older state back (e.g. the poll in flight when a request was accepted).
+    if (read < appliedRead) return
+    appliedRead = read
+    model = next
     loadFailed = false
-    if (activePayableInvoice(model)) {
+    if (activePayableInvoice(model) || acceptedIntentSettled(model, read)) {
       localIntentFeedback = null
+      acceptedIntent = null
     }
   } catch (error) {
+    // Nor may a failed read that started before the newest applied one.
+    if (read < appliedRead) return
     console.error('Failed to load the dashboard state:', error)
     loadFailed = true
   }
@@ -2534,6 +2569,7 @@ async function submitIntent(actionKey) {
       ? (serverSelect && serverSelect.value) || selectedServerId
       : ''
     if (!serverId) {
+      acceptedIntent = null
       localIntentFeedback = {
         level: 'error',
         text: 'Choose a server region first.',
@@ -2563,6 +2599,7 @@ async function submitIntent(actionKey) {
   }
 
   submittingIntent = true
+  acceptedIntent = null
   localIntentFeedback = {
     level: 'info',
     text: 'Submitting request to TunnelSats…',
@@ -2589,6 +2626,12 @@ async function submitIntent(actionKey) {
       submittingIntent = false
       render()
       return
+    }
+    const intent = data && data.intent
+    acceptedIntent = {
+      kind: payload.kind,
+      id: intent && typeof intent.id === 'string' ? intent.id : null,
+      afterRead: dashboardReads,
     }
     localIntentFeedback = {
       level: 'info',
