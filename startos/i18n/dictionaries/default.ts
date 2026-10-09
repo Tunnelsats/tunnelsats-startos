@@ -80,7 +80,7 @@ const dict = {
   'Payment settlement failed: ${error}': 77,
   'The payment was settled, but clearing its payment task on the Lightning node failed: ${error}. Retrying automatically.': 78,
   'Reset Bandwidth': 79,
-  "Reset this month's bandwidth usage once it reaches 70% of the monthly limit. Resets per month are limited; the invoice is paid from your Lightning node.": 80,
+  "Resets this month's bandwidth usage counter to 0 for a small fee (up to 2 resets per month). The invoice is paid from your Lightning node.": 80,
   'Bandwidth Reset Invoice Created': 81,
   "A payment task has been raised on your Lightning node. Once it is paid, this month's bandwidth usage is reset.": 82,
   'Pending Bandwidth Reset Invoice': 83,
