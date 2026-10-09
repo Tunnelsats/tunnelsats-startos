@@ -2316,9 +2316,6 @@ def get_status():
 DASHBOARD_TEXT_LIMIT = 300
 # Shown until the API confirmed the limit for the current key.
 BANDWIDTH_LIMIT_GB = 100
-# The server's default usage threshold for a paid bandwidth reset. The server
-# may configure another one and decides; the dashboard only uses it as a hint.
-RESET_THRESHOLD_DEFAULT_PCT = 70
 BASE_PRICE_USD = 3.0
 PLAN_DISCOUNTS_PCT = ((1, 0), (3, 5), (6, 10), (12, 20))
 PLAN_PRICES_USD = [
@@ -3021,9 +3018,9 @@ def confirmed_bandwidth_limit(meta, public_key):
 
 
 def _bandwidth_summary(meta, public_key, now):
-    """Usage and reset quota for the current key. Usage and the resets used
-    reset on the 1st (UTC), so they are shown only from a sync in the
-    current UTC month; the limit and the allowance are not monthly."""
+    """Usage and reset quota for the current key. Usage resets on the 1st and
+    the resets used count per UTC month, so both are shown only from a sync
+    in the current UTC month; the limit and the allowance are not monthly."""
     same_key = public_key is not None and meta.get("publicKey") == public_key
     synced = _parse_iso(meta.get("lastSync")) if same_key else None
     synced = synced.astimezone(timezone.utc) if synced is not None else None
@@ -3033,7 +3030,6 @@ def _bandwidth_summary(meta, public_key, now):
         "limitGb": confirmed_bandwidth_limit(meta, public_key),
         "resetsThisMonth": valid_reset_count(meta.get("bandwidth_resets_this_month")) if this_month else None,
         "maxResetsPerMonth": valid_reset_count(meta.get("max_resets_per_month")) if same_key else None,
-        "resetThresholdPct": RESET_THRESHOLD_DEFAULT_PCT,
     }
 
 

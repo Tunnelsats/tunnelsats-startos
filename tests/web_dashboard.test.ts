@@ -1377,7 +1377,7 @@ test('monthPace projects usage to the end of the UTC month', () => {
   )
 })
 
-test('resetEligibility and resetsText follow the confirmed quota, as hints only', () => {
+test('resetEligibility says what a reset gives back, from the confirmed numbers', () => {
   const h = load(model())
   const state = (bandwidth: Json, extra: Json = {}) =>
     h.run(`resetEligibility(${JSON.stringify(model({ bandwidth, ...extra }))})`)
@@ -1390,16 +1390,29 @@ test('resetEligibility and resetsText follow the confirmed quota, as hints only'
     limitGb: 100,
     resetsThisMonth,
     maxResetsPerMonth,
-    resetThresholdPct: 70,
   })
-  assert.equal(state(bw(40, 0, 2)).state, 'below-threshold')
-  assert.match(state(bw(40, 0, 2)).text, /TunnelSats decides/)
-  assert.equal(state(bw(80, 1, 2)).state, 'eligible')
-  assert.match(state(bw(80, 1, 2)).text, /1 of 2 resets left/)
-  assert.equal(state(bw(80, 2, 2)).state, 'quota-used')
+  // At any usage: the counter goes back to 0, so a reset gives back what
+  // was used this month.
+  assert.deepEqual(state(bw(40, 0, 2)), {
+    state: 'available',
+    text: '40.00 GB used this month. A reset gives back 40.00 GB and counts as 1 of 2 resets this month. Usage also resets for free on the 1st.',
+  })
+  assert.equal(state(bw(80, 1, 2)).state, 'available')
+  assert.equal(state(bw(1.5, null, 2)).state, 'available')
+  // Without a confirmed monthly limit, the hint does not name one.
+  assert.deepEqual(state(bw(12.5, null, null)), {
+    state: 'available',
+    text: '12.50 GB used this month. A reset gives back 12.50 GB. Usage also resets for free on the 1st.',
+  })
+  assert.deepEqual(state(bw(80, 2, 2)), {
+    state: 'quota-used',
+    text: 'All 2 resets for this month are used. Usage resets for free on the 1st.',
+  })
   assert.match(state(bw(80, 0, 0)).text, /not offered/)
-  assert.equal(state(bw(80, null, null)).state, 'likely')
-  assert.equal(state(bw(null, 0, 2)).state, 'unknown')
+  assert.deepEqual(state(bw(null, 0, 2)), {
+    state: 'unknown',
+    text: 'Usage for this month is not known yet, so a reset now may give back little.',
+  })
   assert.equal(
     state(bw(80, 0, 2), {
       pending: { order: null, renewal: null, reset: { targetNode: 'lnd' } },
@@ -1413,14 +1426,64 @@ test('resetEligibility and resetsText follow the confirmed quota, as hints only'
     'unavailable',
   )
   assert.equal(state(bw(80, 0, 2), { configured: false }).state, 'unavailable')
-  for (const s of [state(bw(80, 1, 2)), state(bw(80, null, null))]) {
-    assert.match(s.text, /TunnelSats confirms/)
-  }
   const resets = (b: Json) =>
     h.run(`resetsText(${JSON.stringify({ bandwidth: b })})`)
   assert.equal(resets(bw(1, 1, 2)), '1 of 2')
   assert.equal(resets(bw(1, null, 2)), '? of 2')
   assert.equal(resets(bw(1, 1, null)), 'Unknown')
+})
+
+test('the reset hint never states a usage threshold', () => {
+  const h = load(model())
+  for (const usedGb of [0, 0.05, 35, 69.9, 70, 95, 100, null]) {
+    for (const [resetsThisMonth, maxResetsPerMonth] of [
+      [0, 2],
+      [1, 2],
+      [2, 2],
+      [null, null],
+    ]) {
+      // bridge.py used to send resetThresholdPct, and the hint fell back to
+      // 70 without it; neither brings a threshold back.
+      const bandwidth = {
+        usedGb,
+        limitGb: 100,
+        resetsThisMonth,
+        maxResetsPerMonth,
+        resetThresholdPct: 70,
+      }
+      const hint = h.run(
+        `resetEligibility(${JSON.stringify(model({ bandwidth }))})`,
+      )
+      assert.doesNotMatch(
+        hint.text,
+        /%|threshold|available from/i,
+        `${usedGb} GB: ${hint.text}`,
+      )
+      assert.notEqual(hint.state, 'below-threshold')
+    }
+  }
+})
+
+test('the reset copy says a reset sets usage to 0 and names no time zone', () => {
+  const html = readFileSync(join(__dirname, '..', 'web', 'index.html'), 'utf8')
+  assert.match(html, />\s*Reset usage to 0 · \$1\.00\s*</)
+  assert.doesNotMatch(html, /\+100 GB/)
+  assert.match(html, /Usage resets for free on the 1st of each month\./)
+  // The day the monthly counter resets is known; its time zone is not.
+  const h = load(model())
+  for (const bandwidth of [
+    { usedGb: 60, limitGb: 100 },
+    { usedGb: 5, limitGb: 100 },
+    { usedGb: 40, limitGb: 100, resetsThisMonth: 1 },
+  ]) {
+    for (const now of [SEPT_16, Date.UTC(2026, 8, 1, 12)]) {
+      const text = h.run(
+        `paceText(monthPace(${JSON.stringify({ bandwidth })}, ${now}))`,
+      )
+      assert.match(text, /The counter resets for free on /)
+      assert.doesNotMatch(text, /UTC/)
+    }
+  }
 })
 
 test('subscriptionTimeline places the 7-day and 3-day reminders before the expiry', () => {
@@ -1902,7 +1965,6 @@ test('the overview renders native gauges, the timeline and the quota', async () 
         limitGb: 150,
         resetsThisMonth: 1,
         maxResetsPerMonth: 2,
-        resetThresholdPct: 70,
       },
     }),
   )
@@ -1920,7 +1982,7 @@ test('the overview renders native gauges, the timeline and the quota', async () 
   assert.equal(h.el('val-resets').textContent, '1 of 2')
   assert.equal(
     h.el('val-reset-eligibility').attributes['data-state'],
-    'eligible',
+    'available',
   )
   assert.match(h.el('pace-text').textContent, /GB/)
   assert.equal(h.el('timeline-phase').textContent, 'On track')
@@ -2283,7 +2345,6 @@ test('command deck renders SVG ring/arc gauges and visual reset pips without inl
         limitGb: 150,
         resetsThisMonth: 1,
         maxResetsPerMonth: 2,
-        resetThresholdPct: 70,
       },
     }),
   )
