@@ -800,9 +800,9 @@
                 type="button"
                 id="btn-intent-reset"
                 class="btn-intent btn-intent-secondary"
-                data-submit-intent="reset"
+                data-open-dialog="reset-confirm-modal"
               >
-                Reset bandwidth · $1.00 for +100 GB
+                Reset usage to 0 · $1.00
               </button>
             </div>
           </section>
@@ -1347,7 +1347,7 @@
           <ul class="bandwidth-facts">
             <li>
               <strong>Monthly allowance:</strong> 100 GB (combined upload +
-              download), reset on the 1st of each calendar month (UTC).
+              download). Usage resets for free on the 1st of each month.
             </li>
             <li>
               <strong>Paid reset:</strong> Run
@@ -1381,6 +1381,72 @@
               <path d="M7 17 17 7M8 7h9v9" />
             </svg>
           </a>
+        </div>
+      </div>
+    </dialog>
+
+    <!-- ── Bandwidth Reset Confirmation ── -->
+    <dialog
+      id="reset-confirm-modal"
+      class="app-modal"
+      closedby="any"
+      aria-labelledby="reset-confirm-title"
+      aria-describedby="reset-confirm-facts"
+    >
+      <div class="modal-dialog-inner confirm-dialog-inner">
+        <div class="modal-header">
+          <h2 id="reset-confirm-title">Reset bandwidth usage to 0?</h2>
+          <button
+            type="button"
+            class="modal-close-btn"
+            data-close-dialog
+            aria-label="Close"
+          >
+            <svg
+              class="modal-close-icon"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              aria-hidden="true"
+            >
+              <line x1="18" y1="6" x2="6" y2="18" />
+              <line x1="6" y1="6" x2="18" y2="18" />
+            </svg>
+          </button>
+        </div>
+        <div class="modal-body">
+          <ul id="reset-confirm-facts" class="bandwidth-facts">
+            <li>
+              Usage for this month is not known yet, so a reset now may give
+              back little.
+            </li>
+          </ul>
+          <p class="muted">
+            TunnelSats creates the invoice, and a Pay Invoice task is raised on
+            your Lightning node.
+          </p>
+          <div class="modal-actions">
+            <button
+              type="button"
+              id="btn-cancel-reset"
+              class="btn-intent btn-intent-secondary"
+              data-close-dialog
+              autofocus
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              id="btn-confirm-reset"
+              class="btn-intent"
+              data-submit-intent="reset"
+            >
+              Reset for $1.00
+            </button>
+          </div>
         </div>
       </div>
     </dialog>

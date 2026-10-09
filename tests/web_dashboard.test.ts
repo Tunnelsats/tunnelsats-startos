@@ -102,6 +102,14 @@ class FakeElement {
   addEventListener() {}
   remove() {}
   select() {}
+  /** HTMLDialogElement: only what the script uses. */
+  open = false
+  showModal() {
+    this.open = true
+  }
+  close() {
+    this.open = false
+  }
 }
 
 interface Harness {
@@ -1377,7 +1385,7 @@ test('monthPace projects usage to the end of the UTC month', () => {
   )
 })
 
-test('resetEligibility and resetsText follow the confirmed quota, as hints only', () => {
+test('resetEligibility says what a reset gives back, from the confirmed numbers', () => {
   const h = load(model())
   const state = (bandwidth: Json, extra: Json = {}) =>
     h.run(`resetEligibility(${JSON.stringify(model({ bandwidth, ...extra }))})`)
@@ -1390,16 +1398,30 @@ test('resetEligibility and resetsText follow the confirmed quota, as hints only'
     limitGb: 100,
     resetsThisMonth,
     maxResetsPerMonth,
-    resetThresholdPct: 70,
   })
-  assert.equal(state(bw(40, 0, 2)).state, 'below-threshold')
-  assert.match(state(bw(40, 0, 2)).text, /TunnelSats decides/)
-  assert.equal(state(bw(80, 1, 2)).state, 'eligible')
-  assert.match(state(bw(80, 1, 2)).text, /1 of 2 resets left/)
-  assert.equal(state(bw(80, 2, 2)).state, 'quota-used')
+  // At any usage: the counter goes back to 0, so a reset gives back what
+  // was used this month.
+  assert.deepEqual(state(bw(40, 0, 2)), {
+    state: 'available',
+    text: '40.00 GB used this month. A reset gives back 40.00 GB and counts as 1 of 2 resets this month. Usage also resets for free on the 1st.',
+  })
+  assert.equal(state(bw(80, 1, 2)).state, 'available')
+  assert.equal(state(bw(1.5, null, 2)).state, 'available')
+  // Without a confirmed monthly limit, the hint does not name one.
+  assert.deepEqual(state(bw(12.5, null, null)), {
+    state: 'available',
+    text: '12.50 GB used this month. A reset gives back 12.50 GB. Usage also resets for free on the 1st.',
+  })
+  assert.deepEqual(state(bw(80, 2, 2)), {
+    state: 'quota-used',
+    text: 'All 2 resets for this month are used. Usage resets for free on the 1st.',
+  })
   assert.match(state(bw(80, 0, 0)).text, /not offered/)
-  assert.equal(state(bw(80, null, null)).state, 'likely')
-  assert.equal(state(bw(null, 0, 2)).state, 'unknown')
+  assert.match(state(bw(80, null, 0)).text, /not offered/)
+  assert.deepEqual(state(bw(null, 0, 2)), {
+    state: 'unknown',
+    text: 'Usage for this month is not known yet, so a reset now may give back little.',
+  })
   assert.equal(
     state(bw(80, 0, 2), {
       pending: { order: null, renewal: null, reset: { targetNode: 'lnd' } },
@@ -1413,14 +1435,225 @@ test('resetEligibility and resetsText follow the confirmed quota, as hints only'
     'unavailable',
   )
   assert.equal(state(bw(80, 0, 2), { configured: false }).state, 'unavailable')
-  for (const s of [state(bw(80, 1, 2)), state(bw(80, null, null))]) {
-    assert.match(s.text, /TunnelSats confirms/)
-  }
   const resets = (b: Json) =>
     h.run(`resetsText(${JSON.stringify({ bandwidth: b })})`)
   assert.equal(resets(bw(1, 1, 2)), '1 of 2')
   assert.equal(resets(bw(1, null, 2)), '? of 2')
   assert.equal(resets(bw(1, 1, null)), 'Unknown')
+})
+
+test('the reset hint never states a usage threshold', () => {
+  const h = load(model())
+  for (const usedGb of [0, 0.05, 35, 69.9, 70, 95, 100, null]) {
+    for (const [resetsThisMonth, maxResetsPerMonth] of [
+      [0, 2],
+      [1, 2],
+      [2, 2],
+      [null, null],
+    ]) {
+      // bridge.py used to send resetThresholdPct, and the hint fell back to
+      // 70 without it; neither brings a threshold back.
+      const bandwidth = {
+        usedGb,
+        limitGb: 100,
+        resetsThisMonth,
+        maxResetsPerMonth,
+        resetThresholdPct: 70,
+      }
+      const hint = h.run(
+        `resetEligibility(${JSON.stringify(model({ bandwidth }))})`,
+      )
+      assert.doesNotMatch(
+        hint.text,
+        /%|threshold|available from/i,
+        `${usedGb} GB: ${hint.text}`,
+      )
+      assert.notEqual(hint.state, 'below-threshold')
+    }
+  }
+})
+
+test('the reset copy says a reset sets usage to 0 and names no time zone', () => {
+  const html = readFileSync(join(__dirname, '..', 'web', 'index.html'), 'utf8')
+  assert.match(html, />\s*Reset usage to 0 · \$1\.00\s*</)
+  assert.doesNotMatch(html, /\+100 GB/)
+  assert.match(html, /Usage resets for free on the 1st of each month\./)
+  // The day the monthly counter resets is known; its time zone is not.
+  const h = load(model())
+  for (const bandwidth of [
+    { usedGb: 60, limitGb: 100 },
+    { usedGb: 5, limitGb: 100 },
+    { usedGb: 40, limitGb: 100, resetsThisMonth: 1 },
+  ]) {
+    for (const now of [SEPT_16, Date.UTC(2026, 8, 1, 12)]) {
+      const text = h.run(
+        `paceText(monthPace(${JSON.stringify({ bandwidth })}, ${now}))`,
+      )
+      assert.match(text, /The counter resets for free on /)
+      assert.doesNotMatch(text, /UTC/)
+    }
+  }
+})
+
+test('index.html sends the reset button to a confirmation dialog', () => {
+  const html = readFileSync(join(__dirname, '..', 'web', 'index.html'), 'utf8')
+  const cta = /<button[^>]*\sid="btn-intent-reset"[^>]*>/.exec(html)?.[0] ?? ''
+  assert.match(cta, /\sdata-open-dialog="reset-confirm-modal"/)
+  assert.doesNotMatch(cta, /data-submit-intent/, 'the button never requests')
+  const dialog =
+    /<dialog[^>]*\sid="reset-confirm-modal"[^>]*>[\s\S]*?<\/dialog>/.exec(
+      html,
+    )?.[0] ?? ''
+  assert.match(dialog, /<ul[^>]*\sid="reset-confirm-facts"/)
+  const confirm =
+    /<button[^>]*\sid="btn-confirm-reset"[^>]*>([\s\S]*?)<\/button>/.exec(
+      dialog,
+    )
+  assert.match(confirm?.[0] ?? '', /\sdata-submit-intent="reset"/)
+  assert.equal(confirm?.[1].trim(), 'Reset for $1.00')
+  const cancel =
+    /<button[^>]*\sid="btn-cancel-reset"[^>]*>([\s\S]*?)<\/button>/.exec(dialog)
+  assert.match(cancel?.[0] ?? '', /\sdata-close-dialog/)
+  assert.equal(cancel?.[1].trim(), 'Cancel')
+})
+
+/** The reset confirmation wired as index.html declares it (test above). */
+function resetConfirmation(h: Harness) {
+  const cta = h.el('btn-intent-reset')
+  cta.setAttribute('data-open-dialog', 'reset-confirm-modal')
+  const dialog = h.el('reset-confirm-modal')
+  dialog.tagName = 'DIALOG'
+  const cancel = h.el('btn-cancel-reset')
+  cancel.setAttribute('data-close-dialog', '')
+  const confirm = h.el('btn-confirm-reset')
+  confirm.setAttribute('data-submit-intent', 'reset')
+  dialog.append(h.el('reset-confirm-facts'), cancel, confirm)
+  const facts = () =>
+    h.el('reset-confirm-facts').children.map((li) => li.textContent)
+  const posts = () => h.requests.filter((r) => r.url === '/api/intents')
+  return { cta, dialog, cancel, confirm, facts, posts }
+}
+
+test('a dashboard reset shows its facts and asks before it is requested', async () => {
+  const h = load(
+    model({
+      bandwidth: {
+        usedGb: 35,
+        limitGb: 100,
+        resetsThisMonth: 0,
+        maxResetsPerMonth: 2,
+      },
+    }),
+  )
+  await settleAll(h)
+  const ui = resetConfirmation(h)
+
+  h.dispatch('click', ui.cta)
+  assert.equal(ui.dialog.open, true)
+  assert.equal(ui.posts().length, 0, 'opening it requests nothing')
+  assert.deepEqual(ui.facts(), [
+    '35.00 GB used this month. A reset sets the counter to 0 and gives back 35.00 GB.',
+    'This is reset 1 of 2 this month.',
+    'Usage also resets for free on the 1st.',
+  ])
+
+  h.dispatch('click', ui.cancel)
+  assert.equal(ui.dialog.open, false)
+  assert.equal(ui.posts().length, 0, 'Cancel requests nothing')
+
+  h.dispatch('click', ui.cta)
+  h.dispatch('click', ui.confirm)
+  await settleAll(h)
+  assert.equal(ui.dialog.open, false)
+  assert.equal(ui.posts().length, 1)
+  assert.deepEqual(JSON.parse(ui.posts()[0].init?.body), { kind: 'reset' })
+})
+
+test('the reset confirmation states the facts, never a usage threshold', () => {
+  const h = load(model())
+  const facts = (bandwidth: Json): string[] =>
+    h.run(`resetConfirmFacts(${JSON.stringify(model({ bandwidth }))})`)
+  const bw = (
+    usedGb: number | null,
+    resetsThisMonth: number | null,
+    maxResetsPerMonth: number | null,
+  ) => ({ usedGb, limitGb: 100, resetsThisMonth, maxResetsPerMonth })
+  assert.deepEqual(facts(bw(null, 1, 2)), [
+    'Usage for this month is not known yet, so a reset now may give back little.',
+    'This is reset 2 of 2 this month.',
+    'Usage also resets for free on the 1st.',
+  ])
+  assert.equal(
+    facts(bw(0.5, null, 2))[1],
+    'It counts as 1 of 2 resets this month.',
+  )
+  assert.equal(
+    facts(bw(99, 2, 2))[1],
+    'All 2 resets for this month are used, so TunnelSats may refuse this one.',
+  )
+  assert.equal(
+    facts(bw(99, 0, 0))[1],
+    'Paid resets are not offered for this subscription.',
+  )
+  assert.deepEqual(facts(bw(10, null, null)), [
+    '10.00 GB used this month. A reset sets the counter to 0 and gives back 10.00 GB.',
+    'Usage also resets for free on the 1st.',
+  ])
+  // A reset already in progress is shown again or settled, never repeated.
+  const pending = h.run(
+    `resetConfirmFacts(${JSON.stringify(
+      model({
+        bandwidth: bw(80, 1, 2),
+        pending: { order: null, renewal: null, reset: { targetNode: 'lnd' } },
+      }),
+    )})`,
+  )
+  assert.equal(
+    pending[1],
+    'A bandwidth reset is already in progress, so this does not request another one.',
+  )
+  for (const usedGb of [0, 0.05, 35, 69.9, 70, 95, 100, null]) {
+    for (const text of facts({ ...bw(usedGb, 0, 2), resetThresholdPct: 70 })) {
+      assert.doesNotMatch(text, /%|threshold|available from/i, text)
+    }
+  }
+})
+
+test('the reset confirmation sends nothing while another request is in flight', async () => {
+  const m = model({
+    bandwidth: {
+      usedGb: 35,
+      limitGb: 100,
+      resetsThisMonth: 0,
+      maxResetsPerMonth: 2,
+    },
+  })
+  const h = load(m)
+  await settleAll(h)
+  const ui = resetConfirmation(h)
+  h.dispatch('click', ui.cta)
+  assert.equal(ui.dialog.open, true)
+  const at = new Date().toISOString()
+  m.intents.renew = {
+    id: 'renew-1',
+    kind: 'renew',
+    status: 'pending',
+    createdAt: at,
+    updatedAt: at,
+    error: null,
+  }
+  h.run('render()')
+  assert.equal(ui.confirm.disabled, true)
+  h.dispatch('click', ui.confirm)
+  await settleAll(h)
+  assert.equal(ui.posts().length, 0)
+  assert.equal(ui.dialog.open, true, 'Cancel is still there')
+  h.dispatch('click', ui.cancel)
+  assert.equal(ui.dialog.open, false)
+  // The disabled button does not open it again.
+  assert.equal(ui.cta.disabled, true)
+  h.dispatch('click', ui.cta)
+  assert.equal(ui.dialog.open, false)
 })
 
 test('subscriptionTimeline places the 7-day and 3-day reminders before the expiry', () => {
@@ -1902,7 +2135,6 @@ test('the overview renders native gauges, the timeline and the quota', async () 
         limitGb: 150,
         resetsThisMonth: 1,
         maxResetsPerMonth: 2,
-        resetThresholdPct: 70,
       },
     }),
   )
@@ -1920,7 +2152,7 @@ test('the overview renders native gauges, the timeline and the quota', async () 
   assert.equal(h.el('val-resets').textContent, '1 of 2')
   assert.equal(
     h.el('val-reset-eligibility').attributes['data-state'],
-    'eligible',
+    'available',
   )
   assert.match(h.el('pace-text').textContent, /GB/)
   assert.equal(h.el('timeline-phase').textContent, 'On track')
@@ -2283,7 +2515,6 @@ test('command deck renders SVG ring/arc gauges and visual reset pips without inl
         limitGb: 150,
         resetsThisMonth: 1,
         maxResetsPerMonth: 2,
-        resetThresholdPct: 70,
       },
     }),
   )
