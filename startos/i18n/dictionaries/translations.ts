@@ -133,6 +133,7 @@ export default {
     129: 'TunnelSats recuperó un pedido pagado que habías sustituido',
     130: 'Se pagó un pedido de TunnelSats que habías sustituido por uno más reciente. TunnelSats lo reclamó y conservó su configuración de WireGuard; tu túnel activo no cambia. Ejecuta Exportar configuración de WireGuard para obtenerla e Importar Suscripción para usarla en su lugar.',
     131: 'Solicita a TunnelSats un restablecimiento de ancho de banda de pago y crea una tarea de pago en tu nodo Lightning. Una nueva solicitud reserva uno de los restablecimientos de este mes hasta que caduque su factura, aunque nunca la pagues.',
+    132: 'TunnelSats rechazó por ahora la solicitud de restablecimiento de ancho de banda: ${message}',
   },
   de_DE: {
     0: 'TunnelSats wird gestartet!',
@@ -266,6 +267,7 @@ export default {
     129: 'TunnelSats hat eine bezahlte, ersetzte Bestellung wiederhergestellt',
     130: 'Eine TunnelSats-Bestellung, die Sie durch eine neuere ersetzt hatten, wurde bezahlt. TunnelSats hat sie abgerufen und ihre WireGuard-Konfiguration aufbewahrt; Ihr aktiver Tunnel bleibt unverändert. Führen Sie „WireGuard-Konfiguration exportieren“ aus, um sie abzurufen, und „Abonnement importieren“, um sie stattdessen zu verwenden.',
     131: 'Fordert bei TunnelSats ein kostenpflichtiges Zurücksetzen der Bandbreite an und erstellt eine Zahlungsaufgabe auf Ihrem Lightning-Knoten. Eine neue Anfrage reserviert eine der Zurücksetzungen dieses Monats, bis ihre Rechnung abläuft, auch wenn Sie sie nie bezahlen.',
+    132: 'TunnelSats hat die Anfrage zum Zurücksetzen der Bandbreite vorerst abgelehnt: ${message}',
   },
   pl_PL: {
     0: 'Uruchamianie TunnelSats!',
@@ -399,6 +401,7 @@ export default {
     129: 'TunnelSats odzyskał opłacone zamówienie, które zastąpiłeś',
     130: 'Zamówienie TunnelSats, które zastąpiłeś nowszym, zostało opłacone. TunnelSats je odebrał i zachował jego konfigurację WireGuard; Twój aktywny tunel pozostaje bez zmian. Uruchom Eksportuj konfigurację WireGuard, aby ją pobrać, i Importuj subskrypcję, aby użyć jej zamiast obecnej.',
     131: 'Zamawia w TunnelSats płatny reset transferu i tworzy zadanie płatności w węźle Lightning. Nowe zamówienie rezerwuje jeden z resetów w tym miesiącu do wygaśnięcia jego faktury, nawet jeśli nigdy jej nie opłacisz.',
+    132: 'TunnelSats na razie odrzucił prośbę o reset transferu: ${message}',
   },
   fr_FR: {
     0: 'Démarrage de TunnelSats !',
@@ -532,5 +535,6 @@ export default {
     129: 'TunnelSats a récupéré une commande payée que vous aviez remplacée',
     130: 'Une commande TunnelSats que vous aviez remplacée par une plus récente a été payée. TunnelSats l’a réclamée et a conservé sa configuration WireGuard ; votre tunnel actif reste inchangé. Lancez Exporter la configuration WireGuard pour la récupérer, puis Importer un abonnement pour l’utiliser à la place.',
     131: "Demande à TunnelSats une réinitialisation payante de la bande passante et crée une tâche de paiement sur votre nœud Lightning. Une nouvelle demande réserve l'une des réinitialisations de ce mois jusqu'à l'expiration de sa facture, même si vous ne la payez jamais.",
+    132: 'TunnelSats a refusé pour le moment la demande de réinitialisation de la bande passante : ${message}',
   },
 } satisfies Record<string, LangDict>

@@ -132,6 +132,7 @@ const dict = {
   'TunnelSats recovered a paid order you had replaced': 129,
   'A TunnelSats order you replaced with a newer one was paid. TunnelSats claimed it and kept its WireGuard configuration; your active tunnel is unchanged. Run Export WireGuard Configuration to retrieve it, and Import Subscription to use it instead.': 130,
   "Requests a paid bandwidth reset from TunnelSats and raises a payment task on your Lightning node. A new request reserves one of this month's resets until its invoice expires, even if you never pay it.": 131,
+  'TunnelSats declined the bandwidth reset request for now: ${message}': 132,
 } as const
 
 /**
