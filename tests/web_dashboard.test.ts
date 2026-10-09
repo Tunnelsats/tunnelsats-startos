@@ -102,6 +102,14 @@ class FakeElement {
   addEventListener() {}
   remove() {}
   select() {}
+  /** HTMLDialogElement: only what the script uses. */
+  open = false
+  showModal() {
+    this.open = true
+  }
+  close() {
+    this.open = false
+  }
 }
 
 interface Harness {
@@ -1409,6 +1417,7 @@ test('resetEligibility says what a reset gives back, from the confirmed numbers'
     text: 'All 2 resets for this month are used. Usage resets for free on the 1st.',
   })
   assert.match(state(bw(80, 0, 0)).text, /not offered/)
+  assert.match(state(bw(80, null, 0)).text, /not offered/)
   assert.deepEqual(state(bw(null, 0, 2)), {
     state: 'unknown',
     text: 'Usage for this month is not known yet, so a reset now may give back little.',
@@ -1484,6 +1493,167 @@ test('the reset copy says a reset sets usage to 0 and names no time zone', () =>
       assert.doesNotMatch(text, /UTC/)
     }
   }
+})
+
+test('index.html sends the reset button to a confirmation dialog', () => {
+  const html = readFileSync(join(__dirname, '..', 'web', 'index.html'), 'utf8')
+  const cta = /<button[^>]*\sid="btn-intent-reset"[^>]*>/.exec(html)?.[0] ?? ''
+  assert.match(cta, /\sdata-open-dialog="reset-confirm-modal"/)
+  assert.doesNotMatch(cta, /data-submit-intent/, 'the button never requests')
+  const dialog =
+    /<dialog[^>]*\sid="reset-confirm-modal"[^>]*>[\s\S]*?<\/dialog>/.exec(
+      html,
+    )?.[0] ?? ''
+  assert.match(dialog, /<ul[^>]*\sid="reset-confirm-facts"/)
+  const confirm =
+    /<button[^>]*\sid="btn-confirm-reset"[^>]*>([\s\S]*?)<\/button>/.exec(
+      dialog,
+    )
+  assert.match(confirm?.[0] ?? '', /\sdata-submit-intent="reset"/)
+  assert.equal(confirm?.[1].trim(), 'Reset for $1.00')
+  const cancel =
+    /<button[^>]*\sid="btn-cancel-reset"[^>]*>([\s\S]*?)<\/button>/.exec(dialog)
+  assert.match(cancel?.[0] ?? '', /\sdata-close-dialog/)
+  assert.equal(cancel?.[1].trim(), 'Cancel')
+})
+
+/** The reset confirmation wired as index.html declares it (test above). */
+function resetConfirmation(h: Harness) {
+  const cta = h.el('btn-intent-reset')
+  cta.setAttribute('data-open-dialog', 'reset-confirm-modal')
+  const dialog = h.el('reset-confirm-modal')
+  dialog.tagName = 'DIALOG'
+  const cancel = h.el('btn-cancel-reset')
+  cancel.setAttribute('data-close-dialog', '')
+  const confirm = h.el('btn-confirm-reset')
+  confirm.setAttribute('data-submit-intent', 'reset')
+  dialog.append(h.el('reset-confirm-facts'), cancel, confirm)
+  const facts = () =>
+    h.el('reset-confirm-facts').children.map((li) => li.textContent)
+  const posts = () => h.requests.filter((r) => r.url === '/api/intents')
+  return { cta, dialog, cancel, confirm, facts, posts }
+}
+
+test('a dashboard reset shows its facts and asks before it is requested', async () => {
+  const h = load(
+    model({
+      bandwidth: {
+        usedGb: 35,
+        limitGb: 100,
+        resetsThisMonth: 0,
+        maxResetsPerMonth: 2,
+      },
+    }),
+  )
+  await settleAll(h)
+  const ui = resetConfirmation(h)
+
+  h.dispatch('click', ui.cta)
+  assert.equal(ui.dialog.open, true)
+  assert.equal(ui.posts().length, 0, 'opening it requests nothing')
+  assert.deepEqual(ui.facts(), [
+    '35.00 GB used this month. A reset sets the counter to 0 and gives back 35.00 GB.',
+    'This is reset 1 of 2 this month.',
+    'Usage also resets for free on the 1st.',
+  ])
+
+  h.dispatch('click', ui.cancel)
+  assert.equal(ui.dialog.open, false)
+  assert.equal(ui.posts().length, 0, 'Cancel requests nothing')
+
+  h.dispatch('click', ui.cta)
+  h.dispatch('click', ui.confirm)
+  await settleAll(h)
+  assert.equal(ui.dialog.open, false)
+  assert.equal(ui.posts().length, 1)
+  assert.deepEqual(JSON.parse(ui.posts()[0].init?.body), { kind: 'reset' })
+})
+
+test('the reset confirmation states the facts, never a usage threshold', () => {
+  const h = load(model())
+  const facts = (bandwidth: Json): string[] =>
+    h.run(`resetConfirmFacts(${JSON.stringify(model({ bandwidth }))})`)
+  const bw = (
+    usedGb: number | null,
+    resetsThisMonth: number | null,
+    maxResetsPerMonth: number | null,
+  ) => ({ usedGb, limitGb: 100, resetsThisMonth, maxResetsPerMonth })
+  assert.deepEqual(facts(bw(null, 1, 2)), [
+    'Usage for this month is not known yet, so a reset now may give back little.',
+    'This is reset 2 of 2 this month.',
+    'Usage also resets for free on the 1st.',
+  ])
+  assert.equal(
+    facts(bw(0.5, null, 2))[1],
+    'It counts as 1 of 2 resets this month.',
+  )
+  assert.equal(
+    facts(bw(99, 2, 2))[1],
+    'All 2 resets for this month are used, so TunnelSats may refuse this one.',
+  )
+  assert.equal(
+    facts(bw(99, 0, 0))[1],
+    'Paid resets are not offered for this subscription.',
+  )
+  assert.deepEqual(facts(bw(10, null, null)), [
+    '10.00 GB used this month. A reset sets the counter to 0 and gives back 10.00 GB.',
+    'Usage also resets for free on the 1st.',
+  ])
+  // A reset already in progress is shown again or settled, never repeated.
+  const pending = h.run(
+    `resetConfirmFacts(${JSON.stringify(
+      model({
+        bandwidth: bw(80, 1, 2),
+        pending: { order: null, renewal: null, reset: { targetNode: 'lnd' } },
+      }),
+    )})`,
+  )
+  assert.equal(
+    pending[1],
+    'A bandwidth reset is already in progress, so this does not request another one.',
+  )
+  for (const usedGb of [0, 0.05, 35, 69.9, 70, 95, 100, null]) {
+    for (const text of facts({ ...bw(usedGb, 0, 2), resetThresholdPct: 70 })) {
+      assert.doesNotMatch(text, /%|threshold|available from/i, text)
+    }
+  }
+})
+
+test('the reset confirmation sends nothing while another request is in flight', async () => {
+  const m = model({
+    bandwidth: {
+      usedGb: 35,
+      limitGb: 100,
+      resetsThisMonth: 0,
+      maxResetsPerMonth: 2,
+    },
+  })
+  const h = load(m)
+  await settleAll(h)
+  const ui = resetConfirmation(h)
+  h.dispatch('click', ui.cta)
+  assert.equal(ui.dialog.open, true)
+  const at = new Date().toISOString()
+  m.intents.renew = {
+    id: 'renew-1',
+    kind: 'renew',
+    status: 'pending',
+    createdAt: at,
+    updatedAt: at,
+    error: null,
+  }
+  h.run('render()')
+  assert.equal(ui.confirm.disabled, true)
+  h.dispatch('click', ui.confirm)
+  await settleAll(h)
+  assert.equal(ui.posts().length, 0)
+  assert.equal(ui.dialog.open, true, 'Cancel is still there')
+  h.dispatch('click', ui.cancel)
+  assert.equal(ui.dialog.open, false)
+  // The disabled button does not open it again.
+  assert.equal(ui.cta.disabled, true)
+  h.dispatch('click', ui.cta)
+  assert.equal(ui.dialog.open, false)
 })
 
 test('subscriptionTimeline places the 7-day and 3-day reminders before the expiry', () => {

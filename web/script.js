@@ -1081,13 +1081,21 @@ function paceText(pace) {
     : `At this pace: about ${projected} GB of ${pace.limitGb} GB by the end of the month. The counter resets for free on ${resets}.`
 }
 
+/**
+ * This month's paid resets from the confirmed quota: { used, max }, each
+ * null while it is not known.
+ */
+function resetQuota(m) {
+  const bw = (m && m.bandwidth) || {}
+  return {
+    used: Number.isInteger(bw.resetsThisMonth) ? bw.resetsThisMonth : null,
+    max: Number.isInteger(bw.maxResetsPerMonth) ? bw.maxResetsPerMonth : null,
+  }
+}
+
 /** Resets used this month as text, from the confirmed quota. */
 function resetsText(m) {
-  const bw = (m && m.bandwidth) || {}
-  const max = Number.isInteger(bw.maxResetsPerMonth)
-    ? bw.maxResetsPerMonth
-    : null
-  const used = Number.isInteger(bw.resetsThisMonth) ? bw.resetsThisMonth : null
+  const { used, max } = resetQuota(m)
   if (max === null) return 'Unknown'
   return `${used === null ? '?' : used} of ${max}`
 }
@@ -1118,12 +1126,8 @@ function resetEligibility(m) {
   if (m.pending && m.pending.reset) {
     return { state: 'pending', text: 'A bandwidth reset is in progress.' }
   }
-  const bw = m.bandwidth || {}
-  const max = Number.isInteger(bw.maxResetsPerMonth)
-    ? bw.maxResetsPerMonth
-    : null
-  const used = Number.isInteger(bw.resetsThisMonth) ? bw.resetsThisMonth : null
-  if (max !== null && used !== null && used >= max) {
+  const { used, max } = resetQuota(m)
+  if (max === 0 || (max !== null && used !== null && used >= max)) {
     return {
       state: 'quota-used',
       text:
@@ -1145,6 +1149,40 @@ function resetEligibility(m) {
     state: 'available',
     text: `${usedGb} GB used this month. A reset gives back ${usedGb} GB${counts}. Usage also resets for free on the 1st.`,
   }
+}
+
+/**
+ * What the reset confirmation states before a paid reset is requested: what
+ * it gives back, which of this month's resets it uses, and the free reset on
+ * the 1st. From the confirmed numbers, which can be up to a day old, so it
+ * never claims the reset will be accepted.
+ */
+function resetConfirmFacts(m) {
+  const usedGb = usedGbText(m)
+  const facts = [
+    usedGb === null
+      ? 'Usage for this month is not known yet, so a reset now may give back little.'
+      : `${usedGb} GB used this month. A reset sets the counter to 0 and gives back ${usedGb} GB.`,
+  ]
+  const { used, max } = resetQuota(m)
+  if (m && m.pending && m.pending.reset) {
+    // runBandwidthReset shows its invoice again or waits for its settlement.
+    facts.push(
+      'A bandwidth reset is already in progress, so this does not request another one.',
+    )
+  } else if (max === 0) {
+    facts.push('Paid resets are not offered for this subscription.')
+  } else if (max !== null && used !== null && used >= max) {
+    facts.push(
+      `All ${max} resets for this month are used, so TunnelSats may refuse this one.`,
+    )
+  } else if (max !== null && used !== null) {
+    facts.push(`This is reset ${used + 1} of ${max} this month.`)
+  } else if (max !== null) {
+    facts.push(`It counts as 1 of ${max} resets this month.`)
+  }
+  facts.push('Usage also resets for free on the 1st.')
+  return facts
 }
 
 /**
@@ -1774,6 +1812,10 @@ function renderIntentControls(m) {
   if (renewSelect) renewSelect.disabled = anyInFlight || !canRenewOrReset
   const resetBtn = byId('btn-intent-reset')
   if (resetBtn) resetBtn.disabled = anyInFlight || !canRenewOrReset
+  const confirmResetBtn = byId('btn-confirm-reset')
+  if (confirmResetBtn) {
+    confirmResetBtn.disabled = anyInFlight || !canRenewOrReset
+  }
 }
 
 function renderNotices(m) {
@@ -2139,6 +2181,20 @@ function renderQuota(m, nowMs = Date.now()) {
     el.textContent = eligibility.text
     el.setAttribute('data-state', eligibility.state)
   }
+  renderResetConfirm(m)
+}
+
+/** The reset confirmation's facts, kept current while it is open. */
+function renderResetConfirm(m) {
+  const list = byId('reset-confirm-facts')
+  if (!list) return
+  list.replaceChildren(
+    ...resetConfirmFacts(m).map((fact) => {
+      const item = document.createElement('li')
+      item.textContent = fact
+      return item
+    }),
+  )
 }
 
 function renderReachability(m) {
@@ -2701,7 +2757,7 @@ function bindEvents() {
     const opener = target.closest('[data-open-dialog]')
     if (opener) {
       const dialog = byId(opener.getAttribute('data-open-dialog'))
-      if (dialog && !dialog.open) dialog.showModal()
+      if (dialog && !dialog.open && !opener.disabled) dialog.showModal()
       return
     }
     const closer = target.closest('[data-close-dialog]')
@@ -2717,6 +2773,10 @@ function bindEvents() {
     }
     const intentBtn = target.closest('[data-submit-intent]')
     if (intentBtn && !intentBtn.disabled) {
+      // A confirmation (Reset Bandwidth) closes once its request is sent;
+      // the outcome then shows in the page.
+      const dialog = intentBtn.closest('dialog')
+      if (dialog) dialog.close()
       submitIntent(intentBtn.getAttribute('data-submit-intent'))
       return
     }

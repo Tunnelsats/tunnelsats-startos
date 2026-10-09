@@ -2613,6 +2613,17 @@ code {
   width: min(46rem, 100%);
 }
 
+.confirm-dialog-inner {
+  width: min(30rem, 100%);
+}
+
+.modal-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 0.75rem;
+}
+
 .modal-header {
   position: sticky;
   top: 0;
