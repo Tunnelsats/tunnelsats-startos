@@ -3188,6 +3188,11 @@ def _nwc_summary(meta):
 NWC_MAX_RENEWAL_SATS = 500_000
 NWC_MAX_SATS_BY_DURATION = {1: 50_000, 3: 135_000, 6: 250_000, 12: 450_000}
 NWC_MAX_ATTEMPTS = 3
+NWC_MAX_RELAYS = 3
+# Overall monotonic time budget for maybe_nwc_auto_renew(), kept below
+# HEALTH_SUBSCRIPTION_TIMEOUT_MS (300_000 ms in startos/bridgeEnv.ts) so
+# _record_nwc_failure always runs before SubContainer.exec sends SIGKILL.
+NWC_AUTO_RENEW_DEADLINE_SECONDS = 180
 NWC_RETRY_DELAY = timedelta(hours=1)
 NWC_TRIGGER_WINDOW = timedelta(days=7)
 NWC_GRACE_WINDOW = timedelta(days=7)
@@ -3782,6 +3787,7 @@ def _connect_socks5h(target_host, target_port, timeout=15):
     if not (1 <= len(host_bytes) <= 255):
         raise NwcError("Invalid relay hostname for SOCKS5h proxy")
     deadline = time.monotonic() + timeout
+    sock = None
     try:
         sock = socket.create_connection((proxy_host, proxy_port), timeout=timeout)
         sock.settimeout(timeout)
@@ -3817,6 +3823,11 @@ def _connect_socks5h(target_host, target_port, timeout=15):
     except NwcError:
         raise
     except Exception as e:
+        if sock is not None:
+            try:
+                sock.close()
+            except Exception:
+                pass
         raise NwcError(f"Tor SOCKS5 proxy ({proxy_host}:{proxy_port}) connection failed: {e}")
 
 
@@ -3968,10 +3979,10 @@ def _ws_open(relay_url, route_via_tor=False, timeout=15):
         raise
 
 
-def nwc_execute_command(parsed_uri, method, params, route_via_tor=False, timeout=20):
+def nwc_execute_command(parsed_uri, method, params, route_via_tor=False, timeout=20, deadline=None):
     """Executes a single NIP-47 command (e.g. get_budget, get_balance,
-    lookup_invoice, pay_invoice) against the wallet's relays. Returns the
-    NIP-47 `result` dict or raises NwcError."""
+    lookup_invoice, pay_invoice) against up to NWC_MAX_RELAYS of the wallet's
+    relays. Returns the NIP-47 `result` dict or raises NwcError."""
     import secrets
     req_event, shared_key = _build_nip47_request_event(
         parsed_uri["secret"],
@@ -3980,16 +3991,24 @@ def nwc_execute_command(parsed_uri, method, params, route_via_tor=False, timeout
         params,
     )
     sub_id = f"ts-{secrets.token_hex(6)}"
-    relays = parsed_uri.get("relays") or []
+    relays = (parsed_uri.get("relays") or [])[:NWC_MAX_RELAYS]
     last_err = None
 
     for relay_url in relays:
+        if deadline is not None:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                last_err = NwcError(f"Timed out waiting for NIP-47 {method} response from wallet")
+                break
+            attempt_timeout = min(float(timeout), remaining)
+        else:
+            attempt_timeout = float(timeout)
         sock = None
         try:
             sock = _ws_open(
                 relay_url,
                 route_via_tor=bool(route_via_tor or parsed_uri.get("hasOnionRelay")),
-                timeout=timeout,
+                timeout=attempt_timeout,
             )
             req_filter = {
                 "kinds": [23195],
@@ -3999,9 +4018,11 @@ def nwc_execute_command(parsed_uri, method, params, route_via_tor=False, timeout
             _ws_send_frame(sock, 0x1, json.dumps(["REQ", sub_id, req_filter]).encode("utf-8"))
             _ws_send_frame(sock, 0x1, json.dumps(["EVENT", req_event]).encode("utf-8"))
 
-            deadline = time.monotonic() + timeout
-            while time.monotonic() < deadline:
-                opcode, payload = _ws_recv_frame(sock, deadline=deadline)
+            req_deadline = time.monotonic() + attempt_timeout
+            if deadline is not None:
+                req_deadline = min(req_deadline, deadline)
+            while time.monotonic() < req_deadline:
+                opcode, payload = _ws_recv_frame(sock, deadline=req_deadline)
                 if opcode == 0x8:  # Close
                     break
                 if opcode == 0x9:  # Ping -> Pong
@@ -4081,13 +4102,22 @@ def nwc_renew_lock():
         os.close(fd)
 
 
-def _nwc_preflight_budget_check(parsed_uri, required_sats, route_via_tor=False):
+def _nwc_preflight_budget_check(parsed_uri, required_sats, route_via_tor=False, deadline=None):
     """Queries NIP-47 get_budget (and get_balance as a secondary check) before
     paying. Returns (ok: bool, error_code: str|None, message: str|None).
     Wallets that do not implement get_budget/get_balance are allowed to proceed
     to pay_invoice."""
+    if deadline is not None and time.monotonic() >= deadline:
+        return True, None, None
     try:
-        budget_res = nwc_execute_command(parsed_uri, "get_budget", {}, route_via_tor=route_via_tor, timeout=10)
+        budget_res = nwc_execute_command(
+            parsed_uri,
+            "get_budget",
+            {},
+            route_via_tor=route_via_tor,
+            timeout=10,
+            deadline=deadline,
+        )
         rem_msat = budget_res.get("remaining_budget")
         if isinstance(rem_msat, (int, float)) and not isinstance(rem_msat, bool) and rem_msat >= 0:
             rem_sats = int(rem_msat // 1000)
@@ -4100,8 +4130,18 @@ def _nwc_preflight_budget_check(parsed_uri, required_sats, route_via_tor=False):
     except NwcError:
         pass
 
+    if deadline is not None and time.monotonic() >= deadline:
+        return True, None, None
+
     try:
-        bal_res = nwc_execute_command(parsed_uri, "get_balance", {}, route_via_tor=route_via_tor, timeout=10)
+        bal_res = nwc_execute_command(
+            parsed_uri,
+            "get_balance",
+            {},
+            route_via_tor=route_via_tor,
+            timeout=10,
+            deadline=deadline,
+        )
         bal_msat = bal_res.get("balance")
         if isinstance(bal_msat, (int, float)) and not isinstance(bal_msat, bool) and bal_msat >= 0:
             bal_sats = int(bal_msat // 1000)
@@ -4117,7 +4157,7 @@ def _nwc_preflight_budget_check(parsed_uri, required_sats, route_via_tor=False):
     return True, None, None
 
 
-def _nwc_lookup_already_paid(parsed_uri, payment_hash, route_via_tor=False):
+def _nwc_lookup_already_paid(parsed_uri, payment_hash, route_via_tor=False, deadline=None):
     """Asks the wallet via NIP-47 lookup_invoice whether payment_hash was
     already settled. Returns True only on a positive settled answer."""
     try:
@@ -4127,6 +4167,7 @@ def _nwc_lookup_already_paid(parsed_uri, payment_hash, route_via_tor=False):
             {"payment_hash": payment_hash},
             route_via_tor=route_via_tor,
             timeout=10,
+            deadline=deadline,
         )
         if not isinstance(res, dict):
             return False
@@ -4176,7 +4217,7 @@ def _record_nwc_failure(wg_pubkey, payment_hash, err, now, force_fallback=False,
     return trip_fallback
 
 
-def maybe_nwc_auto_renew(wg_pubkey, now=None):
+def maybe_nwc_auto_renew(wg_pubkey, now=None, deadline_seconds=None):
     """Checks if the current subscription is within the NWC auto-renewal window
     (-7 days < remaining <= 7 days) and executes idempotent NIP-47 renewal.
     Serialized across processes via nwc_renew_lock()."""
@@ -4191,6 +4232,9 @@ def maybe_nwc_auto_renew(wg_pubkey, now=None):
     with nwc_renew_lock() as acquired:
         if not acquired:
             return {"result": "busy", "message": "Another NWC auto-renewal check is already in progress."}
+
+        budget_s = NWC_AUTO_RENEW_DEADLINE_SECONDS if deadline_seconds is None else float(deadline_seconds)
+        renew_deadline = time.monotonic() + budget_s
 
         with meta_lock():
             meta = read_meta()
@@ -4299,7 +4343,7 @@ def maybe_nwc_auto_renew(wg_pubkey, now=None):
                 return {"result": "already-paid", "paymentHash": payment_hash}
             nwc_was_attempted = bool(pending.get("paidViaNwc") or pending.get("nwcAttempted"))
             if nwc_was_attempted and _nwc_lookup_already_paid(
-                parsed_uri, payment_hash, route_via_tor=route_via_tor
+                parsed_uri, payment_hash, route_via_tor=route_via_tor, deadline=renew_deadline
             ):
                 with meta_lock():
                     fresh_meta = read_meta()
@@ -4476,11 +4520,21 @@ def maybe_nwc_auto_renew(wg_pubkey, now=None):
             parsed_uri,
             verified_sats,
             route_via_tor=route_via_tor,
+            deadline=renew_deadline,
         )
         if not budget_ok:
             err = NwcError(budget_msg, code=budget_code or "QUOTA_EXCEEDED", permanent=True, budget=True)
             _record_nwc_failure(wg_pubkey, payment_hash, err, now, force_fallback=True, budget_warning=True)
             return {"result": "budget-insufficient", "paymentHash": payment_hash, "message": budget_msg}
+
+        if time.monotonic() >= renew_deadline:
+            err = NwcError("Timed out during NWC auto-renewal preflight before payment could be sent")
+            tripped = _record_nwc_failure(wg_pubkey, payment_hash, err, now)
+            return {
+                "result": "fallback-raised" if tripped else "retry-scheduled",
+                "paymentHash": payment_hash,
+                "message": str(err),
+            }
 
         # Re-verify under meta_lock that the wallet was not disconnected or
         # replaced during invoice creation / budget preflight, and mark
@@ -4524,6 +4578,7 @@ def maybe_nwc_auto_renew(wg_pubkey, now=None):
                 "pay_invoice",
                 {"invoice": invoice},
                 route_via_tor=route_via_tor,
+                deadline=renew_deadline,
             )
         except NwcError as e:
             tripped = _record_nwc_failure(
