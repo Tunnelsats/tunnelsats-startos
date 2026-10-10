@@ -901,6 +901,40 @@ class TestRenewalSettlement(SettlementTestBase):
         self.assertEqual(self.only(settled)["result"], "renewed")
         self.assertNotIn("pendingRenewal", self.read_meta())
 
+    def test_unpaid_nwc_renewal_expiry_respects_raise_pay_task_flag(self):
+        created_at = NOW - timedelta(hours=2)
+        # 1. raisePayTask: False (NWC-managed renewal that never raised a node Pay Invoice task)
+        self.write_meta({
+            "pendingRenewal": self.pending_renewal(
+                createdAt=iso(created_at),
+                expiresAt=iso(NOW - timedelta(hours=1)),
+                raisePayTask=False,
+            ),
+        })
+        self.api.on("GET", f"/subscription/{RENEW_HASH}", response({"status": "pending"}))
+
+        res_no_task = self.settle(now=NOW)
+        self.assertEqual(self.only(res_no_task)["result"], "waiting")
+        self.assertEqual(res_no_task["clearPayTasks"], [])
+        meta = self.read_meta()
+        self.assertIs(meta["pendingRenewal"]["payTaskClearedOnExpiry"], True)
+        self.assertIs(meta["pendingRenewal"]["raisePayTask"], False)
+
+        # 2. raisePayTask: True (fallback tripped before expiry; expiry clears raisePayTask and queues task clear)
+        self.write_meta({
+            "pendingRenewal": self.pending_renewal(
+                createdAt=iso(created_at),
+                expiresAt=iso(NOW - timedelta(hours=1)),
+                raisePayTask=True,
+            ),
+        })
+        res_fallback = self.settle(now=NOW)
+        self.assertEqual(self.only(res_fallback)["result"], "waiting")
+        self.assertEqual(res_fallback["clearPayTasks"], [RENEW_TASK])
+        meta2 = self.read_meta()
+        self.assertIs(meta2["pendingRenewal"]["payTaskClearedOnExpiry"], True)
+        self.assertIs(meta2["pendingRenewal"]["raisePayTask"], False)
+
 
 class TestPayTaskAcknowledgement(SettlementTestBase):
     def test_ack_removes_only_the_given_replay_ids(self):

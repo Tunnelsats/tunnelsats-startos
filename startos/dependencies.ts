@@ -118,6 +118,7 @@ export interface SubscriptionMeta {
     targetNode?: TargetNode
     publicKey?: string
     raisePayTask?: boolean
+    payTaskClearedOnExpiry?: boolean
   } | null
   lastRecoveredOrder?: {
     paymentHash: string
@@ -757,7 +758,12 @@ export async function raiseFallbackRenewalPayTask(params: {
   clearRaiseFlag: (paymentHash: string) => Promise<unknown>
 }): Promise<boolean> {
   const pending = params.meta?.pendingRenewal
-  if (!pending?.raisePayTask || !pending.invoice || !pending.paymentHash) {
+  if (
+    !pending?.raisePayTask ||
+    pending.payTaskClearedOnExpiry ||
+    !pending.invoice ||
+    !pending.paymentHash
+  ) {
     return false
   }
   const targetNode = renewalPayNode(pending, params.config)

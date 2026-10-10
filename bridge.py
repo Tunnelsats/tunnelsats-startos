@@ -1192,10 +1192,14 @@ def _unpaid(kind, key, pending, state, now):
                     and current.get("paymentReceivedFor") != payment_hash
                     and current.get("payTaskClearedOnExpiry") is not True
                 ):
+                    had_pay_task = current.get("raisePayTask") is not False
                     current["payTaskClearedOnExpiry"] = True
                     pending["payTaskClearedOnExpiry"] = True
+                    if "raisePayTask" in current:
+                        current["raisePayTask"] = False
+                        pending["raisePayTask"] = False
                     node = current.get("targetNode") or pending.get("targetNode")
-                    if node in TARGET_NODES:
+                    if had_pay_task and node in TARGET_NODES:
                         tasks = [t for t in meta.get("payTasksToClear") or [] if isinstance(t, str)]
                         replay_id = pay_task_replay_id(kind, node, payment_hash)
                         if replay_id not in tasks:
