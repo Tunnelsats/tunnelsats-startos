@@ -1172,14 +1172,50 @@ def _outcome(kind, result, message, payment_hash):
 
 
 def _unpaid(kind, key, pending, state, now):
+    payment_hash = pending["paymentHash"]
     created = _parse_iso(pending.get("createdAt"))
     if created is not None and now - created >= PENDING_TTL:
-        _finish_pending(key, pending["paymentHash"])
+        _finish_pending(key, payment_hash)
         return _outcome(kind, "expired", "The invoice was not paid within 24 hours; the pending payment was cleared.",
-                        pending["paymentHash"])
+                        payment_hash)
     if state == "unknown":
         raise SettlementError("The TunnelSats API has no record of this payment")
-    return _outcome(kind, "waiting", "Waiting for the invoice to be paid.", pending["paymentHash"])
+    expires = _parse_iso(pending.get("expiresAt")) or (created + INVOICE_DEFAULT_TTL if created is not None else None)
+    if expires is not None and now >= expires:
+        if pending.get("payTaskClearedOnExpiry") is not True:
+            with meta_lock():
+                meta = read_meta()
+                current = meta.get(key)
+                if (
+                    isinstance(current, dict)
+                    and current.get("paymentHash") == payment_hash
+                    and current.get("paymentReceivedFor") != payment_hash
+                    and current.get("payTaskClearedOnExpiry") is not True
+                ):
+                    had_pay_task = current.get("raisePayTask") is not False
+                    current["payTaskClearedOnExpiry"] = True
+                    pending["payTaskClearedOnExpiry"] = True
+                    if "raisePayTask" in current:
+                        current["raisePayTask"] = False
+                        pending["raisePayTask"] = False
+                    node = current.get("targetNode") or pending.get("targetNode")
+                    if had_pay_task and node in TARGET_NODES:
+                        tasks = [t for t in meta.get("payTasksToClear") or [] if isinstance(t, str)]
+                        replay_id = pay_task_replay_id(kind, node, payment_hash)
+                        if replay_id not in tasks:
+                            tasks.append(replay_id)
+                        meta["payTasksToClear"] = tasks
+                    atomic_write_json(META_FILE_PATH, meta)
+        action_name = "Buy Subscription" if kind == "order" else "Renew Subscription"
+        retention_until = _iso(created + PENDING_TTL) if created is not None else "24 hours after creation"
+        return _outcome(
+            kind,
+            "waiting",
+            f"The invoice expired unpaid. Run {action_name} again for a new invoice. "
+            f"A payment made before it expired is still picked up until {retention_until}.",
+            payment_hash,
+        )
+    return _outcome(kind, "waiting", "Waiting for the invoice to be paid.", payment_hash)
 
 
 PLAN_KEYS = ("pendingOrder", "pendingRenewal")
