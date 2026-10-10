@@ -74,6 +74,9 @@ class FakeElement {
   getAttribute(name: string) {
     return this.attributes[name] ?? null
   }
+  removeAttribute(name: string) {
+    delete this.attributes[name]
+  }
   contains(node: FakeElement | null): boolean {
     for (let n = node; n; n = n.parent) if (n === this) return true
     return false
@@ -115,12 +118,15 @@ class FakeElement {
 interface Harness {
   context: vm.Context
   doc: FakeDocument
+  location: { hash: string }
   storage: Map<string, string>
   requests: { url: string; init: Json | undefined }[]
   elements: Map<string, FakeElement>
   el: (id: string) => FakeElement
   /** Runs the script's own document listeners, as a browser event would. */
   dispatch: (type: string, target: FakeElement, init?: Json) => void
+  /** Runs the script's own window listeners (e.g. hashchange). */
+  dispatchWindow: (type: string, init?: Json) => void
   run: <T = any>(code: string) => T
   settle: () => Promise<void>
 }
@@ -134,11 +140,14 @@ function load(
   },
   routes: Record<string, { status: number; body: Json }> = {},
   stored: Record<string, string> = {},
+  initialHash = '',
 ): Harness {
   const requests: { url: string; init: Json | undefined }[] = []
   const storage = new Map<string, string>(Object.entries(stored))
   const elements = new Map<string, FakeElement>()
   const listeners = new Map<string, ((event: Json) => void)[]>()
+  const windowListeners = new Map<string, ((event: Json) => void)[]>()
+  const location = { hash: initialHash }
   const body = new FakeElement('BODY')
   const doc: FakeDocument = { activeElement: body, body }
   const own = (element: FakeElement) => {
@@ -171,7 +180,27 @@ function load(
         listeners.set(type, [...(listeners.get(type) ?? []), handler])
       },
     }),
-    window: { isSecureContext: false },
+    window: {
+      isSecureContext: false,
+      location,
+      history: {
+        replaceState: (
+          _data: unknown,
+          _unused: string,
+          url?: string | null,
+        ) => {
+          if (typeof url === 'string' && url.startsWith('#')) {
+            location.hash = url
+          }
+        },
+      },
+      addEventListener: (type: string, handler: (event: Json) => void) => {
+        windowListeners.set(type, [
+          ...(windowListeners.get(type) ?? []),
+          handler,
+        ])
+      },
+    },
     navigator: {},
     localStorage: {
       getItem: (key: string) => storage.get(key) ?? null,
@@ -215,6 +244,7 @@ function load(
   return {
     context,
     doc,
+    location,
     storage,
     requests,
     elements,
@@ -222,6 +252,11 @@ function load(
     dispatch: (type: string, target: FakeElement, init: Json = {}) => {
       for (const handler of listeners.get(type) ?? []) {
         handler({ type, target, preventDefault() {}, ...init })
+      }
+    },
+    dispatchWindow: (type: string, init: Json = {}) => {
+      for (const handler of windowListeners.get(type) ?? []) {
+        handler({ type, ...init })
       }
     },
     run: (code: string) => {
@@ -1834,6 +1869,8 @@ test('renderFlows marks the current step for assistive technology', async () => 
   await settleAll(h)
   assert.equal(h.el('flow').hidden, false)
   const [flow] = h.el('flow-list').children
+  assert.equal(flow.children[0].tagName, 'H2')
+  assert.equal(flow.children[0].className, 'flow-title')
   const steps = flow.children[1]
   assert.equal(steps.tagName, 'OL')
   const currentSteps = steps.children.filter(
@@ -2212,6 +2249,12 @@ test('every meter and progress bar in index.html has an accessible name', () => 
 })
 
 test('command deck segmented navigation switches between Overview, Actions & Plans, and Verify & CLI while preserving context emphasis', async () => {
+  const html = readFileSync(join(__dirname, '..', 'web', 'index.html'), 'utf8')
+  assert.match(
+    html,
+    /<button[^>]*\bid="tab-btn-overview"[^>]*\baria-current="page"/,
+  )
+
   // Unconfigured customer: Overview tab emphasizes Setup (Server Region + Buy)
   const hNew = load(
     model({
@@ -2227,8 +2270,11 @@ test('command deck segmented navigation switches between Overview, Actions & Pla
   assert.equal(hNew.el('manage').hidden, true)
   assert.equal(hNew.el('verify-section').hidden, true)
   assert.equal(hNew.el('tab-btn-overview').getAttribute('aria-pressed'), 'true')
+  assert.equal(hNew.el('tab-btn-overview').getAttribute('aria-current'), 'page')
   assert.equal(hNew.el('tab-btn-actions').getAttribute('aria-pressed'), 'false')
+  assert.equal(hNew.el('tab-btn-actions').getAttribute('aria-current'), null)
   assert.equal(hNew.el('tab-btn-verify').getAttribute('aria-pressed'), 'false')
+  assert.equal(hNew.el('tab-btn-verify').getAttribute('aria-current'), null)
 
   // Configured customer: Overview tab emphasizes Overview (Topology + Renew)
   const hExisting = load(model({ configured: true }))
@@ -2243,13 +2289,22 @@ test('command deck segmented navigation switches between Overview, Actions & Pla
   assert.equal(hExisting.el('view-overview').hidden, true)
   assert.equal(hExisting.el('manage').hidden, false)
   assert.equal(hExisting.el('verify-section').hidden, true)
+  assert.equal(hExisting.location.hash, '#actions')
   assert.equal(
     hExisting.el('tab-btn-actions').getAttribute('aria-pressed'),
     'true',
   )
   assert.equal(
+    hExisting.el('tab-btn-actions').getAttribute('aria-current'),
+    'page',
+  )
+  assert.equal(
     hExisting.el('tab-btn-overview').getAttribute('aria-pressed'),
     'false',
+  )
+  assert.equal(
+    hExisting.el('tab-btn-overview').getAttribute('aria-current'),
+    null,
   )
 
   // Switch to Verify & CLI tab
@@ -2257,9 +2312,18 @@ test('command deck segmented navigation switches between Overview, Actions & Pla
   assert.equal(hExisting.el('view-overview').hidden, true)
   assert.equal(hExisting.el('manage').hidden, true)
   assert.equal(hExisting.el('verify-section').hidden, false)
+  assert.equal(hExisting.location.hash, '#verify')
   assert.equal(
     hExisting.el('tab-btn-verify').getAttribute('aria-pressed'),
     'true',
+  )
+  assert.equal(
+    hExisting.el('tab-btn-verify').getAttribute('aria-current'),
+    'page',
+  )
+  assert.equal(
+    hExisting.el('tab-btn-actions').getAttribute('aria-current'),
+    null,
   )
 
   // Unknown tab names are ignored
@@ -2267,6 +2331,54 @@ test('command deck segmented navigation switches between Overview, Actions & Pla
   assert.equal(
     hExisting.el('tab-btn-verify').getAttribute('aria-pressed'),
     'true',
+  )
+  assert.equal(hExisting.location.hash, '#verify')
+
+  // Browser hashchange switches tabs and updates aria-current
+  hExisting.location.hash = '#overview'
+  hExisting.dispatchWindow('hashchange')
+  assert.equal(hExisting.run('activeTab'), 'overview')
+  assert.equal(hExisting.el('view-overview').hidden, false)
+  assert.equal(
+    hExisting.el('tab-btn-overview').getAttribute('aria-current'),
+    'page',
+  )
+  assert.equal(
+    hExisting.el('tab-btn-verify').getAttribute('aria-current'),
+    null,
+  )
+
+  // Initial URL hash (#verify, #actions, or #manage alias) opens that tab directly
+  const hVerify = load(
+    model({ configured: true }),
+    200,
+    undefined,
+    {},
+    {},
+    '#verify',
+  )
+  await settleAll(hVerify)
+  assert.equal(hVerify.run('activeTab'), 'verify')
+  assert.equal(hVerify.el('verify-section').hidden, false)
+  assert.equal(
+    hVerify.el('tab-btn-verify').getAttribute('aria-current'),
+    'page',
+  )
+
+  const hManage = load(
+    model({ configured: true }),
+    200,
+    undefined,
+    {},
+    {},
+    '#manage',
+  )
+  await settleAll(hManage)
+  assert.equal(hManage.run('activeTab'), 'actions')
+  assert.equal(hManage.el('manage').hidden, false)
+  assert.equal(
+    hManage.el('tab-btn-actions').getAttribute('aria-current'),
+    'page',
   )
 })
 
@@ -2592,6 +2704,11 @@ test('shipped SVG, PNG and font files carry no active content or metadata', () =
       [/\bstyle\s*=/i, 'an inline style attribute (CSP)'],
       [/<style[\s>]/i, 'a style element (CSP)'],
       [/url\((?!\s*['"]?#)/i, 'an external url() reference'],
+      [/<\?xml/i, 'an XML declaration'],
+      [/<!--/, 'an XML comment'],
+      [/\b(?:inkscape|sodipodi)\b/i, 'Inkscape or Sodipodi editor metadata'],
+      [/\bxmlns:(?:rdf|cc|dc|svg|xlink)\b/i, 'unused namespace declarations'],
+      [/\bxml:space\s*=/i, 'an xml:space attribute'],
     ] as const) {
       assert.doesNotMatch(svg, pattern, `${file} must not contain ${what}`)
     }
@@ -2806,4 +2923,20 @@ test('times are shown to the minute and estimates to the day', () => {
   assert.equal(h.run(`formatDate(null)`), null)
   assert.equal(h.run('monthsLabel(1)'), '1 month')
   assert.equal(h.run('monthsLabel(12)'), '12 months')
+})
+
+test('heading levels never skip from h1 to h3 and style.css defines a single code rule', () => {
+  const html = readFileSync(join(WEB_DIR, 'index.html'), 'utf8')
+  const headings = [...html.matchAll(/<h([1-6])\b/gi)].map((m) => Number(m[1]))
+  assert.equal(headings[0], 1)
+  for (let i = 1; i < headings.length; i++) {
+    assert.ok(
+      headings[i] <= headings[i - 1] + 1,
+      `heading h${headings[i]} at index ${i} skips a level after h${headings[i - 1]}`,
+    )
+  }
+
+  const css = readFileSync(join(WEB_DIR, 'style.css'), 'utf8')
+  const codeRules = [...css.matchAll(/^code\s*\{/gm)]
+  assert.equal(codeRules.length, 1, 'style.css must have a single code {} rule')
 })

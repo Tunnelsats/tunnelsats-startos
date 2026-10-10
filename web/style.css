@@ -191,9 +191,6 @@ a {
 code {
   font-family: var(--font-mono);
   font-variant-ligatures: none;
-}
-
-code {
   font-size: 0.9em;
   padding: 0.0625rem 0.3125rem;
   border-radius: var(--radius-xs);

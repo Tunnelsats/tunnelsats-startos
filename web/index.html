@@ -49,6 +49,7 @@
             class="nav-pill is-active"
             data-tab-target="overview"
             aria-pressed="true"
+            aria-current="page"
           >
             <svg
               class="nav-pill-icon"
@@ -823,8 +824,8 @@
           <span class="badge-pill">Services → TunnelSats → Actions</span>
         </div>
         <p class="muted">
-          Switch VPN server regions by purchasing a new subscription, or run
-          advanced configuration and backup actions in StartOS.
+          Buy a subscription in another region, or run configuration and backup
+          actions in StartOS.
         </p>
 
         <!-- Secondary Server Switch / New Subscription Composer -->
@@ -1544,11 +1545,10 @@
                 SOCKS5 routing).
               </p>
               <p class="faq-note">
-                If your wallet budget or balance is insufficient or NWC fails 3
-                times, TunnelSats automatically falls back to raising a
-                <strong>Pay Invoice</strong> task on your Lightning node and a
-                <strong>Connect Wallet</strong> action task so you can still
-                renew manually. Without NWC, TunnelSats posts reminders at
+                If the wallet balance or budget is too low, or NWC fails 3
+                times, TunnelSats raises a <strong>Pay Invoice</strong> task on
+                your node and a <strong>Connect Wallet</strong> task so you can
+                renew manually. Without NWC, reminders are posted at
                 <strong>7 days</strong> and <strong>3 days</strong> before
                 expiry.
               </p>
@@ -1566,10 +1566,9 @@
                   >Services → TunnelSats → Actions → Configure
                   TunnelSats</strong
                 >
-                and select the new target node. TunnelSats asks the previous
-                node to turn off its tunnel first and only raises the task on
-                the new node once the previous one is off, so two nodes never
-                share one WireGuard peer.
+                and select the new target node. TunnelSats waits for the
+                previous node to turn off its tunnel before raising the task on
+                the new node, so two nodes never share one WireGuard peer.
               </p>
             </div>
           </details>
