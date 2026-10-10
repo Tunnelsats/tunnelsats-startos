@@ -1374,7 +1374,14 @@ def _settle_one(kind, key, pending, now):
     payment_hash = pending["paymentHash"]
     retry_at = _parse_iso(pending.get("nextAttemptAt"))
     if retry_at is not None and retry_at > now:
-        return _outcome(kind, "failed", str(pending.get("lastError") or "Retrying shortly."), payment_hash)
+        last_err = str(pending.get("lastError") or "").strip()
+        detail = f" ({last_err})" if last_err else ""
+        return _outcome(
+            kind,
+            "waiting",
+            f"Upstream check paused after a temporary error{detail}; retrying shortly.",
+            payment_hash,
+        )
     try:
         outcome = _SETTLERS[kind](pending, now)
     except Exception as e:
@@ -1542,7 +1549,14 @@ def _settle_previous_orders(now, newer_order_provisioned=False):
         p_hash = prev["paymentHash"]
         retry_at = _parse_iso(prev.get("nextAttemptAt"))
         if retry_at is not None and retry_at > now:
-            outcomes.append(_outcome("order", "failed", str(prev.get("lastError") or "Retrying shortly."), p_hash))
+            last_err = str(prev.get("lastError") or "").strip()
+            detail = f" ({last_err})" if last_err else ""
+            outcomes.append(_outcome(
+                "order",
+                "waiting",
+                f"Upstream check paused after a temporary error{detail}; retrying shortly.",
+                p_hash,
+            ))
             continue
         try:
             state = _payment_state(p_hash)
@@ -1937,11 +1951,14 @@ class DashboardHTTPRequestHandler(BaseHTTPRequestHandler):
 
     def _send_json(self, status_code, payload):
         body = json.dumps(payload).encode("utf-8")
-        self.send_response(status_code)
-        self.send_header("Content-Type", "application/json")
-        self.send_header("Cache-Control", "no-store")
-        self.end_headers()
-        self.wfile.write(body)
+        try:
+            self.send_response(status_code)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Cache-Control", "no-store")
+            self.end_headers()
+            self.wfile.write(body)
+        except (BrokenPipeError, ConnectionResetError):
+            self.close_connection = True
 
     def _read_json_body(self, max_bytes):
         """The request's JSON body, or None after sending a 400."""
@@ -1990,6 +2007,12 @@ class DashboardHTTPRequestHandler(BaseHTTPRequestHandler):
             return
         self.send_error(404, "Not found")
 
+    def handle_one_request(self):
+        try:
+            super().handle_one_request()
+        except (BrokenPipeError, ConnectionResetError):
+            self.close_connection = True
+
 
 class DashboardHTTPServer(ThreadingHTTPServer):
     daemon_threads = True
@@ -2013,6 +2036,11 @@ class DashboardHTTPServer(ThreadingHTTPServer):
             super().process_request_thread(request, client_address)
         finally:
             self._conn_sem.release()
+
+    def handle_error(self, request, client_address):
+        if isinstance(sys.exc_info()[1], (BrokenPipeError, ConnectionResetError)):
+            return
+        super().handle_error(request, client_address)
 
 
 def web_server_thread():

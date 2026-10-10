@@ -306,12 +306,31 @@ class TestOrderSettlement(SettlementTestBase):
         self.assertEqual(pending.get("paymentReceivedFor"), HASH)
 
     def test_failure_backs_off_without_calling_the_api(self):
+        retry_iso = iso(NOW + timedelta(minutes=3))
         self.write_meta({"pendingOrder": self.pending_order(
-            lastError="HTTP 500 from claim", nextAttemptAt=iso(NOW + timedelta(minutes=3)))})
+            lastError="HTTP 500 from claim", nextAttemptAt=retry_iso)})
         outcome = self.only(self.settle())
-        self.assertEqual(outcome["result"], "failed")
+        self.assertEqual(outcome["result"], "waiting")
+        self.assertIn("Upstream check paused", outcome["message"])
         self.assertIn("HTTP 500 from claim", outcome["message"])
         self.assertEqual(self.api.requests, [])
+        pending = self.read_meta()["pendingOrder"]
+        self.assertEqual(pending.get("lastError"), "HTTP 500 from claim")
+        self.assertEqual(pending.get("nextAttemptAt"), retry_iso)
+
+        old_priv, old_pub = new_keypair()
+        old_hash = "c" * 64
+        self.write_meta({"previousPendingOrders": [self.pending_order(
+            paymentHash=old_hash, privateKey=old_priv, publicKey=old_pub,
+            lastError="HTTP 500 from claim", nextAttemptAt=retry_iso)]})
+        prev_outcome = self.only(self.settle())
+        self.assertEqual(prev_outcome["result"], "waiting")
+        self.assertIn("Upstream check paused", prev_outcome["message"])
+        self.assertIn("HTTP 500 from claim", prev_outcome["message"])
+        self.assertEqual(self.api.requests, [])
+        prev_stored = self.read_meta()["previousPendingOrders"][0]
+        self.assertEqual(prev_stored.get("lastError"), "HTTP 500 from claim")
+        self.assertEqual(prev_stored.get("nextAttemptAt"), retry_iso)
 
     def test_retry_after_backoff_clears_the_error_once_it_waits_again(self):
         self.write_meta({"pendingOrder": self.pending_order(
