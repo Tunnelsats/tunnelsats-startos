@@ -1732,7 +1732,8 @@ DASHBOARD_CSP = (
     "font-src 'self'; "
     "object-src 'none'; "
     "base-uri 'none'; "
-    "form-action 'none'"
+    "form-action 'none'; "
+    "frame-ancestors 'none'"
 )
 
 # Content types of the files under web/; anything else is served as
@@ -1752,6 +1753,10 @@ STATIC_CONTENT_TYPES = {
 # os.path.realpath raise instead of answering.
 STATIC_PATH_CONTROL_CHARS_RE = re.compile(r"[\x00-\x1f\x7f]")
 DASHBOARD_MAX_CONCURRENT_REQUESTS = 32
+_CSRF_STARTED_AT = int(time.time())
+
+import email.utils
+import hashlib
 
 
 class DashboardHTTPRequestHandler(BaseHTTPRequestHandler):
@@ -1854,6 +1859,41 @@ class DashboardHTTPRequestHandler(BaseHTTPRequestHandler):
         return True
 
     def do_GET(self):
+        self._handle_get_or_head(send_body=True)
+
+    def do_HEAD(self):
+        self._handle_get_or_head(send_body=False)
+
+    def _send_json_head(self, status_code, payload):
+        body = json.dumps(payload).encode("utf-8")
+        self.send_response(status_code)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Cache-Control", "no-store")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+
+    def _is_not_modified(self, etag, mtime_sec):
+        inm = self.headers.get("If-None-Match")
+        if inm is not None:
+            tokens = [t.strip() for t in inm.split(",") if t.strip()]
+            return "*" in tokens or any(
+                (t[2:].strip() if t.startswith("W/") else t) == etag
+                for t in tokens
+            )
+        if mtime_sec is None:
+            return False
+        ims = self.headers.get("If-Modified-Since")
+        if not ims:
+            return False
+        try:
+            ims_dt = email.utils.parsedate_to_datetime(ims)
+            if ims_dt.tzinfo is None:
+                ims_dt = ims_dt.replace(tzinfo=timezone.utc)
+            return int(mtime_sec) <= int(ims_dt.timestamp())
+        except (TypeError, ValueError, OverflowError):
+            return False
+
+    def _handle_get_or_head(self, send_body=True):
         if not self.is_trusted_request():
             return
 
@@ -1867,13 +1907,22 @@ class DashboardHTTPRequestHandler(BaseHTTPRequestHandler):
             try:
                 result = get_servers()
             except DiscoveryUnavailable as e:
-                self._send_json(503, {"error": str(e)})
+                if send_body:
+                    self._send_json(503, {"error": str(e)})
+                else:
+                    self._send_json_head(503, {"error": str(e)})
                 return
             except Exception as e:
                 print(f"Server discovery failed: {e}", file=sys.stderr)
-                self._send_json(500, {"error": "Server list unavailable"})
+                if send_body:
+                    self._send_json(500, {"error": "Server list unavailable"})
+                else:
+                    self._send_json_head(500, {"error": "Server list unavailable"})
                 return
-            self._send_json(200, result)
+            if send_body:
+                self._send_json(200, result)
+            else:
+                self._send_json_head(200, result)
             return
 
         if path_only == "/api/dashboard":
@@ -1887,8 +1936,10 @@ class DashboardHTTPRequestHandler(BaseHTTPRequestHandler):
             self.send_response(200)
             self.send_header("Content-Type", "application/json")
             self.send_header("Cache-Control", "no-store")
+            self.send_header("Content-Length", str(len(body)))
             self.end_headers()
-            self.wfile.write(body)
+            if send_body:
+                self.wfile.write(body)
             return
 
         web_dir = os.path.realpath(os.path.join(os.path.dirname(__file__), "web"))
@@ -1907,31 +1958,45 @@ class DashboardHTTPRequestHandler(BaseHTTPRequestHandler):
             return
 
         if os.path.exists(safe_path) and os.path.isfile(safe_path):
-            if safe_path.endswith(".html"):
-                try:
+            try:
+                st = os.stat(safe_path)
+                if safe_path.endswith(".html"):
                     with open(safe_path, "r", encoding="utf-8") as f:
                         html_content = f.read()
                     csrf_tag = f'<meta name="csrf-token" content="{get_csrf_token()}">\n</head>'
                     html_content = html_content.replace("</head>", csrf_tag, 1)
-                    self.send_response(200)
-                    self.send_header("Content-Type", "text/html; charset=utf-8")
-                    self.end_headers()
-                    self.wfile.write(html_content.encode("utf-8"))
-                    return
-                except Exception:
-                    pass
-
-            try:
-                with open(safe_path, "rb") as f:
-                    content = f.read()
+                    content = html_content.encode("utf-8")
+                    content_type = "text/html; charset=utf-8"
+                    mtime_sec = max(int(st.st_mtime), _CSRF_STARTED_AT)
+                else:
+                    with open(safe_path, "rb") as f:
+                        content = f.read()
+                    extension = os.path.splitext(safe_path)[1].lower()
+                    content_type = STATIC_CONTENT_TYPES.get(extension, "application/octet-stream")
+                    mtime_sec = int(st.st_mtime)
             except OSError:
                 self.send_error(404, "File not found")
                 return
-            extension = os.path.splitext(safe_path)[1].lower()
+
+            etag = f'"{hashlib.sha256(content).hexdigest()[:32]}"'
+            last_modified = email.utils.formatdate(mtime_sec, usegmt=True)
+            if self._is_not_modified(etag, mtime_sec):
+                self.send_response(304)
+                self.send_header("ETag", etag)
+                self.send_header("Last-Modified", last_modified)
+                self.send_header("Cache-Control", "no-cache")
+                self.end_headers()
+                return
+
             self.send_response(200)
-            self.send_header("Content-Type", STATIC_CONTENT_TYPES.get(extension, "application/octet-stream"))
+            self.send_header("Content-Type", content_type)
+            self.send_header("Content-Length", str(len(content)))
+            self.send_header("Cache-Control", "no-cache")
+            self.send_header("ETag", etag)
+            self.send_header("Last-Modified", last_modified)
             self.end_headers()
-            self.wfile.write(content)
+            if send_body:
+                self.wfile.write(content)
         else:
             self.send_error(404, "File not found")
 

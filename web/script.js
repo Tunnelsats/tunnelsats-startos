@@ -2238,7 +2238,7 @@ function renderFlows(m) {
       const wrap = document.createElement('div')
       wrap.className = 'flow'
       wrap.setAttribute('data-flow', flow.kind)
-      const title = document.createElement('h3')
+      const title = document.createElement('h2')
       title.className = 'flow-title'
       title.textContent = flow.title
       const steps = document.createElement('ol')
@@ -2393,9 +2393,34 @@ function selectServer(id) {
   }
 }
 
+function tabFromHash(hash) {
+  const raw = String(hash || '')
+    .replace(/^#/, '')
+    .trim()
+    .toLowerCase()
+  if (raw === 'manage') return 'actions'
+  return VALID_TABS.includes(raw) ? raw : null
+}
+
+function syncHashToTab(tab) {
+  if (typeof window === 'undefined' || !window.location) return
+  const nextHash = `#${tab}`
+  if (window.location.hash === nextHash) return
+  if (window.history && typeof window.history.replaceState === 'function') {
+    try {
+      window.history.replaceState(null, '', nextHash)
+      return
+    } catch {
+      // Fall back to location.hash assignment if replaceState is restricted.
+    }
+  }
+  window.location.hash = nextHash
+}
+
 function switchTab(tab) {
   if (!VALID_TABS.includes(tab)) return
   activeTab = tab
+  syncHashToTab(tab)
   renderTabs(model)
 }
 
@@ -2405,6 +2430,11 @@ function renderTabs(m) {
     if (btn) {
       const active = tab === activeTab
       btn.setAttribute('aria-pressed', active ? 'true' : 'false')
+      if (active) {
+        btn.setAttribute('aria-current', 'page')
+      } else if (typeof btn.removeAttribute === 'function') {
+        btn.removeAttribute('aria-current')
+      }
       btn.classList.toggle('is-active', active)
     }
   }
@@ -2837,6 +2867,19 @@ function bindEvents() {
     refresh()
     if (serversStale()) loadServers()
   })
+
+  if (
+    typeof window !== 'undefined' &&
+    typeof window.addEventListener === 'function'
+  ) {
+    window.addEventListener('hashchange', () => {
+      const tab = tabFromHash(window.location && window.location.hash)
+      if (tab && tab !== activeTab) {
+        activeTab = tab
+        renderTabs(model)
+      }
+    })
+  }
 }
 
 function serversStale(nowMs = Date.now()) {
@@ -2852,6 +2895,11 @@ function pollTick(nowMs = Date.now()) {
 }
 
 function init() {
+  const initialTab =
+    typeof window !== 'undefined' && window.location
+      ? tabFromHash(window.location.hash)
+      : null
+  if (initialTab) activeTab = initialTab
   renderPlans()
   bindEvents()
   const pubkeyInput = byId('reach-pubkey')

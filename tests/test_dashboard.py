@@ -483,8 +483,18 @@ class LoopbackServerTestBase(DashboardStateTestBase):
         finally:
             conn.close()
 
+    def head(self, path, headers=None):
+        conn = http.client.HTTPConnection("127.0.0.1", self.server.server_address[1], timeout=5)
+        try:
+            conn.request("HEAD", path, headers=headers or {})
+            res = conn.getresponse()
+            return res.status, dict(res.getheaders()), res.read()
+        finally:
+            conn.close()
+
     def assert_security_headers(self, headers):
         self.assertEqual(headers.get("Content-Security-Policy"), bridge.DASHBOARD_CSP)
+        self.assertIn("frame-ancestors 'none'", headers.get("Content-Security-Policy", ""))
         self.assertEqual(headers.get("X-Content-Type-Options"), "nosniff")
         self.assertEqual(headers.get("Referrer-Policy"), "no-referrer")
 
@@ -887,6 +897,57 @@ class TestStaticServingHardening(LoopbackServerTestBase):
                 self.assertEqual(headers.get("Content-Type"), expected_type)
                 self.assert_security_headers(headers)
                 self.assertGreater(len(body), 0)
+
+    def test_head_requests_and_cache_validators(self):
+        self.configure("lnd")
+        for path in ("/", "/style.css", "/script.js", "/favicon.svg"):
+            with self.subTest(path=path):
+                get_status, get_headers, get_body = self.get(path)
+                self.assertEqual(get_status, 200)
+                self.assertGreater(len(get_body), 0)
+                etag = get_headers.get("ETag")
+                last_mod = get_headers.get("Last-Modified")
+                self.assertTrue(etag and etag.startswith('"') and etag.endswith('"'))
+                self.assertTrue(last_mod)
+                self.assertEqual(get_headers.get("Content-Length"), str(len(get_body)))
+
+                # HEAD returns identical validator and length headers with an empty body
+                head_status, head_headers, head_body = self.head(path)
+                self.assertEqual(head_status, 200)
+                self.assertEqual(head_body, b"")
+                self.assert_security_headers(head_headers)
+                self.assertEqual(head_headers.get("ETag"), etag)
+                self.assertEqual(head_headers.get("Last-Modified"), last_mod)
+                self.assertEqual(head_headers.get("Content-Length"), str(len(get_body)))
+
+                # If-None-Match matching (exact, weak W/, and comma-separated list) -> 304
+                for inm in (etag, f"W/{etag}", f'"other", {etag}'):
+                    status_304, headers_304, body_304 = self.get(path, {"If-None-Match": inm})
+                    self.assertEqual(status_304, 304)
+                    self.assertEqual(body_304, b"")
+                    self.assert_security_headers(headers_304)
+                    self.assertEqual(headers_304.get("ETag"), etag)
+
+                # Non-matching If-None-Match -> 200 (even if If-Modified-Since matches)
+                status_200, _, body_200 = self.get(
+                    path,
+                    {"If-None-Match": '"stale"', "If-Modified-Since": last_mod},
+                )
+                self.assertEqual(status_200, 200)
+                self.assertEqual(len(body_200), len(get_body))
+
+                # If-Modified-Since matching (when If-None-Match is absent) -> 304
+                status_ims, headers_ims, body_ims = self.get(path, {"If-Modified-Since": last_mod})
+                self.assertEqual(status_ims, 304)
+                self.assertEqual(body_ims, b"")
+                self.assertEqual(headers_ims.get("Last-Modified"), last_mod)
+
+        # HEAD on /api/dashboard returns 200 with no-store and empty body
+        dash_status, dash_headers, dash_body = self.head("/api/dashboard")
+        self.assertEqual(dash_status, 200)
+        self.assertEqual(dash_body, b"")
+        self.assertEqual(dash_headers.get("Cache-Control"), "no-store")
+        self.assert_security_headers(dash_headers)
 
 
 if __name__ == "__main__":
