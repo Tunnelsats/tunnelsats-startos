@@ -90,34 +90,45 @@ test('SDK 3 version range contract: QA baseline and start-sdk 3.0.3 node release
     rangeStr: string
     installedCurrent: string
     versions: string[]
+    rejected: string[]
   }[] = [
     {
       packageId: 'lnd',
       rangeStr: lndDeps.lnd.versionRange,
       installedCurrent: (lndVersionGraph as any).current.options.version,
-      versions: ['0.21.4-beta:0', '0.21.4-beta:1'],
+      versions: ['0.21.3-beta:10', '0.21.4-beta:0', '0.21.4-beta:1'],
+      rejected: ['0.21.3-beta:9', '0.21.2-beta:5'],
     },
     {
       packageId: 'c-lightning',
       rangeStr: clnDeps['c-lightning'].versionRange,
       installedCurrent: (clnVersionGraph as any).current.options.version,
       versions: ['26.6.8:3', '26.6.8:7', '26.6.9:0', '26.6.9:1'],
+      rejected: ['26.6.8:2', '26.6.2:0'],
     },
     {
       packageId: 'eclair',
       rangeStr: eclairDeps.eclair.versionRange,
       installedCurrent: (eclairVersionGraph as any).current.options.version,
       versions: ['0.14.3:3', '0.14.3:4'],
+      rejected: ['0.14.3:2', '0.14.2:0'],
     },
     {
       packageId: 'tor',
       rangeStr: torDeps.tor.versionRange,
       installedCurrent: (torVersionGraph as any).current.options.version,
-      versions: ['0.4.9.12:5', '0.4.9.13:1', '0.4.9.14:0'],
+      versions: ['0.4.9.11:2', '0.4.9.12:5', '0.4.9.13:1', '0.4.9.14:0'],
+      rejected: ['0.4.9.11:1'],
     },
   ]
 
-  for (const { packageId, rangeStr, installedCurrent, versions } of matrix) {
+  for (const {
+    packageId,
+    rangeStr,
+    installedCurrent,
+    versions,
+    rejected,
+  } of matrix) {
     const range = VersionRange.parse(rangeStr)
     for (const verStr of [...versions, installedCurrent]) {
       const parsedVer = ExtendedVersion.parse(verStr)
@@ -130,6 +141,14 @@ test('SDK 3 version range contract: QA baseline and start-sdk 3.0.3 node release
         parsedVer.satisfies(range),
         true,
         `${packageId} ExtendedVersion.satisfies(${rangeStr}) failed for ${verStr}`,
+      )
+    }
+    for (const verStr of rejected) {
+      const parsedVer = ExtendedVersion.parse(verStr)
+      assert.equal(
+        range.satisfiedBy(parsedVer),
+        false,
+        `${packageId} pre-baseline version ${verStr} must not satisfy range ${rangeStr}`,
       )
     }
   }
@@ -236,6 +255,101 @@ test('SDK 3 clearnet-vpn handoff contract: lnd, c-lightning, and eclair validate
       built.validator.parse(ipv6Payload),
       ipv6Payload,
       `${packageId} validator must accept IPv6 announce endpoint`,
+    )
+  }
+})
+
+test('SDK 3 node vpn.ts dataplane contract: parseWireguardConfig, isHostPort, renderWgQuick (B1-B3), and vpnDownScript (B8)', async () => {
+  const { assembleWireguardConfig } = await import('../startos/apiClient')
+  const { generateWireguardKeypair } = await import('../startos/keygen')
+  const lndVpn = await import('lnd-startos/startos/vpn')
+  const clnVpn = await import('cln-startos/startos/vpn')
+  const eclairVpn = await import('eclair-startos/startos/vpn')
+
+  const clientKeys = generateWireguardKeypair()
+  const serverKeys = generateWireguardKeypair()
+  const psk = generateWireguardKeypair().privateKey
+  const claimedConf = assembleWireguardConfig(
+    {
+      server: {
+        endpoint: 'de2.tunnelsats.com:51820',
+        publicKey: serverKeys.publicKey,
+        allowedIPs: '0.0.0.0/0',
+      },
+      peer: {
+        address: '10.9.0.102/32',
+        presharedKey: psk,
+      },
+      subscriptionEnd: '2026-12-31T23:59:59Z',
+      vpnPort: 24556,
+    },
+    clientKeys.privateKey,
+  )
+
+  const vpnModules = [
+    { packageId: 'lnd', mod: lndVpn },
+    { packageId: 'c-lightning', mod: clnVpn },
+    { packageId: 'eclair', mod: eclairVpn },
+  ] as const
+
+  for (const { packageId, mod } of vpnModules) {
+    assert.equal(mod.vpnIface, 'wg0')
+    assert.equal(mod.vpnTable, 51820)
+
+    const parsed = mod.parseWireguardConfig(claimedConf.trim())
+    assert.ok(
+      !('error' in parsed),
+      `${packageId} parseWireguardConfig must accept assembleWireguardConfig output`,
+    )
+    assert.equal(parsed.config.privateKey, clientKeys.privateKey)
+    assert.equal(parsed.config.publicKey, serverKeys.publicKey)
+    assert.equal(parsed.config.presharedKey, psk)
+    assert.equal(parsed.config.endpoint, 'de2.tunnelsats.com:51820')
+    assert.equal(parsed.config.allowedIps, '0.0.0.0/0')
+
+    assert.equal(mod.isHostPort('de2.tunnelsats.com:24556'), true)
+    assert.equal(mod.isHostPort('[2a01:4f8:c012:1234::1]:24556'), true)
+    assert.equal(mod.isHostPort('de2.tunnelsats.com'), false)
+    assert.equal(mod.isHostPort('de2.tunnelsats.com:70000'), false)
+
+    const wgQuick =
+      packageId === 'eclair'
+        ? eclairVpn.renderWgQuick(parsed.config, 24556)
+        : (mod.renderWgQuick as (c: typeof parsed.config) => string)(
+            parsed.config,
+          )
+    assert.match(wgQuick, /^Table = off$/m)
+    assert.match(wgQuick, /PostUp = wg set %i fwmark 51820/)
+    assert.match(wgQuick, /PostUp = ip -4 route add default dev %i table 51820/)
+    assert.match(
+      wgQuick,
+      /PostUp = ip -4 route add blackhole default metric 4294967295 table 51820/,
+    )
+    assert.match(
+      wgQuick,
+      /PostUp = ip -6 route add blackhole default metric 4294967295 table 51820/,
+    )
+    assert.match(
+      wgQuick,
+      /PostUp = ip -4 rule add not fwmark 51820 table 51820/,
+    )
+    assert.match(
+      wgQuick,
+      /PostUp = ip -4 rule add table main suppress_prefixlength 0/,
+    )
+    if (packageId === 'eclair') {
+      assert.match(
+        wgQuick,
+        /iptables -t nat -A PREROUTING -i %i -p tcp --dport 9735 -j REDIRECT --to-ports 24556/,
+      )
+    }
+
+    assert.match(mod.vpnDownScript, /ip link del wg0/)
+    assert.match(mod.vpnDownScript, /ip \$fam route flush table 51820/)
+    assert.match(mod.vpnDownScript, /ip \$fam rule del table 51820/)
+    assert.match(
+      mod.vpnDownScript,
+      /ip \$fam rule del table main suppress_prefixlength 0/,
     )
   }
 })
