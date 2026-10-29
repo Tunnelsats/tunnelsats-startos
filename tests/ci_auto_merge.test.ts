@@ -60,6 +60,14 @@ test('Dependabot Configuration - structured AST validation', () => {
     actionsUpdate,
     'github-actions package-ecosystem update entry must exist',
   )
+
+  for (const entry of parsed.updates) {
+    assert.strictEqual(
+      entry.cooldown?.['default-days'],
+      3,
+      `Dependabot entry ${entry['package-ecosystem']} must enforce 3-day cooldown`,
+    )
+  }
 })
 
 test('Dependabot Auto-Merge Workflow - structured workflow validation & parsed condition evaluation', () => {

@@ -8,6 +8,8 @@ updates:
       day: "monday"
       time: "09:00"
       timezone: "Europe/Berlin"
+    cooldown:
+      default-days: 3
     
     groups:
       startos-packages:
@@ -58,6 +60,8 @@ updates:
     schedule:
       interval: "weekly"
       day: "monday"
+    cooldown:
+      default-days: 3
     
     groups:
       actions-all:
