@@ -39,14 +39,15 @@ AllowedIPs = 0.0.0.0/0
 PersistentKeepalive = 25
 `
 
-test('SDK 3 dependency contract: node packages and TunnelSats declare @start9labs/start-sdk >= 3.0.6 (< 4.0.0)', () => {
-  const sdkRange = VersionRange.parse('>=3.0.6:0 <4.0.0:0')
+test('SDK 4 dependency contract: node packages and TunnelSats declare @start9labs/start-sdk >= 4.0.0 (< 5.0.0) with a single hoisted SDK copy', () => {
+  const sdkRange = VersionRange.parse('>=4.0.0:0 <5.0.0:0')
   const packages = [
     join(REPO_ROOT, 'package.json'),
     join(REPO_ROOT, 'node_modules/lnd-startos/package.json'),
     join(REPO_ROOT, 'node_modules/cln-startos/package.json'),
     join(REPO_ROOT, 'node_modules/eclair-startos/package.json'),
     join(REPO_ROOT, 'node_modules/tor-startos/package.json'),
+    join(REPO_ROOT, 'node_modules/bitcoin-core-startos/package.json'),
   ]
 
   for (const pkgPath of packages) {
@@ -59,12 +60,24 @@ test('SDK 3 dependency contract: node packages and TunnelSats declare @start9lab
     assert.ok(
       normalizedVer.length > 0 &&
         ExtendedVersion.parse(`${normalizedVer}:0`).satisfies(sdkRange),
-      `${pkg.name ?? pkgPath} must depend on @start9labs/start-sdk >= 3.0.6 (< 4.0.0), got "${rawSdkVer}"`,
+      `${pkg.name ?? pkgPath} must depend on @start9labs/start-sdk >= 4.0.0 (< 5.0.0), got "${rawSdkVer}"`,
     )
   }
+
+  const lock = JSON.parse(
+    readFileSync(join(REPO_ROOT, 'package-lock.json'), 'utf8'),
+  ) as { packages?: Record<string, { version?: string }> }
+  const sdkKeys = Object.keys(lock.packages ?? {}).filter((k) =>
+    k.endsWith('node_modules/@start9labs/start-sdk'),
+  )
+  assert.deepEqual(
+    sdkKeys,
+    ['node_modules/@start9labs/start-sdk'],
+    `package-lock.json must contain exactly one hoisted @start9labs/start-sdk copy, got ${JSON.stringify(sdkKeys)}`,
+  )
 })
 
-test('SDK 3 version range contract: QA baseline and start-sdk 3.0.6 node releases satisfy declared dependency ranges', () => {
+test('SDK 4 version range contract: QA baseline and start-sdk 3/4 node releases satisfy declared dependency ranges', () => {
   const lndDeps = getDependenciesForConfig({
     enabled: true,
     'target-node': 'lnd',
@@ -105,6 +118,7 @@ test('SDK 3 version range contract: QA baseline and start-sdk 3.0.6 node release
         '0.21.4-beta:1',
         '0.21.4-beta:2',
         '0.21.4-beta:3',
+        '0.21.6-beta:3',
       ],
       rejected: ['0.21.3-beta:9', '0.21.2-beta:5'],
     },
@@ -119,6 +133,7 @@ test('SDK 3 version range contract: QA baseline and start-sdk 3.0.6 node release
         '26.6.9:1',
         '26.6.9:2',
         '26.6.9:3',
+        '26.6.10:3',
       ],
       rejected: ['26.6.8:2', '26.6.2:0'],
     },
@@ -126,7 +141,7 @@ test('SDK 3 version range contract: QA baseline and start-sdk 3.0.6 node release
       packageId: 'eclair',
       rangeStr: eclairDeps.eclair.versionRange,
       installedCurrent: (eclairVersionGraph as any).current.options.version,
-      versions: ['0.14.3:3', '0.14.3:4', '0.14.3:5'],
+      versions: ['0.14.3:3', '0.14.3:4', '0.14.3:5', '0.14.6:2'],
       rejected: ['0.14.3:2', '0.14.2:0'],
     },
     {
