@@ -28,7 +28,10 @@ import {
   unsettledUntil,
   untilText,
 } from './buySubscription'
-import { resolvePayInvoice } from './resolvePayInvoice'
+import {
+  buildPayInvoiceTaskInput,
+  resolvePayInvoice,
+} from './resolvePayInvoice'
 
 export { PendingPaymentConflictError }
 
@@ -387,16 +390,7 @@ export function startRenewal(
         'important',
         {
           replayId: payTaskReplayId('renewal', targetNode, paymentHash),
-          input: {
-            kind: 'partial',
-            accept: [],
-            set: {
-              invoice,
-              amount: { selection: 'invoice', value: {} },
-              'max-fee-percent': 1,
-              confirmed: false,
-            },
-          },
+          input: buildPayInvoiceTaskInput(invoice),
           reason: i18n('Pay TunnelSats VPN subscription renewal invoice'),
         },
       )
