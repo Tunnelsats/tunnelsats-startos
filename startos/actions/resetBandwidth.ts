@@ -19,7 +19,10 @@ import {
   type ResetRunResult,
 } from '../bandwidthReset'
 import { payTaskReplayId, type TargetNode } from '../settlement'
-import { resolvePayInvoice } from './resolvePayInvoice'
+import {
+  buildPayInvoiceTaskInput,
+  resolvePayInvoice,
+} from './resolvePayInvoice'
 
 /**
  * TunnelSats answers 429 with one error code (ERR_RATE_LIMIT_EXCEEDED) for
@@ -145,16 +148,7 @@ export async function startBandwidthReset(
         'important',
         {
           replayId: payTaskReplayId('reset', node, paymentHash),
-          input: {
-            kind: 'partial',
-            accept: [],
-            set: {
-              invoice,
-              amount: { selection: 'invoice', value: {} },
-              'max-fee-percent': 1,
-              confirmed: false,
-            },
-          },
+          input: buildPayInvoiceTaskInput(invoice),
           reason: i18n('Pay TunnelSats bandwidth reset invoice'),
         },
       )

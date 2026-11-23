@@ -18,7 +18,10 @@ import {
   getDependenciesForConfig,
   getTargetVpnConfig,
 } from '../startos/dependencies'
-import { resolvePayInvoice } from '../startos/actions/resolvePayInvoice'
+import {
+  buildPayInvoiceTaskInput,
+  resolvePayInvoice,
+} from '../startos/actions/resolvePayInvoice'
 import { TOR_SOCKS_HOST_ID, TOR_SOCKS_PORT } from '../startos/bridgeEnv'
 import { buildOffTaskInput, buildOnTaskInput } from '../startos/vpnHandoff'
 
@@ -119,6 +122,7 @@ test('SDK 4 version range contract: QA baseline and start-sdk 3/4 node releases 
         '0.21.4-beta:2',
         '0.21.4-beta:3',
         '0.21.6-beta:3',
+        '0.21.8-beta:3',
       ],
       rejected: ['0.21.3-beta:9', '0.21.2-beta:5'],
     },
@@ -134,6 +138,7 @@ test('SDK 4 version range contract: QA baseline and start-sdk 3/4 node releases 
         '26.6.9:2',
         '26.6.9:3',
         '26.6.10:3',
+        '26.6.10:9',
       ],
       rejected: ['26.6.8:2', '26.6.2:0'],
     },
@@ -141,7 +146,7 @@ test('SDK 4 version range contract: QA baseline and start-sdk 3/4 node releases 
       packageId: 'eclair',
       rangeStr: eclairDeps.eclair.versionRange,
       installedCurrent: (eclairVersionGraph as any).current.options.version,
-      versions: ['0.14.3:3', '0.14.3:4', '0.14.3:5', '0.14.6:2'],
+      versions: ['0.14.3:3', '0.14.3:4', '0.14.3:5', '0.14.6:2', '0.14.6:5'],
       rejected: ['0.14.3:2', '0.14.2:0'],
     },
     {
@@ -154,6 +159,7 @@ test('SDK 4 version range contract: QA baseline and start-sdk 3/4 node releases 
         '0.4.9.13:1',
         '0.4.9.14:0',
         '0.4.9.14:1',
+        '0.4.9.15:1',
       ],
       rejected: ['0.4.9.11:1'],
     },
@@ -398,13 +404,33 @@ test('SDK 3 pay-invoice settlement contract: resolvePayInvoice actions accept Tu
     eclair: { packageId: 'eclair', action: eclairPayInvoice },
   } as const
 
-  // Exact payload raised by buySubscription, renewSubscription, resetBandwidth,
-  // and NWC fallback renewal tasks.
-  const taskPayload = {
-    invoice: 'lnbc45u1p0testinvoice',
-    amount: { selection: 'invoice' as const, value: {} },
-    'max-fee-percent': 1,
-    confirmed: false,
+  // Exact partial task input raised by buySubscription, renewSubscription,
+  // resetBandwidth, and NWC fallback renewal tasks.
+  const taskInput = buildPayInvoiceTaskInput('lnbc45u1p0testinvoice')
+  assert.deepEqual(taskInput, {
+    kind: 'partial',
+    accept: [],
+    set: {
+      invoice: 'lnbc45u1p0testinvoice',
+    },
+  })
+
+  const resolveSpecDefaults = (
+    spec: Record<string, Record<string, any>>,
+  ): Record<string, unknown> => {
+    const defaults: Record<string, unknown> = {}
+    for (const [key, field] of Object.entries(spec)) {
+      if (field?.type === 'union' && typeof field.default === 'string') {
+        const variantSpec = field.variants?.[field.default]?.spec ?? {}
+        defaults[key] = {
+          selection: field.default,
+          value: resolveSpecDefaults(variantSpec),
+        }
+      } else if (field && 'default' in field) {
+        defaults[key] = field.default
+      }
+    }
+    return defaults
   }
 
   for (const node of ['lnd', 'cln', 'eclair'] as const) {
@@ -427,14 +453,61 @@ test('SDK 3 pay-invoice settlement contract: resolvePayInvoice actions accept Tu
       prefill: null,
     })
 
-    assert.deepEqual(
-      built.validator.parse(taskPayload),
-      taskPayload,
-      `${packageId} pay-invoice validator must accept TunnelSats settlement task payload`,
+    // Every preset key must exist on the node's Pay Invoice InputSpec
+    // (ts-matches partialValidator ignores unknown keys at runtime, whereas
+    // tsc and StartOS reject/strip undeclared keys).
+    for (const key of Object.keys(taskInput.set)) {
+      assert.ok(
+        Object.prototype.hasOwnProperty.call(built.spec, key),
+        `${packageId} pay-invoice InputSpec must declare task prefill key "${key}"`,
+      )
+    }
+
+    // Invoice-only partial tasks rely on each node's InputSpec defaults for
+    // amount (must default to invoice amount) and any optional fee/confirmation
+    // fields (confirmation must never default to true).
+    const specRecord = built.spec as Record<string, Record<string, any>>
+    assert.equal(
+      specRecord.amount?.default,
+      'invoice',
+      `${packageId} pay-invoice amount must default to 'invoice'`,
     )
+    if ('max-fee-percent' in specRecord) {
+      assert.equal(typeof specRecord['max-fee-percent']?.default, 'number')
+      assert.ok(specRecord['max-fee-percent'].default >= 0)
+    }
+    if ('confirmed' in specRecord) {
+      assert.equal(
+        specRecord.confirmed?.default,
+        false,
+        `${packageId} pay-invoice confirmed toggle must default to false`,
+      )
+    }
+
+    // Merging the partial task input over the node's InputSpec defaults must
+    // yield a complete form payload accepted by the full action validator.
+    const mergedFormInput = {
+      ...resolveSpecDefaults(specRecord),
+      ...taskInput.set,
+    }
     assert.deepEqual(
-      inputSpec.partialValidator.parse(taskPayload),
-      taskPayload,
+      built.validator.parse(mergedFormInput),
+      mergedFormInput,
+      `${packageId} pay-invoice validator must accept task prefill merged over InputSpec defaults`,
+    )
+
+    // Passing a whitespace-only invoice skips container/RPC decode helpers while
+    // exercising the node's Pay Invoice prefill-hardening guard (which refuses
+    // tasks that preset amount, fee limit, or confirmation).
+    await specFn({
+      effects: {} as never,
+      prefill: buildPayInvoiceTaskInput('   ').set,
+      caller: null,
+    })
+
+    assert.deepEqual(
+      inputSpec.partialValidator.parse(taskInput.set),
+      taskInput.set,
       `${packageId} pay-invoice partialValidator must accept TunnelSats settlement task payload`,
     )
   }

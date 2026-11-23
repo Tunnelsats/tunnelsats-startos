@@ -27,7 +27,10 @@ import {
   type PendingOrderRecord,
   type TargetNode,
 } from '../settlement'
-import { resolvePayInvoice } from './resolvePayInvoice'
+import {
+  buildPayInvoiceTaskInput,
+  resolvePayInvoice,
+} from './resolvePayInvoice'
 import { defaultServerRegion, loadServerRegions } from '../serverRegions'
 
 export {
@@ -351,16 +354,7 @@ export function startPurchase(
           // The settlement health check clears the task under this ID once the
           // order is settled or expired.
           replayId: payTaskReplayId('order', targetNode, paymentHash),
-          input: {
-            kind: 'partial',
-            accept: [],
-            set: {
-              invoice,
-              amount: { selection: 'invoice', value: {} },
-              'max-fee-percent': 1,
-              confirmed: false,
-            },
-          },
+          input: buildPayInvoiceTaskInput(invoice),
           reason: i18n(
             'Pay TunnelSats VPN subscription invoice (${amount} sats)',
             {

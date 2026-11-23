@@ -14,7 +14,10 @@ import { derivePublicKey } from './keygen'
 import { renewSubscription } from './actions/renewSubscription'
 import { importSubscription } from './actions/importSubscription'
 import { connectWallet } from './actions/connectWallet'
-import { resolvePayInvoice } from './actions/resolvePayInvoice'
+import {
+  buildPayInvoiceTaskInput,
+  resolvePayInvoice,
+} from './actions/resolvePayInvoice'
 import { payTaskReplayId } from './settlement'
 import { metaLockFor, type MetaLock } from './metaLock'
 import {
@@ -949,16 +952,7 @@ export const handoffInit = sdk.setupOnInit(async (effects) => {
               'important',
               {
                 replayId,
-                input: {
-                  kind: 'partial',
-                  accept: [],
-                  set: {
-                    invoice,
-                    amount: { selection: 'invoice', value: {} },
-                    'max-fee-percent': 1,
-                    confirmed: false,
-                  },
-                },
+                input: buildPayInvoiceTaskInput(invoice),
                 reason,
               },
             ),
