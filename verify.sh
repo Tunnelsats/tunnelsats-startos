@@ -177,9 +177,10 @@ echo "    curl -4 -s https://ifconfig.me # must print the TunnelSats server IP, 
 if [ "$ALLOW_IPV6" == "True" ]; then
     echo "    (Allow IPv6 Endpoint is ON: only lets TunnelSats hand your node an IPv6 server endpoint to announce; IPv6 routing still stays inside table 51820.)"
 fi
-echo "    ip -6 route show table 51820   # 'blackhole default': IPv6 cannot leave outside the tunnel"
+echo "    ip -6 route show table 51820   # 'blackhole default' fallback (plus 'default dev wg0' when AllowedIPs includes ::/0)"
 echo "    curl -6 -sS --max-time 5 https://ifconfig.me; echo \" curl exit \$?\""
-echo "      # prints an IP address: IPv6 LEAKS past the tunnel."
+echo "      # prints your TunnelSats server IPv6 (with 'default dev wg0' above): tunneled via wg0."
+echo "      # prints your home ISP IPv6 (or any non-TunnelSats IP): IPv6 LEAKS past the tunnel."
 echo "      # 'Failed to connect' / 'Network is unreachable' (exit 7): no IPv6 egress."
 echo "      # 'Could not resolve host' (exit 6), a timeout (exit 28) or any other error: NOT verified, the probe itself did not run."
 # The node task announces the Endpoint host of the stored config with the

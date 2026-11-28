@@ -247,7 +247,10 @@ EOF
     [[ "$output" =~ "table 51820" ]]
     [[ "$output" =~ "ip -6 route show table 51820" ]]
     [[ "$output" =~ "blackhole default" ]]
+    [[ "$output" =~ "default dev wg0" ]]
     [[ "$output" =~ "curl -6 -sS --max-time 5 https://ifconfig.me" ]]
+    [[ "$output" =~ "tunneled via wg0" ]]
+    [[ "$output" =~ "home ISP IPv6" ]]
     [[ "$output" =~ "Could not resolve host" ]]
     [[ "$output" =~ "any other error: NOT verified" ]]
     refute_match 'Allow Home IPv6 Coexistence|leaves via your home ISP'
