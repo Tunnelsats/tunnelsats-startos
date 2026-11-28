@@ -163,6 +163,7 @@ if [ -n "$(json_field "$API_DATA" "configured")" ]; then
 else
     log_fail "Web dashboard API unreachable or invalid at $WEB_URL/api/dashboard."
 fi
+[ -z "$ALLOW_IPV6" ] && ALLOW_IPV6=$(json_field "$APP_CONFIG" "allow-ipv6")
 
 # 5. Node-side checks: printed, never executed or claimed
 log_step "5. Node-side tunnel checks (MANUAL, not executed by this script)"
@@ -174,14 +175,13 @@ echo "    ip rule                        # a rule with 'lookup 51820' (fwmark 0x
 echo "    ip route show table 51820      # 'default dev wg0'"
 echo "    curl -4 -s https://ifconfig.me # must print the TunnelSats server IP, not your home IP"
 if [ "$ALLOW_IPV6" == "True" ]; then
-    echo "    (Allow Home IPv6 Coexistence is ON: IPv6 leaves via your home ISP by design.)"
-else
-    echo "    ip -6 route show table 51820   # 'blackhole default': IPv6 cannot leave outside the tunnel"
-    echo "    curl -6 -sS --max-time 5 https://ifconfig.me; echo \" curl exit \$?\""
-    echo "      # prints an IP address: IPv6 LEAKS past the tunnel."
-    echo "      # 'Failed to connect' / 'Network is unreachable' (exit 7): no IPv6 egress."
-    echo "      # 'Could not resolve host' (exit 6), a timeout (exit 28) or any other error: NOT verified, the probe itself did not run."
+    echo "    (Allow IPv6 Endpoint is ON: only lets TunnelSats hand your node an IPv6 server endpoint to announce; IPv6 routing still stays inside table 51820.)"
 fi
+echo "    ip -6 route show table 51820   # 'blackhole default': IPv6 cannot leave outside the tunnel"
+echo "    curl -6 -sS --max-time 5 https://ifconfig.me; echo \" curl exit \$?\""
+echo "      # prints an IP address: IPv6 LEAKS past the tunnel."
+echo "      # 'Failed to connect' / 'Network is unreachable' (exit 7): no IPv6 egress."
+echo "      # 'Could not resolve host' (exit 6), a timeout (exit 28) or any other error: NOT verified, the probe itself did not run."
 # The node task announces the Endpoint host of the stored config with the
 # forwarded port (getAnnounceEndpoint), not the `# Server:` comment that
 # /api/dashboard reports as the server.
