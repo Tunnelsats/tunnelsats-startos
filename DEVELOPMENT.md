@@ -12,7 +12,7 @@ TunnelSats is built using the StartOS TypeScript SDK (`@start9labs/start-sdk`).
 
 - **`startos/manifest/index.ts`**: Defines package identity, container images, volume mounts, and dynamic dependencies.
 - **`startos/main.ts`**: Sets up the primary daemon, readiness probes for the Web Dashboard on port 80, and registers background subscription health checks.
-- **`startos/actions/`**: Storefront actions: Buy, Renew and Import Subscription, Reset Bandwidth, Export WireGuard Configuration, and Configure (enable/disable TunnelSats, pick the target node `lnd` / `cln` / `eclair`, replace the WireGuard config, IPv6 coexistence).
+- **`startos/actions/`**: Storefront actions: Buy, Renew and Import Subscription, Reset Bandwidth, Export WireGuard Configuration, and Configure (enable/disable TunnelSats, pick the target node `lnd` / `cln` / `eclair`, replace the WireGuard config, and `Allow IPv6 Endpoint` for announcing an IPv6 TunnelSats server endpoint).
 - **`startos/dependencies.ts`** / **`startos/vpnHandoff.ts`**: Dynamic dependencies, the Renew reminder task, and the clearnet-vpn handoff: an on-task on the target node's `clearnet-vpn` action (which runs the tunnel as `wg0` inside the node container) and an off-task for a node that used the tunnel before.
 - **`bridge.py`**: Python orchestrator serving the Web Dashboard and its API (`GET /api/dashboard`, `GET /api/servers` for the cached server list, `POST /api/intents` for dashboard-started Buy / Renew / Reset Bandwidth, `POST /api/reachability` for the rate-limited inbound ping test), plus telemetry synchronization and payment settlement. The POST endpoints require a trusted request with the CSRF token.
 - **`verify.sh`**: In-container diagnostics (stored config, subscription health, dashboard API). The tunnel runs on the node, so the node-side checks (`wg show`, `ip rule`, `ip route show table 51820`, egress probes) are printed as manual steps and never reported as verified.
@@ -52,4 +52,4 @@ npm run test:bats
 
 1. **Zero Secret Leaks**: Test fixtures and code examples must strictly use dummy test keys (`DUMMY_TEST_PRIVATE_KEY_...`). Active WireGuard private keys and residential IP addresses must never be committed or logged.
 2. **Fail-Closed Verification**: Health checks and status probes must fail closed on unverified network state.
-3. **IPv6 Leak Protection**: Ensure IPv6 WAN routes remain blocked or unadvertised unless the user explicitly opts into dual-stack coexistence.
+3. **IPv6 Leak Protection**: IPv6 routing is decided by the Lightning node package (current builds send IPv6 through the tunnel when `AllowedIPs` include `::/0` and keep a `blackhole default` fallback in `table 51820`). **Allow IPv6 Endpoint** only allows TunnelSats to hand the node an IPv6 TunnelSats server endpoint to announce; never claim it bypasses `table 51820` or routes IPv6 over the home ISP.

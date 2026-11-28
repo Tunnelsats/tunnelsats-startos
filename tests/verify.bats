@@ -236,3 +236,44 @@ EOF
     refute_match 'Outbound Gateway|Peer Interface|net gateway|Gateway Mode|System → Gateways'
     refute_match 'Outbound Gateway|Peer Interface|net gateway|gateway_mode|System → Gateways' "$(cat "$REPO_ROOT/verify.sh")"
 }
+
+@test "verify.sh still prints IPv6 routing and egress checks when allowIpv6 is true" {
+    fake_bridge '{"result": "ok", "message": "Active until 2026-12-31"}' 0
+    fake_config true lnd
+    serve_status '{"configured": true, "connection": {"server": "de2.tunnelsats.com", "vpnPort": 24556, "allowIpv6": true}}'
+    run "$REPO_ROOT/verify.sh"
+    [ "$status" -eq 0 ]
+    [[ "$output" =~ "Allow IPv6 Endpoint is ON" ]]
+    [[ "$output" =~ "table 51820" ]]
+    [[ "$output" =~ "ip -6 route show table 51820" ]]
+    [[ "$output" =~ "blackhole default" ]]
+    [[ "$output" =~ "default dev wg0" ]]
+    [[ "$output" =~ "curl -6 -sS --max-time 5 https://ifconfig.me" ]]
+    [[ "$output" =~ "tunneled via wg0" ]]
+    [[ "$output" =~ "home ISP IPv6" ]]
+    [[ "$output" =~ "Could not resolve host" ]]
+    [[ "$output" =~ "any other error: NOT verified" ]]
+    refute_match 'Allow Home IPv6 Coexistence|leaves via your home ISP'
+}
+
+@test "verify.sh carries no stale IPv6 coexistence wording" {
+    healthy_service lnd
+    run "$REPO_ROOT/verify.sh"
+    [ "$status" -eq 0 ]
+    refute_match 'Allow IPv6 Endpoint is ON'
+    refute_match 'Allow Home IPv6 Coexistence|leaves via your home ISP'
+    refute_match 'Allow Home IPv6 Coexistence|leaves via your home ISP' "$(cat "$REPO_ROOT/verify.sh")"
+}
+
+@test "verify.sh falls back to config.json allow-ipv6 when the dashboard API is unreachable" {
+    fake_bridge '{"result": "ok", "message": "Active until 2026-12-31"}' 0
+    printf '[Interface]\nPrivateKey = x\n# VPNPort: 24556\n' > "$DATA_DIR/tunnelsatsv3.conf"
+    printf '{"enabled": true, "target-node": "lnd", "allow-ipv6": true}' > "$DATA_DIR/config.json"
+    run "$REPO_ROOT/verify.sh"
+    [ "$status" -eq 1 ]
+    [[ "$output" =~ "Web dashboard API unreachable" ]]
+    [[ "$output" =~ "Allow IPv6 Endpoint is ON" ]]
+    [[ "$output" =~ "ip -6 route show table 51820" ]]
+    [[ "$output" =~ "blackhole default" ]]
+    [[ "$output" =~ "curl -6 -sS --max-time 5 https://ifconfig.me" ]]
+}
